@@ -6,6 +6,8 @@ import { useAction, useQuery } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import { ChatThread } from "@/features/chat/ChatThread";
+import { FailureBanner, type FailureReason } from "@/features/byok/FailureBanner";
+import { parseByokError } from "@/features/byok/parseByokError";
 import { useAnalytics } from "@/lib/analytics";
 import { getBrowserTimezone } from "@/lib/timezone";
 import { Activity, Dumbbell, Flame, Loader2, Sparkles, TrendingUp, Zap } from "lucide-react";
@@ -40,6 +42,7 @@ function ChatPageInner() {
   const mountedRef = useRef(true);
   const [waitingForCoach, setWaitingForCoach] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
+  const [byokError, setByokError] = useState<FailureReason | null>(null);
   const { track } = useAnalytics();
 
   useEffect(() => {
@@ -50,7 +53,10 @@ function ChatPageInner() {
   }, []);
 
   const sendAndWait = async (args: { prompt: string; imageStorageIds?: Id<"_storage">[] }) => {
-    if (mountedRef.current) setSendError(null);
+    if (mountedRef.current) {
+      setSendError(null);
+      setByokError(null);
+    }
     if (mountedRef.current) setWaitingForCoach(true);
     try {
       return await createThreadWithMessage({ ...args, userTimezone: getBrowserTimezone() });
@@ -73,7 +79,12 @@ function ChatPageInner() {
         // Reset so the user can manually retry the same prompt from the input.
         autoSentRef.current = false;
         if (mountedRef.current) {
-          setSendError(SEND_ERROR_MESSAGE);
+          const byokReason = parseByokError(err);
+          if (byokReason) {
+            setByokError(byokReason);
+          } else {
+            setSendError(SEND_ERROR_MESSAGE);
+          }
         }
       }
     })();
@@ -127,7 +138,12 @@ function ChatPageInner() {
                   sendAndWait({ prompt: text }).catch((err: unknown) => {
                     console.error("Suggestion send failed:", err);
                     if (mountedRef.current) {
-                      setSendError(SEND_ERROR_MESSAGE);
+                      const byokReason = parseByokError(err);
+                      if (byokReason) {
+                        setByokError(byokReason);
+                      } else {
+                        setSendError(SEND_ERROR_MESSAGE);
+                      }
                     }
                   });
                 }}
@@ -139,10 +155,16 @@ function ChatPageInner() {
             ))}
           </div>
 
-          {sendError && (
-            <p className="mt-4 text-sm text-destructive" role="alert">
-              {sendError}
-            </p>
+          {byokError ? (
+            <div className="mt-4 w-full max-w-lg">
+              <FailureBanner reason={byokError} />
+            </div>
+          ) : (
+            sendError && (
+              <p className="mt-4 text-sm text-destructive" role="alert">
+                {sendError}
+              </p>
+            )
           )}
         </div>
 
