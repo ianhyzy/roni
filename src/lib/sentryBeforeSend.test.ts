@@ -84,6 +84,52 @@ describe("shouldDropSentryEvent", () => {
     expect(shouldDropSentryEvent(eventWithValue(payload), hintWithError(payload))).toBe(true);
   });
 
+  it("drops Gemini overloaded errors (alternate 503 phrasing)", () => {
+    const payload = "The model is currently overloaded. Please try again later.";
+    expect(shouldDropSentryEvent(eventWithValue(payload), hintWithError(payload))).toBe(true);
+  });
+
+  it("drops high-demand error when buried in AI SDK wrapper via Error.cause", () => {
+    // The Vercel AI SDK wraps provider errors: outer.message is generic while
+    // the provider-specific text lives on Error.cause.
+    const inner = new Error(
+      "This model is currently experiencing high demand. Spikes in demand are usually temporary. Please try again later.",
+    );
+    const outer = new Error("Error reading UI message stream");
+    (outer as Error & { cause?: unknown }).cause = inner;
+
+    const genericEvent = eventWithValue("Error reading UI message stream");
+    expect(shouldDropSentryEvent(genericEvent, { originalException: outer })).toBe(true);
+  });
+
+  it("drops high-demand error buried two levels deep in cause chain", () => {
+    const root = new Error("This model is currently experiencing high demand.");
+    const mid = new Error("Failed to process stream chunk");
+    (mid as Error & { cause?: unknown }).cause = root;
+    const outer = new Error("Unhandled stream error");
+    (outer as Error & { cause?: unknown }).cause = mid;
+
+    const genericEvent = eventWithValue("Unhandled stream error");
+    expect(shouldDropSentryEvent(genericEvent, { originalException: outer })).toBe(true);
+  });
+
+  it("drops error when originalException is a non-Error object with a message property", () => {
+    // Some SDK error types don't extend Error but carry a .message field.
+    const fakeError = { message: "This model is currently experiencing high demand." };
+    const genericEvent = eventWithValue("Unknown error");
+    expect(shouldDropSentryEvent(genericEvent, { originalException: fakeError as Error })).toBe(
+      true,
+    );
+  });
+
+  it("keeps real errors that happen to have an innocent cause chain", () => {
+    const cause = new Error("Some benign internal detail");
+    const outer = new Error("Database connection failed");
+    (outer as Error & { cause?: unknown }).cause = cause;
+    const event = eventWithValue("Database connection failed");
+    expect(shouldDropSentryEvent(event, { originalException: outer })).toBe(false);
+  });
+
   it("drops Gemini RESOURCE_EXHAUSTED errors", () => {
     const payload = "Error: 429 RESOURCE_EXHAUSTED";
     expect(shouldDropSentryEvent(eventWithValue(payload), hintWithError(payload))).toBe(true);

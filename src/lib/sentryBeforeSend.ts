@@ -36,6 +36,10 @@ const SUPPRESSED_MESSAGE_SUBSTRINGS: readonly string[] = [
   // which is what Sentry captures here.
   "function call turn comes immediately after",
   "model is currently experiencing high demand",
+  // Gemini's alternative 503 overload phrasing. Both variants map to the same
+  // provider_overload transient kind on the backend; the client stream consumer
+  // surfaces whichever string was in the streaming error chunk.
+  "model is currently overloaded",
   "RESOURCE_EXHAUSTED",
   // Gemini free-tier quota errors. The leading "You exceeded" prefix is
   // Gemini's exact phrasing (capitalized "You exceeded ..."), so it covers
@@ -50,17 +54,35 @@ const SUPPRESSED_MESSAGE_SUBSTRINGS: readonly string[] = [
   "credits are depleted",
 ];
 
-// Collect every candidate message from the hint and event so that quota errors
-// nested in event.exception.values are not missed when hint.originalException
-// carries a generic wrapper message.
+// Collect every candidate message from the hint and event so that provider
+// errors nested inside AI SDK wrapper errors are not missed.
+//
+// The Vercel AI SDK sometimes wraps provider errors: the outer Error has a
+// generic message (e.g. "Error reading stream") while the provider-specific
+// text (e.g. "This model is currently experiencing high demand") lives on
+// Error.cause. We walk the full cause chain so the suppression list matches
+// regardless of how many wrappers the SDK adds.
 function errorMessages(event: ErrorEvent, hint: EventHint): string[] {
   const messages: string[] = [];
 
   const hintError = hint.originalException;
-  if (hintError instanceof Error && typeof hintError.message === "string") {
-    messages.push(hintError.message);
+  if (hintError instanceof Error) {
+    if (typeof hintError.message === "string") {
+      messages.push(hintError.message);
+    }
+    // Walk the cause chain — provider errors are often buried here.
+    let cause: unknown = hintError.cause;
+    while (cause instanceof Error) {
+      if (typeof cause.message === "string") messages.push(cause.message);
+      cause = cause.cause;
+    }
   } else if (typeof hintError === "string") {
     messages.push(hintError);
+  } else if (hintError !== null && typeof hintError === "object") {
+    // Some SDK error classes don't extend Error but carry a message property
+    // (duck-typed Error interface). Extract it defensively.
+    const msg = (hintError as Record<string, unknown>).message;
+    if (typeof msg === "string") messages.push(msg);
   }
 
   const values = event.exception?.values;

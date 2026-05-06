@@ -100,6 +100,18 @@ describe("shouldDropPosthogEvent", () => {
     expect(dropped).toBe(true);
   });
 
+  it("drops Gemini overloaded errors (alternate 503 phrasing)", () => {
+    const event = makeEvent({
+      properties: {
+        $exception_values: [{ value: "The model is currently overloaded. Please try again later." }],
+      },
+    });
+
+    const dropped = shouldDropPosthogEvent(event);
+
+    expect(dropped).toBe(true);
+  });
+
   it("drops Firefox reader-mode injection errors", () => {
     const event = makeEvent({
       properties: {

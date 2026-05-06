@@ -333,10 +333,16 @@ async function finalizePendingMessages(
   });
   for (const message of result.page) {
     if (message.status !== "pending") continue;
-    await ctx.runMutation(components.agent.messages.finalizeMessage, {
-      messageId: message._id,
-      result: { status: "failed", error: reason },
-    });
+    try {
+      await ctx.runMutation(components.agent.messages.finalizeMessage, {
+        messageId: message._id,
+        result: { status: "failed", error: reason },
+      });
+    } catch {
+      // The @convex-dev/agent library may have already finalized this message
+      // internally when the stream failed (before our retry logic ran). Ignore
+      // the error and continue so any remaining pending messages are processed.
+    }
   }
 }
 

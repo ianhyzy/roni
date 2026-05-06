@@ -37,6 +37,8 @@ const SUPPRESSED_MESSAGE_SUBSTRINGS: readonly string[] = [
   "function call turn comes immediately after",
   "exceeded your current quota",
   "model is currently experiencing high demand",
+  // Gemini's alternative 503 overload phrasing (mirrors sentryBeforeSend.ts).
+  "model is currently overloaded",
   "RESOURCE_EXHAUSTED",
   // Gemini paid-tier billing exhaustion: surfaces as "Your prepayment credits
   // are depleted." for both BYOK and house-key users. classifyByokError maps
