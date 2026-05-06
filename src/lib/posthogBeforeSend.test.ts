@@ -103,7 +103,9 @@ describe("shouldDropPosthogEvent", () => {
   it("drops Gemini overloaded errors (alternate 503 phrasing)", () => {
     const event = makeEvent({
       properties: {
-        $exception_values: [{ value: "The model is currently overloaded. Please try again later." }],
+        $exception_values: [
+          { value: "The model is currently overloaded. Please try again later." },
+        ],
       },
     });
 
