@@ -266,7 +266,7 @@ async function attemptStream({
       STREAM_OPTIONS,
     );
     await result.text;
-
+    if (accumulator.toRow().finishReason === "error") throw new Error("provider_response_failed");
     if (budgetTrip) {
       await ctx.runMutation(internal.aiUsage.recordBudgetStop, {
         userId: userId as Id<"users">,
