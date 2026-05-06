@@ -4,6 +4,7 @@
  */
 
 import type { ModelMessage, UserContent } from "ai";
+import { enforceToolCallAdjacency } from "./toolCallAdjacency";
 
 // ---------------------------------------------------------------------------
 // Merge consecutive same-role messages
@@ -109,7 +110,7 @@ export function stripOrphanedToolCalls(messages: ModelMessage[]): ModelMessage[]
     }
   }
 
-  return messages
+  const firstPass = messages
     .map((msg) => {
       if (msg.role === "assistant") {
         if (typeof msg.content === "string" || !Array.isArray(msg.content)) return msg;
@@ -148,6 +149,26 @@ export function stripOrphanedToolCalls(messages: ModelMessage[]): ModelMessage[]
       return msg;
     })
     .filter((msg): msg is ModelMessage => msg !== null);
+
+  // Belt-and-suspenders adjacency repair (PostHog issue 019d510a).
+  // Gemini's hard rule: a function-call turn MUST be immediately followed by a
+  // function-response turn. The set-based logic above proves a tool-result/
+  // approval-response exists *somewhere* in history, but not that it sits in
+  // the slot Gemini requires. This final pass walks the surviving messages and
+  // drops any tool-call (or stray tool message) that fails the adjacency check.
+  const repaired = enforceToolCallAdjacency(
+    firstPass,
+    approvalIdToToolCallId,
+    liveApprovalToolCallIds,
+  );
+  if (repaired.dropCount > 0) {
+    // Surface adjacency repairs in Convex logs so a regression in upstream
+    // persistence (the bug class this pass defends against) is observable.
+    console.warn(
+      `[stripOrphanedToolCalls] adjacency repair dropped ${repaired.dropCount} message(s)/part(s) (PostHog 019d510a)`,
+    );
+  }
+  return repaired.messages;
 }
 
 // ---------------------------------------------------------------------------
