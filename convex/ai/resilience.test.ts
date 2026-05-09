@@ -1,12 +1,11 @@
 import { APICallError } from "@ai-sdk/provider";
 import { describe, expect, it } from "vitest";
+import { buildByokErrorMessage, classifyByokError, withByokErrorSanitization } from "./byokErrors";
 import {
-  buildByokErrorMessage,
-  classifyByokError,
+  buildProviderTransientMessage,
+  classifyTransientError,
   isTransientError,
-  withByokErrorSanitization,
-} from "./resilience";
-import { buildProviderTransientMessage, classifyTransientError } from "./transientErrors";
+} from "./transientErrors";
 
 function apiCallError(overrides: {
   statusCode?: number;

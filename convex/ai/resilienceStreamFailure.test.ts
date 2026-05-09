@@ -3,6 +3,7 @@ import { saveMessage } from "@convex-dev/agent";
 import type { StepResult, ToolSet } from "ai";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ActionCtx } from "../_generated/server";
+import type { ProviderId } from "./providers";
 import { streamWithRetry } from "./resilience";
 
 const runWithPrimaryCircuitBreakerMock = vi.hoisted(() => vi.fn());
@@ -112,4 +113,83 @@ describe("streamWithRetry provider response failures", () => {
     expect(runAction).toHaveBeenCalledTimes(1);
     expect(recordErrorMock).toHaveBeenCalledWith("byok_unknown_error");
   });
+});
+
+function makeSuccessAgent(): {
+  agent: Agent;
+  captureStreamTextOptions: () => Record<string, unknown> | undefined;
+} {
+  let captured: Record<string, unknown> | undefined;
+  const streamText = vi.fn(async (options: Record<string, unknown>) => {
+    captured = options;
+    return { text: Promise.resolve("") };
+  });
+  const agent = {
+    continueThread: vi.fn(async () => ({ thread: { streamText } })),
+  } as unknown as Agent;
+  return { agent, captureStreamTextOptions: () => captured };
+}
+
+function baseStreamWithRetryArgs(provider: ProviderId) {
+  return {
+    primaryModelName: "test-model",
+    threadId: "thread-1",
+    userId: "user-1",
+    prompt: "hello",
+    isByok: false,
+    provider,
+    source: "chat" as const,
+    environment: "dev" as const,
+  };
+}
+
+describe("Gemini thinking disabled via providerOptions", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    runWithPrimaryCircuitBreakerMock.mockImplementation(
+      async (options: { primaryAgent: Agent; runAttempt: unknown }) => {
+        const runAttempt = options.runAttempt as (agent: Agent) => Promise<unknown>;
+        return await runAttempt(options.primaryAgent);
+      },
+    );
+  });
+
+  it("passes thinkingBudget: 0 providerOptions for Gemini to prevent thought_signature errors", async () => {
+    const { agent, captureStreamTextOptions } = makeSuccessAgent();
+    const ctx = {
+      runQuery: vi.fn(async () => ({ page: [] })),
+      runMutation: vi.fn(async () => undefined),
+      runAction: vi.fn(async () => undefined),
+    } as unknown as ActionCtx;
+
+    await streamWithRetry(ctx, {
+      primaryAgent: agent,
+      fallbackAgent: agent,
+      ...baseStreamWithRetryArgs("gemini"),
+    });
+
+    expect(captureStreamTextOptions()?.providerOptions).toEqual({
+      google: { thinkingConfig: { thinkingBudget: 0 } },
+    });
+  });
+
+  it.each<ProviderId>(["claude", "openai", "openrouter"])(
+    "does not add Google providerOptions for %s provider",
+    async (provider) => {
+      const { agent, captureStreamTextOptions } = makeSuccessAgent();
+      const ctx = {
+        runQuery: vi.fn(async () => ({ page: [] })),
+        runMutation: vi.fn(async () => undefined),
+        runAction: vi.fn(async () => undefined),
+      } as unknown as ActionCtx;
+
+      await streamWithRetry(ctx, {
+        primaryAgent: agent,
+        fallbackAgent: agent,
+        ...baseStreamWithRetryArgs(provider),
+      });
+
+      expect(captureStreamTextOptions()?.providerOptions).toBeUndefined();
+    },
+  );
 });

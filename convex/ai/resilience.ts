@@ -21,11 +21,6 @@ import {
   isTransientError,
 } from "./transientErrors";
 
-// Re-export for backwards compatibility with existing callers/tests.
-export { buildByokErrorMessage, classifyByokError, withByokErrorSanitization } from "./byokErrors";
-export type { ByokErrorCode } from "./byokErrors";
-export { isTransientError } from "./transientErrors";
-
 const AI_ERROR_MESSAGE = "I'm having trouble right now. Please try again in a moment.";
 const BUDGET_CAP_MESSAGE =
   "This is getting expensive on your API key, so I'm simplifying here. Ask a narrower follow-up if you want me to keep going.";
@@ -241,6 +236,11 @@ async function attemptStream({
         stopWhen,
         experimental_telemetry: buildTelemetryConfig(telemetry),
         experimental_context: { runId: telemetry.runId },
+        // @convex-dev/agent drops thought_signature from stored tool calls; disabling thinking prevents Gemini from requiring them on replay.
+        providerOptions:
+          telemetry.provider === "gemini"
+            ? { google: { thinkingConfig: { thinkingBudget: 0 } } }
+            : undefined,
         onChunk: (event: { chunk: { type: string } }) => {
           try {
             if (event.chunk.type === "text-delta") accumulator.markFirstChunk();
