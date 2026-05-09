@@ -27,4 +27,17 @@ describe("getFinalizeCodeForError", () => {
 
     expect(finalizeCode).toBe("unknown_error");
   });
+
+  it("maps provider_response_failed to provider_overload finalize code", () => {
+    // provider_response_failed is the synthetic error thrown when finishReason:"error"
+    // resolves without a thrown exception. After being classified as transient, if all
+    // retries are exhausted the finalize code must be a clean provider_overload string
+    // (not "Error" / the raw error name) so the user sees an attributed message.
+    const error = new Error("provider_response_failed");
+
+    const finalizeCode = getFinalizeCodeForError(error);
+
+    expect(finalizeCode).toBe("provider_overload");
+    expect(finalizeCode).not.toBe("Error");
+  });
 });

@@ -89,6 +89,12 @@ export function isTransientError(error: unknown): boolean {
   if (error instanceof Error) {
     if (error.name === "TimeoutError" || error.name === "AbortError") return true;
 
+    // When the AI SDK completes a step with finishReason:"error" without throwing,
+    // attemptStream raises this synthetic marker. The provider errored mid-stream
+    // (almost always a transient overload), so treat it as retryable so the
+    // circuit-breaker retry/fallback path fires instead of a dead-end terminal error.
+    if (error.message === "provider_response_failed") return true;
+
     const lower = error.message.toLowerCase();
     if (lower.includes("timeout") || lower.includes("aborted")) return true;
     if (TRANSIENT_MESSAGE_PATTERNS.some((p) => lower.includes(p))) return true;

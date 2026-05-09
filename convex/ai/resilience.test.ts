@@ -127,6 +127,10 @@ describe("isTransientError", () => {
     );
     expect(isTransientError(error)).toBe(true);
   });
+
+  it("returns true for provider_response_failed", () => {
+    expect(isTransientError(new Error("provider_response_failed"))).toBe(true);
+  });
 });
 
 describe("classifyByokError", () => {
@@ -327,6 +331,10 @@ describe("classifyTransientError", () => {
       "Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests",
     );
     expect(classifyTransientError(error)).toBe("rate_limit");
+  });
+
+  it("returns 'provider_overload' for provider_response_failed", () => {
+    expect(classifyTransientError(new Error("provider_response_failed"))).toBe("provider_overload");
   });
 });
 

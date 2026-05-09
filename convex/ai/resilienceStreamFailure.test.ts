@@ -58,6 +58,59 @@ describe("streamWithRetry provider response failures", () => {
     );
   });
 
+  it("treats non-thrown provider finish errors as transient for non-BYOK users", async () => {
+    // When the AI SDK finishes a step with finishReason:"error" but does not throw
+    // (the error is embedded in the stream rather than propagated as an HTTP error),
+    // non-BYOK users must get a transient outcome so the circuit-breaker retry/fallback
+    // path fires — not a dead-end terminal error with a generic "I'm having trouble" message.
+    const streamText = vi.fn(
+      async (options: { onStepFinish: (step: StepResult<ToolSet>) => void }) => {
+        options.onStepFinish(responseFailedStep());
+        return { text: Promise.resolve("") };
+      },
+    );
+    const agent = {
+      continueThread: vi.fn(async () => ({ thread: { streamText } })),
+    } as unknown as Agent;
+    const runQuery = vi.fn(async () => ({
+      page: [{ _id: "pending-message", status: "pending" }],
+    }));
+    const runMutation = vi.fn(async () => undefined);
+    const runAction = vi.fn(async () => undefined);
+
+    const accumulator = await streamWithRetry(
+      { runQuery, runMutation, runAction } as unknown as ActionCtx,
+      {
+        primaryAgent: agent,
+        fallbackAgent: agent,
+        primaryModelName: "gemini-3-flash-preview",
+        threadId: "thread-1",
+        userId: "user-1",
+        prompt: "hello",
+        isByok: false,
+        provider: "gemini",
+        source: "chat",
+        environment: "prod",
+      },
+    );
+
+    // The error is transient: no terminal error class is set, and the circuit
+    // breaker receives { done: false } so it can retry with the fallback agent.
+    expect(accumulator.toRow()).toMatchObject({
+      finishReason: "error",
+      terminalErrorClass: undefined,
+    });
+    // No user-facing error message saved (circuit breaker handles retry/fallback).
+    expect(saveMessage).not.toHaveBeenCalled();
+    // No Discord notification for a transient signal.
+    expect(runAction).not.toHaveBeenCalled();
+    // No explicit finalizeMessage call from our layer (circuit breaker will finalize on retry).
+    expect(runMutation).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ result: expect.objectContaining({ status: "failed" }) }),
+    );
+  });
+
   it("surfaces non-thrown provider finish errors as BYOK messages", async () => {
     const streamText = vi.fn(
       async (options: { onStepFinish: (step: StepResult<ToolSet>) => void }) => {
