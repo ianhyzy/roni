@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented here. This file is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commits on `main`. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.9.1](https://github.com/JeffOtano/roni/compare/v0.9.0...v0.9.1) (2026-05-09)
+
+
+### Bug Fixes
+
+* disable Gemini thinking to prevent thought_signature replay errors ([522371b](https://github.com/JeffOtano/roni/commit/522371bf4030f188c73add454b24d8e5e918e4ec))
+* pre-empt agent library stream error throws ([a0cad4d](https://github.com/JeffOtano/roni/commit/a0cad4db465ddbfe7149826a3a5e201adf032fc9))
+* retry provider_response_failed errors for non-BYOK users ([65f6b2d](https://github.com/JeffOtano/roni/commit/65f6b2d5026c3acfb37dca1e3970b85d752fb2db))
+* **sentry:** suppress provider_overload finalize codes ([9636886](https://github.com/JeffOtano/roni/commit/9636886a00cd003ea44c880cee115e30938cac60))
+* surface BYOK stream response failures ([#345](https://github.com/JeffOtano/roni/issues/345)) ([7c96055](https://github.com/JeffOtano/roni/commit/7c96055511e80c6dd7fbb4ec17b82857e1cbf620))
+
 ## [0.9.0](https://github.com/JeffOtano/roni/compare/v0.8.0...v0.9.0) (2026-05-05)
 
 
