@@ -140,6 +140,32 @@ describe("shouldDropPosthogEvent", () => {
     expect(dropped).toBe(true);
   });
 
+  it("drops Firefox NetworkError fetch failures (Convex transport offline)", () => {
+    const event = makeEvent({
+      properties: {
+        $exception_values: [
+          {
+            value: "NetworkError when attempting to fetch resource. (chatty-hawk-29.convex.cloud)",
+          },
+        ],
+      },
+    });
+
+    const dropped = shouldDropPosthogEvent(event);
+
+    expect(dropped).toBe(true);
+  });
+
+  it("drops Chromium/Safari Failed to fetch transport failures", () => {
+    const event = makeEvent({
+      properties: { $exception_values: [{ value: "Failed to fetch" }] },
+    });
+
+    const dropped = shouldDropPosthogEvent(event);
+
+    expect(dropped).toBe(true);
+  });
+
   it("keeps real errors", () => {
     const event = makeEvent({
       properties: { $exception_message: "Cannot read properties of undefined (reading 'foo')" },

@@ -18,6 +18,14 @@ const SUPPRESSED_MESSAGE_SUBSTRINGS: readonly string[] = [
   "ResizeObserver loop",
   "Script error.",
   "n.standardSelectors",
+  // Browser-side network failures (offline, DNS, TLS, connection drops) thrown
+  // by fetch() before the server is even reached. Convex transport already
+  // auto-reconnects and surfaces a connection indicator, so these are not
+  // actionable application bugs. Firefox emits "NetworkError when attempting
+  // to fetch resource"; Chromium-based browsers and Safari emit "Failed to
+  // fetch".
+  "NetworkError when attempting to fetch resource",
+  "Failed to fetch",
   // Already-handled BYOK / app-level codes
   "byok_key_missing",
   "byok_model_missing",

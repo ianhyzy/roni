@@ -116,6 +116,16 @@ describe("shouldDropSentryEvent", () => {
     expect(shouldDropSentryEvent(eventWithValue(payload), hintWithError(payload))).toBe(true);
   });
 
+  it("drops Firefox NetworkError fetch failures (Convex transport offline)", () => {
+    const payload = "NetworkError when attempting to fetch resource. (chatty-hawk-29.convex.cloud)";
+    expect(shouldDropSentryEvent(eventWithValue(payload), hintWithError(payload))).toBe(true);
+  });
+
+  it("drops Chromium/Safari Failed to fetch transport failures", () => {
+    const payload = "Failed to fetch";
+    expect(shouldDropSentryEvent(eventWithValue(payload), hintWithError(payload))).toBe(true);
+  });
+
   it("keeps real errors", () => {
     const event = eventWithValue("TypeError: Cannot read properties of undefined");
     const hint = hintWithError("TypeError: Cannot read properties of undefined");
