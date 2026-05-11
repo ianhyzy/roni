@@ -6,7 +6,10 @@
 import { v } from "convex/values";
 import { action, internalAction } from "./_generated/server";
 import { internal } from "./_generated/api";
-import type { Movement, SetActivity, WorkoutActivityDetail } from "./tonal/types";
+import type { ActionCtx } from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
+import { TonalApiError } from "./tonal/client";
+import type { Activity, Movement, SetActivity, WorkoutActivityDetail } from "./tonal/types";
 import { generatePerformanceSummary } from "./coach/prDetection";
 
 const WEIGHT_STEP_LBS = 2.5;
@@ -122,6 +125,29 @@ export type PerMovementHistoryEntry = {
   sessions: MovementSessionSnapshot[];
 };
 
+function isTonalAuthError(error: unknown): boolean {
+  return (
+    (error instanceof TonalApiError && error.status === 401) ||
+    (error instanceof Error && error.message.includes("session expired"))
+  );
+}
+
+async function fetchWorkoutHistoryOrEmpty(
+  ctx: ActionCtx,
+  userId: Id<"users">,
+  maxActivities: number,
+): Promise<Activity[]> {
+  try {
+    return await ctx.runAction(internal.tonal.workoutHistoryProxy.fetchWorkoutHistory, {
+      userId,
+      limit: maxActivities,
+    });
+  } catch (error) {
+    if (isTonalAuthError(error)) throw error;
+    return [];
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Internal: build per-movement session history from Tonal
 // ---------------------------------------------------------------------------
@@ -134,10 +160,7 @@ export const getPerMovementHistory = internalAction({
   handler: async (ctx, args): Promise<PerMovementHistoryEntry[]> => {
     const { userId } = args;
     const maxActivities = args.maxActivities ?? 20;
-    const activities = await ctx.runAction(internal.tonal.workoutHistoryProxy.fetchWorkoutHistory, {
-      userId,
-      limit: maxActivities,
-    });
+    const activities = await fetchWorkoutHistoryOrEmpty(ctx, userId, maxActivities);
 
     const movements: Movement[] = await ctx.runQuery(internal.tonal.movementSync.getAllMovements);
     const straightBarIds = new Set(
@@ -150,11 +173,12 @@ export const getPerMovementHistory = internalAction({
       const activityId = activity.activityId;
       let detail: WorkoutActivityDetail | null;
       try {
-        detail = (await ctx.runAction(internal.tonal.proxy.fetchWorkoutDetail, {
+        detail = await ctx.runAction(internal.tonal.proxy.fetchWorkoutDetail, {
           userId,
           activityId,
-        })) as WorkoutActivityDetail | null;
+        });
       } catch (error) {
+        if (isTonalAuthError(error)) throw error;
         console.error(
           `[progressiveOverload] Failed to fetch detail for activity ${activityId}`,
           error,

@@ -278,41 +278,54 @@ export const fetchWorkoutDetail = internalAction({
     activityId: v.string(),
   },
   handler: async (ctx, { userId, activityId }): Promise<WorkoutActivityDetail | null> => {
-    const result = await withTokenRetry(ctx, userId, (token, tonalUserId) =>
-      cachedFetch<WorkoutActivityDetail | null>(ctx, {
-        userId,
-        dataType: `workoutDetail:${activityId}`,
-        ttl: CACHE_TTLS.immutableWorkout,
-        // Null = 404 or projection rejection — don't pin for the 30-day TTL.
-        shouldCache: (d) => d !== null,
-        fetcher: async () => {
-          try {
-            const raw = await tonalFetch<unknown>(
-              token,
-              `/v6/users/${tonalUserId}/workout-activities/${activityId}`,
-            );
-            const detail = projectWorkoutDetail(raw);
-            if (detail === null) {
-              // Schema drift — projectWorkoutDetail already logged Zod issues.
-              // Return null so the caller gracefully renders "not found"; the
-              // cache short-circuits repeat requests for CACHE_TTLS.immutableWorkout.
-              console.error(
-                `fetchWorkoutDetail: projectWorkoutDetail rejected payload for activity ${activityId}`,
+    try {
+      const result = await withTokenRetry(ctx, userId, (token, tonalUserId) =>
+        cachedFetch<WorkoutActivityDetail | null>(ctx, {
+          userId,
+          dataType: `workoutDetail:${activityId}`,
+          ttl: CACHE_TTLS.immutableWorkout,
+          // Null = 404 or projection rejection — don't pin for the 30-day TTL.
+          shouldCache: (d) => d !== null,
+          fetcher: async () => {
+            try {
+              const raw = await tonalFetch<unknown>(
+                token,
+                `/v6/users/${tonalUserId}/workout-activities/${activityId}`,
               );
-              return null;
+              const detail = projectWorkoutDetail(raw);
+              if (detail === null) {
+                // Schema drift — projectWorkoutDetail already logged Zod issues.
+                // Return null so the caller gracefully renders "not found"; the
+                // cache short-circuits repeat requests for CACHE_TTLS.immutableWorkout.
+                console.error(
+                  `fetchWorkoutDetail: projectWorkoutDetail rejected payload for activity ${activityId}`,
+                );
+                return null;
+              }
+              return detail;
+            } catch (error) {
+              if (error instanceof TonalApiError && error.status === 404) {
+                return null;
+              }
+              throw error;
             }
-            return detail;
-          } catch (error) {
-            if (error instanceof TonalApiError && error.status === 404) {
-              return null;
-            }
-            throw error;
-          }
-        },
-      }),
-    );
-    // Project after cachedFetch too: stale cache may predate the projection.
-    return projectWorkoutDetail(result);
+          },
+        }),
+      );
+      // Project after cachedFetch too: stale cache may predate the projection.
+      return projectWorkoutDetail(result);
+    } catch (error) {
+      // Re-throw auth errors so callers can prompt reconnect.
+      if (error instanceof Error && error.message.includes("session expired")) throw error;
+      if (error instanceof TonalApiError && error.status === 401) throw error;
+      // Network / server errors (e.g. tunnel failures): return null so callers
+      // can skip this activity rather than aborting the entire operation.
+      console.warn(
+        `[fetchWorkoutDetail] Request failed for activity ${activityId}, returning null`,
+        error,
+      );
+      return null;
+    }
   },
 });
 

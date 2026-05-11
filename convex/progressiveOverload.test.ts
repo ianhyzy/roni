@@ -1,6 +1,27 @@
-import { describe, expect, it } from "vitest";
-import { aggregateDetailToSessions } from "./progressiveOverload";
+/// <reference types="vite/client" />
+import { convexTest } from "convex-test";
+import { describe, expect, it, vi } from "vitest";
+import { internal } from "./_generated/api";
+import type { Id } from "./_generated/dataModel";
+import type { ActionCtx } from "./_generated/server";
+import {
+  aggregateDetailToSessions,
+  getPerMovementHistory,
+  type PerMovementHistoryEntry,
+} from "./progressiveOverload";
+import schema from "./schema";
 import type { WorkoutActivityDetail } from "./tonal/types";
+
+const modules = import.meta.glob("./**/*.*s");
+
+type GetPerMovementHistoryHandler = (
+  ctx: ActionCtx,
+  args: { userId: Id<"users">; maxActivities?: number },
+) => Promise<PerMovementHistoryEntry[]>;
+
+const getPerMovementHistoryHandler = (
+  getPerMovementHistory as unknown as { _handler: GetPerMovementHistoryHandler }
+)._handler;
 
 function makeDetail(overrides: Partial<WorkoutActivityDetail> = {}): WorkoutActivityDetail {
   return {
@@ -208,5 +229,52 @@ describe("aggregateDetailToSessions", () => {
 
     const m1 = result.get("m1");
     expect(m1!.avgWeightLbs).toBeUndefined();
+  });
+});
+
+describe("getPerMovementHistory Tonal API resilience", () => {
+  it("returns empty array when user has no Tonal profile (API unavailable)", async () => {
+    // When fetchWorkoutHistory throws because there is no Tonal profile in the DB
+    // (equivalent to a network/auth-setup failure), getPerMovementHistory must
+    // return [] rather than propagating the error to the caller.
+    const t = convexTest(schema, modules);
+    const userId = await t.run(async (ctx) => ctx.db.insert("users", {}));
+
+    const result = await t.action(internal.progressiveOverload.getPerMovementHistory, { userId });
+
+    expect(result).toEqual([]);
+  });
+
+  it("rethrows session-expired errors so reconnect prompts are not masked", async () => {
+    const ctx = {
+      runAction: vi.fn().mockRejectedValue(new Error("Tonal session expired — please reconnect")),
+      runQuery: vi.fn(),
+    } as unknown as ActionCtx;
+
+    await expect(
+      getPerMovementHistoryHandler(ctx, {
+        userId: "test-user-123" as Id<"users">,
+        maxActivities: 20,
+      }),
+    ).rejects.toThrow("session expired");
+    expect(ctx.runQuery).not.toHaveBeenCalled();
+  });
+
+  it("rethrows session-expired errors from detail fetches", async () => {
+    const ctx = {
+      runAction: vi
+        .fn()
+        .mockResolvedValueOnce([{ activityId: "activity-1", activityTime: "2026-03-10T10:00:00Z" }])
+        .mockRejectedValueOnce(new Error("Tonal session expired — please reconnect")),
+      runQuery: vi.fn().mockResolvedValue([]),
+    } as unknown as ActionCtx;
+
+    await expect(
+      getPerMovementHistoryHandler(ctx, {
+        userId: "test-user-123" as Id<"users">,
+        maxActivities: 20,
+      }),
+    ).rejects.toThrow("session expired");
+    expect(ctx.runAction).toHaveBeenCalledTimes(2);
   });
 });

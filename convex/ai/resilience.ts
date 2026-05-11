@@ -275,7 +275,16 @@ async function attemptStream({
       },
       STREAM_OPTIONS,
     );
-    await result.text;
+    // Await the full text. If the stream delivers an error event, @convex-dev/agent@0.6.1
+    // may throw from its internal finalizeMessage mutation before our onError pre-emption
+    // completes. Catching here ensures the pending message is always finalized and the
+    // error reaches the circuit-breaker retry path with a clean thread state.
+    try {
+      await result.text;
+    } catch (streamError) {
+      await safeFinalizePending(ctx, threadId, getFinalizeCodeForError(streamError));
+      throw streamError;
+    }
     if (accumulator.toRow().finishReason === "error") throw new Error("provider_response_failed");
     if (budgetTrip) {
       await ctx.runMutation(internal.aiUsage.recordBudgetStop, {

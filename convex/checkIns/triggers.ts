@@ -31,6 +31,36 @@ const VIGOROUS_HR_THRESHOLD = 130;
 
 type TriggerResult = { trigger: CheckInTrigger; triggerContext?: string; message?: string };
 
+async function fetchWorkoutHistoryOrNull(
+  ctx: ActionCtx,
+  userId: Id<"users">,
+  limit: number,
+): Promise<Activity[] | null> {
+  try {
+    return await ctx.runAction(internal.tonal.workoutHistoryProxy.fetchWorkoutHistory, {
+      userId,
+      limit,
+    });
+  } catch {
+    return null;
+  }
+}
+
+async function fetchExternalActivitiesOrNull(
+  ctx: ActionCtx,
+  userId: Id<"users">,
+  limit: number,
+): Promise<ProjectedExternalActivity[] | null> {
+  try {
+    return await ctx.runAction(internal.tonal.proxyProjected.fetchExternalActivities, {
+      userId,
+      limit,
+    });
+  } catch {
+    return null;
+  }
+}
+
 async function evaluateMissedSession(opts: {
   ctx: ActionCtx;
   userId: Id<"users">;
@@ -66,10 +96,9 @@ async function evaluateGap3Days(
   userId: Id<"users">,
   now: number,
 ): Promise<TriggerResult | null> {
-  const activities = (await ctx.runAction(internal.tonal.workoutHistoryProxy.fetchWorkoutHistory, {
-    userId,
-    limit: 5,
-  })) as Activity[];
+  const activities = await fetchWorkoutHistoryOrNull(ctx, userId, 5);
+  if (!activities) return null;
+
   const lastActivityTime =
     activities.length > 0 ? new Date(activities[0].activityTime ?? 0).getTime() : 0;
   if (lastActivityTime === 0 || now - lastActivityTime < THREE_DAYS_MS) return null;
@@ -186,10 +215,8 @@ async function evaluateHighExternalLoad(
   userId: Id<"users">,
   now: number,
 ): Promise<TriggerResult | null> {
-  const externals = (await ctx.runAction(internal.tonal.proxyProjected.fetchExternalActivities, {
-    userId,
-    limit: 20,
-  })) as ProjectedExternalActivity[];
+  const externals = await fetchExternalActivitiesOrNull(ctx, userId, 20);
+  if (!externals) return null;
 
   const seventyTwoHoursAgo = now - 3 * 24 * 60 * 60 * 1000;
   const recentVigorous = externals.filter((e) => {
@@ -223,10 +250,8 @@ async function evaluateConsistencyStreak(
 ): Promise<TriggerResult | null> {
   const threeWeeksAgo = new Date(now - 21 * 24 * 60 * 60 * 1000);
 
-  const activities = (await ctx.runAction(internal.tonal.workoutHistoryProxy.fetchWorkoutHistory, {
-    userId,
-    limit: 30,
-  })) as Activity[];
+  const activities = await fetchWorkoutHistoryOrNull(ctx, userId, 30);
+  if (!activities) return null;
 
   const weekCounts = new Map<string, number>();
   for (const a of activities) {
@@ -286,19 +311,30 @@ export const evaluateTriggersForUser = internalAction({
     const tough = await evaluateToughSession(ctx, userId, now);
     if (tough) triggers.push(tough);
 
-    // Performance triggers share one expensive call
-    const [summary, activities] = await Promise.all([
-      ctx.runAction(internal.progressiveOverload.getWorkoutPerformanceSummary, { userId }),
-      ctx.runAction(internal.tonal.workoutHistoryProxy.fetchWorkoutHistory, { userId, limit: 1 }),
-    ]);
-    const latestActivity =
-      (activities as Activity[]).length > 0 ? (activities as Activity[])[0] : null;
+    // Performance triggers share one expensive call; skip the block on Tonal API failure.
+    try {
+      const [summary, historyActivities] = await Promise.all([
+        ctx.runAction(internal.progressiveOverload.getWorkoutPerformanceSummary, { userId }),
+        fetchWorkoutHistoryOrNull(ctx, userId, 1),
+      ]);
+      if (historyActivities) {
+        const latestActivity = historyActivities[0] ?? null;
 
-    const milestone = await evaluateStrengthMilestone(ctx, userId, now, summary, latestActivity);
-    if (milestone) triggers.push(milestone);
+        const milestone = await evaluateStrengthMilestone(
+          ctx,
+          userId,
+          now,
+          summary,
+          latestActivity,
+        );
+        if (milestone) triggers.push(milestone);
 
-    const plateauResult = await evaluatePlateau(ctx, userId, now, summary);
-    if (plateauResult) triggers.push(plateauResult);
+        const plateauResult = await evaluatePlateau(ctx, userId, now, summary);
+        if (plateauResult) triggers.push(plateauResult);
+      }
+    } catch {
+      // Tonal API unavailable — skip performance-based triggers this run.
+    }
 
     const externalLoad = await evaluateHighExternalLoad(ctx, userId, now);
     if (externalLoad) triggers.push(externalLoad);

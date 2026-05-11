@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 import { convexTest } from "convex-test";
-import { describe, expect, it, test } from "vitest";
+import { describe, expect, it, test, vi } from "vitest";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { frequencyWindowMs } from "./checkIns";
@@ -201,5 +201,31 @@ describe("runCheckInTriggerEvaluation", () => {
       cursor: expect.any(String),
       totalScheduled: RUN_EVALUATION_PAGE_SIZE,
     });
+  });
+});
+
+describe("evaluateTriggersForUser Tonal API resilience", () => {
+  test("completes without throwing when Tonal API is unavailable", async () => {
+    // A user with no Tonal profile causes every Tonal API sub-action to throw
+    // "No Tonal profile found". The evaluateGap3Days, evaluateHighExternalLoad,
+    // evaluateConsistencyStreak helpers, and the performance-trigger Promise.all
+    // all have try-catch guards added to handle this gracefully. This test
+    // verifies the action resolves to an array rather than propagating the error.
+    const t = convexTest(schema, modules);
+    const userId = await t.run(async (ctx) => ctx.db.insert("users", {}));
+
+    // Fix the clock to a Wednesday at noon UTC so time-gated triggers
+    // (weekly_recap only fires Sunday 18:00+ UTC) stay silent.
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-08T12:00:00Z").getTime());
+    try {
+      const result = await t.action(internal.checkIns.triggers.evaluateTriggersForUser, {
+        userId,
+      });
+
+      expect(result).toBeInstanceOf(Array);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
