@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here. This file is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commits on `main`. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.9.2](https://github.com/JeffOtano/roni/compare/v0.9.1...v0.9.2) (2026-05-11)
+
+
+### Bug Fixes
+
+* repair dependency lockfile ([c87d649](https://github.com/JeffOtano/roni/commit/c87d64963c85b9adbc6e38f61fa7b386334bdb3c))
+* **sentry:** resolve Tonal API network errors and stream finalization race ([4b52926](https://github.com/JeffOtano/roni/commit/4b52926383d9b80ebeb956fc19e9fc0b3bd303c3))
+
 ## [0.9.1](https://github.com/JeffOtano/roni/compare/v0.9.0...v0.9.1) (2026-05-09)
 
 
