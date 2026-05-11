@@ -21,6 +21,15 @@ export const KNOWN_TRAINING_TYPES = [
   "Pre & Postnatal",
 ] as const;
 
+const TONAL_NOT_LINKED_RESPONSE = {
+  error:
+    "Tonal account not linked. The user must connect their Tonal account before this data is available. Tell them to visit the Settings page or /connect-tonal to link their account.",
+} as const;
+
+function isTonalNotLinked(err: unknown): boolean {
+  return err instanceof Error && err.message.includes("No Tonal profile found");
+}
+
 export const searchExercisesTool = createTool({
   description:
     "Search Tonal's exercise catalog by name, muscle group, and/or training type. Use this before naming, suggesting, swapping, or programming exercises; results include canonical Tonal names, movement IDs, accessory requirements, and duration-vs-rep behavior. Default match is name-strict (matches name/shortName only) — set looseMatch:true to also match in descriptions if a strict search returns nothing.",
@@ -74,19 +83,9 @@ export const getStrengthScoresTool = createTool({
   description:
     "Get Tonal Strength Scores by body region. These are a PROPRIETARY fitness metric on a 0-999 scale — NOT weight in pounds. Higher means stronger relative to the user's body. Use actual workout history (avgWeightLbs) for real weight data.",
   inputSchema: z.object({}),
-  execute: withToolTracking(
-    "get_strength_scores",
-    async (
-      ctx,
-      _input,
-      _options,
-    ): Promise<{
-      note: string;
-      scores: { region: string; score: number }[];
-      overall: number;
-      percentile: number;
-    }> => {
-      const userId = requireUserId(ctx);
+  execute: withToolTracking("get_strength_scores", async (ctx, _input, _options) => {
+    const userId = requireUserId(ctx);
+    try {
       const scores = (await ctx.runAction(internal.tonal.proxy.fetchStrengthScores, {
         userId,
       })) as StrengthScore[];
@@ -104,38 +103,45 @@ export const getStrengthScoresTool = createTool({
         overall: distribution.overallScore,
         percentile: distribution.percentile,
       };
-    },
-  ),
+    } catch (err) {
+      if (isTonalNotLinked(err)) return TONAL_NOT_LINKED_RESPONSE;
+      throw err;
+    }
+  }),
 });
 
 export const getStrengthHistoryTool = createTool({
   description: "Get strength score history over time by region (last 30 entries per region).",
   inputSchema: z.object({}),
-  execute: withToolTracking(
-    "get_strength_history",
-    async (ctx, _input, _options): Promise<StrengthScoreHistoryEntry[]> => {
-      const userId = requireUserId(ctx);
+  execute: withToolTracking("get_strength_history", async (ctx, _input, _options) => {
+    const userId = requireUserId(ctx);
+    try {
       const history = (await ctx.runAction(internal.tonal.proxyProjected.fetchStrengthHistory, {
         userId,
       })) as StrengthScoreHistoryEntry[];
       // Cap returned entries to prevent large tool results from bloating context
       return history.slice(0, 30);
-    },
-  ),
+    } catch (err) {
+      if (isTonalNotLinked(err)) return TONAL_NOT_LINKED_RESPONSE;
+      throw err;
+    }
+  }),
 });
 
 export const getMuscleReadinessTool = createTool({
   description: "Get muscle readiness (0-100) per muscle group.",
   inputSchema: z.object({}),
-  execute: withToolTracking(
-    "get_muscle_readiness",
-    async (ctx, _input, _options): Promise<MuscleReadiness> => {
-      const userId = requireUserId(ctx);
+  execute: withToolTracking("get_muscle_readiness", async (ctx, _input, _options) => {
+    const userId = requireUserId(ctx);
+    try {
       return (await ctx.runAction(internal.tonal.proxy.fetchMuscleReadiness, {
         userId,
       })) as MuscleReadiness;
-    },
-  ),
+    } catch (err) {
+      if (isTonalNotLinked(err)) return TONAL_NOT_LINKED_RESPONSE;
+      throw err;
+    }
+  }),
 });
 
 export const getWorkoutHistoryTool = createTool({
@@ -146,23 +152,28 @@ export const getWorkoutHistoryTool = createTool({
   }),
   execute: withToolTracking("get_workout_history", async (ctx, input, _options) => {
     const userId = requireUserId(ctx);
-    const activities = (await ctx.runAction(
-      internal.tonal.workoutHistoryProxy.fetchWorkoutHistory,
-      {
-        userId,
-        limit: input.limit,
-      },
-    )) as Activity[];
+    try {
+      const activities = (await ctx.runAction(
+        internal.tonal.workoutHistoryProxy.fetchWorkoutHistory,
+        {
+          userId,
+          limit: input.limit,
+        },
+      )) as Activity[];
 
-    return activities.map((a) => ({
-      activityId: a.activityId,
-      date: a.activityTime,
-      title: a.workoutPreview.workoutTitle,
-      targetArea: a.workoutPreview.targetArea,
-      totalVolume: a.workoutPreview.totalVolume,
-      duration: a.workoutPreview.totalDuration,
-      type: a.workoutPreview.workoutType,
-    }));
+      return activities.map((a) => ({
+        activityId: a.activityId,
+        date: a.activityTime,
+        title: a.workoutPreview.workoutTitle,
+        targetArea: a.workoutPreview.targetArea,
+        totalVolume: a.workoutPreview.totalVolume,
+        duration: a.workoutPreview.totalDuration,
+        type: a.workoutPreview.workoutType,
+      }));
+    } catch (err) {
+      if (isTonalNotLinked(err)) return TONAL_NOT_LINKED_RESPONSE;
+      throw err;
+    }
   }),
 });
 
@@ -172,20 +183,22 @@ export const getWorkoutDetailTool = createTool({
   inputSchema: z.object({
     activityId: z.string().describe("Activity ID from workout history"),
   }),
-  execute: withToolTracking(
-    "get_workout_detail",
-    async (ctx, input, _options): Promise<EnrichedWorkoutDetail | null> => {
-      // Call the internal action with explicit userId. Calling the public
-      // action via `api.workoutDetail.getWorkoutDetail` from the agent runtime
-      // failed ~46% of the time with "Not authenticated" — the agent runtime
-      // doesn't reliably propagate auth context through runAction.
-      const userId = requireUserId(ctx);
+  execute: withToolTracking("get_workout_detail", async (ctx, input, _options) => {
+    // Call the internal action with explicit userId. Calling the public
+    // action via `api.workoutDetail.getWorkoutDetail` from the agent runtime
+    // failed ~46% of the time with "Not authenticated" — the agent runtime
+    // doesn't reliably propagate auth context through runAction.
+    const userId = requireUserId(ctx);
+    try {
       return (await ctx.runAction(internal.workoutDetail.getWorkoutDetailInternal, {
         userId,
         activityId: input.activityId,
       })) as EnrichedWorkoutDetail | null;
-    },
-  ),
+    } catch (err) {
+      if (isTonalNotLinked(err)) return TONAL_NOT_LINKED_RESPONSE;
+      throw err;
+    }
+  }),
 });
 
 export const getTrainingFrequencyTool = createTool({
@@ -193,33 +206,38 @@ export const getTrainingFrequencyTool = createTool({
   inputSchema: z.object({}),
   execute: withToolTracking("get_training_frequency", async (ctx, _input, _options) => {
     const userId = requireUserId(ctx);
-    const activities = (await ctx.runAction(
-      internal.tonal.workoutHistoryProxy.fetchWorkoutHistory,
-      {
-        userId,
-        limit: 30,
-      },
-    )) as Activity[];
+    try {
+      const activities = (await ctx.runAction(
+        internal.tonal.workoutHistoryProxy.fetchWorkoutHistory,
+        {
+          userId,
+          limit: 30,
+        },
+      )) as Activity[];
 
-    const muscleGroupCounts: Record<string, number> = {};
-    const lastTrained: Record<string, string> = {};
+      const muscleGroupCounts: Record<string, number> = {};
+      const lastTrained: Record<string, string> = {};
 
-    for (const a of activities) {
-      const area = a.workoutPreview.targetArea;
-      if (area) {
-        muscleGroupCounts[area] = (muscleGroupCounts[area] || 0) + 1;
-        if (!lastTrained[area]) {
-          lastTrained[area] = a.activityTime;
+      for (const a of activities) {
+        const area = a.workoutPreview.targetArea;
+        if (area) {
+          muscleGroupCounts[area] = (muscleGroupCounts[area] || 0) + 1;
+          if (!lastTrained[area]) {
+            lastTrained[area] = a.activityTime;
+          }
         }
       }
-    }
 
-    return {
-      sessionsPerArea: muscleGroupCounts,
-      lastTrainedPerArea: lastTrained,
-      totalSessions: activities.length,
-      periodDays: 30,
-    };
+      return {
+        sessionsPerArea: muscleGroupCounts,
+        lastTrainedPerArea: lastTrained,
+        totalSessions: activities.length,
+        periodDays: 30,
+      };
+    } catch (err) {
+      if (isTonalNotLinked(err)) return TONAL_NOT_LINKED_RESPONSE;
+      throw err;
+    }
   }),
 });
 

@@ -6,6 +6,8 @@ import { useAction, useQuery } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import { ChatThread } from "@/features/chat/ChatThread";
+import { FailureBanner, type FailureReason } from "@/features/byok/FailureBanner";
+import { parseByokError } from "@/features/byok/parseByokError";
 import { useAnalytics } from "@/lib/analytics";
 import { getBrowserTimezone } from "@/lib/timezone";
 import { Activity, Dumbbell, Flame, Loader2, Sparkles, TrendingUp, Zap } from "lucide-react";
@@ -40,6 +42,7 @@ function ChatPageInner() {
   const mountedRef = useRef(true);
   const [waitingForCoach, setWaitingForCoach] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
+  const [byokError, setByokError] = useState<FailureReason | null>(null);
   const { track } = useAnalytics();
 
   useEffect(() => {
@@ -51,11 +54,22 @@ function ChatPageInner() {
 
   const sendAndWait = async (args: { prompt: string; imageStorageIds?: Id<"_storage">[] }) => {
     if (mountedRef.current) setSendError(null);
+    if (mountedRef.current) setByokError(null);
     if (mountedRef.current) setWaitingForCoach(true);
     try {
       return await createThreadWithMessage({ ...args, userTimezone: getBrowserTimezone() });
     } finally {
       if (mountedRef.current) setWaitingForCoach(false);
+    }
+  };
+
+  const handleSendError = (err: unknown) => {
+    const byokReason = parseByokError(err);
+    if (byokReason) {
+      if (mountedRef.current) setByokError(byokReason);
+      if (mountedRef.current) setSendError(null);
+    } else {
+      if (mountedRef.current) setSendError(SEND_ERROR_MESSAGE);
     }
   };
 
@@ -72,9 +86,7 @@ function ChatPageInner() {
         console.error("Auto-send failed:", err);
         // Reset so the user can manually retry the same prompt from the input.
         autoSentRef.current = false;
-        if (mountedRef.current) {
-          setSendError(SEND_ERROR_MESSAGE);
-        }
+        handleSendError(err);
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -126,9 +138,7 @@ function ChatPageInner() {
                   track("suggestion_tapped", { suggestion_text: text });
                   sendAndWait({ prompt: text }).catch((err: unknown) => {
                     console.error("Suggestion send failed:", err);
-                    if (mountedRef.current) {
-                      setSendError(SEND_ERROR_MESSAGE);
-                    }
+                    handleSendError(err);
                   });
                 }}
                 className="flex items-center gap-3 rounded-xl border border-border bg-card px-4 py-3 text-left text-sm text-foreground transition-colors duration-150 hover:bg-accent active:scale-[0.98]"
@@ -139,10 +149,16 @@ function ChatPageInner() {
             ))}
           </div>
 
-          {sendError && (
-            <p className="mt-4 text-sm text-destructive" role="alert">
-              {sendError}
-            </p>
+          {byokError ? (
+            <div className="mt-4 w-full max-w-lg">
+              <FailureBanner reason={byokError} />
+            </div>
+          ) : (
+            sendError && (
+              <p className="mt-4 text-sm text-destructive" role="alert">
+                {sendError}
+              </p>
+            )
           )}
         </div>
 

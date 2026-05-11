@@ -6,6 +6,8 @@ import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import { Button } from "@/components/ui/button";
 import { ImagePreviewRow } from "@/features/chat/ImagePreviewRow";
+import { FailureBanner, type FailureReason } from "@/features/byok/FailureBanner";
+import { parseByokError } from "@/features/byok/parseByokError";
 import { useImageUpload } from "@/hooks/useImageUpload";
 import { useAnalytics } from "@/lib/analytics";
 import { ImagePlus, Loader2, SendHorizontal } from "lucide-react";
@@ -21,6 +23,7 @@ export function WelcomeInput({
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [byokError, setByokError] = useState<FailureReason | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { track } = useAnalytics();
 
@@ -65,9 +68,16 @@ export function WelcomeInput({
         has_images: imageCount > 0,
         image_count: imageCount,
       });
-    } catch {
+    } catch (err) {
       setInput(trimmed);
-      setError("Message failed to send. Please try again.");
+      const byokReason = parseByokError(err);
+      if (byokReason) {
+        setByokError(byokReason);
+        setError(null);
+      } else {
+        setByokError(null);
+        setError("Message failed to send. Please try again.");
+      }
     } finally {
       setSending(false);
     }
@@ -85,13 +95,19 @@ export function WelcomeInput({
 
   return (
     <div className="mx-auto w-full max-w-3xl">
-      {error && (
-        <div
-          role="alert"
-          className="mb-2 rounded-xl border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs font-medium text-destructive"
-        >
-          {error}
+      {byokError ? (
+        <div className="mb-2">
+          <FailureBanner reason={byokError} />
         </div>
+      ) : (
+        error && (
+          <div
+            role="alert"
+            className="mb-2 rounded-xl border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs font-medium text-destructive"
+          >
+            {error}
+          </div>
+        )
       )}
       <div className="rounded-2xl border border-border bg-card p-2 shadow-sm">
         <ImagePreviewRow images={pendingImages} onRemove={removeImage} disabled={isDisabled} />

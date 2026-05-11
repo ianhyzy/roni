@@ -283,14 +283,25 @@ export const generateDraftWeekPlan = internalAction({
         estimatedDuration: sessionDurationMinutes,
       })) as Id<"workoutPlans">;
 
-      // Link to week plan
-      await ctx.runMutation(internal.weekPlans.linkWorkoutPlanToDayInternal, {
-        userId: args.userId,
-        weekPlanId,
-        dayIndex,
-        workoutPlanId: planId,
-        estimatedDuration: sessionDurationMinutes,
-      });
+      // Link to week plan — may fail if a concurrent generateDraftWeekPlan
+      // deleted this plan and created a new one while we were building drafts.
+      try {
+        await ctx.runMutation(internal.weekPlans.linkWorkoutPlanToDayInternal, {
+          userId: args.userId,
+          weekPlanId,
+          dayIndex,
+          workoutPlanId: planId,
+          estimatedDuration: sessionDurationMinutes,
+        });
+      } catch (err) {
+        if (err instanceof Error && err.message.includes("Week plan not found")) {
+          await ctx.runMutation(internal.weekPlans.deleteDraftWorkout, {
+            workoutPlanId: planId,
+          });
+          return { success: false, error: "concurrent_generation" };
+        }
+        throw err;
+      }
 
       // Build summary for agent display
       const allMainExercises = mainBlocks.flatMap((b) => b.exercises);

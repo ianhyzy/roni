@@ -27,6 +27,80 @@ async function seedWeekPlan(
   );
 }
 
+async function seedWorkoutPlan(
+  t: ReturnType<typeof convexTest>,
+  userId: Id<"users">,
+): Promise<Id<"workoutPlans">> {
+  return t.run(async (ctx) =>
+    ctx.db.insert("workoutPlans", {
+      userId,
+      title: "Test Workout",
+      blocks: [],
+      status: "draft" as const,
+      source: "roni",
+      createdAt: Date.now(),
+    }),
+  );
+}
+
+describe("linkWorkoutPlanToDayInternal", () => {
+  test("links workout plan to a day slot", async () => {
+    const t = convexTest(schema, modules);
+    const userId = await t.run(async (ctx) => ctx.db.insert("users", {}));
+    const weekPlanId = await seedWeekPlan(t, userId);
+    const workoutPlanId = await seedWorkoutPlan(t, userId);
+
+    await t.mutation(internal.weekPlanInternals.linkWorkoutPlanToDayInternal, {
+      userId,
+      weekPlanId,
+      dayIndex: 2,
+      workoutPlanId,
+    });
+
+    const plan = await t.run(async (ctx) => ctx.db.get(weekPlanId));
+    expect(plan?.days[2].workoutPlanId).toBe(workoutPlanId);
+  });
+
+  test("throws 'Week plan not found' when weekPlanId was deleted (race condition)", async () => {
+    // This is the race condition from TONALCOACH-11/12: generateDraftWeekPlan
+    // creates a plan, a concurrent call deletes it, then linkWorkoutPlanToDayInternal
+    // throws "Week plan not found".
+    const t = convexTest(schema, modules);
+    const userId = await t.run(async (ctx) => ctx.db.insert("users", {}));
+    const weekPlanId = await seedWeekPlan(t, userId);
+    const workoutPlanId = await seedWorkoutPlan(t, userId);
+
+    // Simulate the concurrent deletion before the link mutation runs.
+    await t.run(async (ctx) => ctx.db.delete(weekPlanId));
+
+    await expect(
+      t.mutation(internal.weekPlanInternals.linkWorkoutPlanToDayInternal, {
+        userId,
+        weekPlanId,
+        dayIndex: 0,
+        workoutPlanId,
+      }),
+    ).rejects.toThrow("Week plan not found");
+  });
+
+  test("throws 'Week plan not found' when weekPlanId belongs to a different user", async () => {
+    const t = convexTest(schema, modules);
+    const ownerId = await t.run(async (ctx) => ctx.db.insert("users", {}));
+    const attackerId = await t.run(async (ctx) => ctx.db.insert("users", {}));
+    const weekPlanId = await seedWeekPlan(t, ownerId);
+    const workoutPlanId = await seedWorkoutPlan(t, attackerId);
+
+    await expect(
+      t.mutation(internal.weekPlanInternals.linkWorkoutPlanToDayInternal, {
+        userId: attackerId,
+        weekPlanId,
+        workoutPlanId,
+        dayIndex: 0,
+      }),
+    ).rejects.toThrow("Week plan not found");
+  });
+});
+
 describe("deleteWeekPlanInternal", () => {
   test("deletes a week plan that belongs to the user", async () => {
     const t = convexTest(schema, modules);
