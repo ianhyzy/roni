@@ -4,7 +4,13 @@ on:
   schedule:
     # 04:17 UTC daily — off-peak so Gemini rate limits don't block us
     - cron: "17 4 * * *"
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      run_full_agent_eval:
+        description: "Run the cost-incurring Phoenix/Gemini full-agent eval"
+        required: true
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -19,16 +25,75 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
+      - name: Decide whether to run evals
+        id: preflight
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RUN_FULL_AGENT_EVAL: ${{ inputs.run_full_agent_eval || 'false' }}
+          RUN_NIGHTLY_AI_EVALS: ${{ vars.RUN_NIGHTLY_AI_EVALS }}
+          PHOENIX_API_KEY: ${{ secrets.PHOENIX_API_KEY }}
+          GOOGLE_GENERATIVE_AI_API_KEY: ${{ secrets.GOOGLE_GENERATIVE_AI_API_KEY }}
+        run: |
+          should_run=false
+          reason=""
+
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            if [ "$RUN_FULL_AGENT_EVAL" = "true" ]; then
+              should_run=true
+            else
+              reason="manual run did not opt in with run_full_agent_eval=true"
+            fi
+          elif [ "$RUN_NIGHTLY_AI_EVALS" = "true" ]; then
+            should_run=true
+          else
+            reason="RUN_NIGHTLY_AI_EVALS is not true"
+          fi
+
+          if [ "$should_run" = "true" ]; then
+            missing=()
+            if [ -z "$PHOENIX_API_KEY" ]; then
+              missing+=("PHOENIX_API_KEY")
+            fi
+            if [ -z "$GOOGLE_GENERATIVE_AI_API_KEY" ]; then
+              missing+=("GOOGLE_GENERATIVE_AI_API_KEY")
+            fi
+            if [ "${#missing[@]}" -gt 0 ]; then
+              should_run=false
+              reason="required eval secrets are absent: ${missing[*]}"
+            fi
+          fi
+
+          echo "should_run=$should_run" >> "$GITHUB_OUTPUT"
+          {
+            echo "### AI eval preflight"
+            if [ "$should_run" = "true" ]; then
+              echo "Running cost-incurring Phoenix/Gemini evals."
+            else
+              echo "Skipping cost-incurring Phoenix/Gemini evals: $reason."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$should_run" = "true" ]; then
+            echo "::notice::Running cost-incurring Phoenix/Gemini evals."
+          else
+            echo "::notice::Skipping cost-incurring Phoenix/Gemini evals: $reason."
+          fi
+
       - uses: actions/checkout@v6
+        if: steps.preflight.outputs.should_run == 'true'
 
       - uses: actions/setup-node@v6
+        if: steps.preflight.outputs.should_run == 'true'
         with:
           node-version-file: .nvmrc
           cache: npm
 
       - run: npm ci
+        if: steps.preflight.outputs.should_run == 'true'
 
       - name: Sync Phoenix dataset from evalScenarios
+        if: steps.preflight.outputs.should_run == 'true'
         run: npm run ai:dataset
         env:
           PHOENIX_HOST: ${{ secrets.PHOENIX_HOST }}
@@ -37,6 +102,7 @@ jobs:
           PHOENIX_PROJECT_NAME: ${{ secrets.PHOENIX_PROJECT_NAME }}
 
       - name: Run full-agent experiment
+        if: steps.preflight.outputs.should_run == 'true'
         run: npx tsx scripts/evals/phoenix/runAgentExperiment.ts
         env:
           PHOENIX_HOST: ${{ secrets.PHOENIX_HOST }}
