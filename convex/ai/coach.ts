@@ -1,9 +1,16 @@
 import { Agent } from "@convex-dev/agent";
 import type { ContextHandler, UsageHandler } from "@convex-dev/agent";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
-import type { ModelMessage } from "ai";
+import type { LanguageModel, ModelMessage } from "ai";
 import { components, internal } from "../_generated/api";
-import { getPromptInputBudget, getProviderConfig, type ProviderId } from "./providers";
+import {
+  getFallbackTier,
+  getModelForTier,
+  getPromptInputBudget,
+  getProviderConfig,
+  type ModelTier,
+  type ProviderId,
+} from "./providers";
 import type { Id } from "../_generated/dataModel";
 import { withAnthropicHistoryCache } from "./anthropicCache";
 import { getTrainingSnapshotForChat, type TrainingSnapshotSource } from "./trainingSnapshotCache";
@@ -26,6 +33,23 @@ const sharedEmbeddingModel = serverProvider.textEmbeddingModel("gemini-embedding
 const STATIC_INSTRUCTIONS = buildInstructions();
 const RECENT_MESSAGES_LIMIT = 40;
 export const COACH_MAX_STEPS = 25;
+
+const PROGRAMMING_TOOL_NAMES = new Set<string>([
+  "add_exercise",
+  "adjust_session_duration",
+  "advance_training_block",
+  "approve_week_plan",
+  "check_deload",
+  "create_workout",
+  "delete_week_plan",
+  "delete_workout",
+  "move_session",
+  "program_week",
+  "rebuild_day",
+  "set_warmup_block",
+  "start_training_block",
+  "swap_exercise",
+]);
 
 /**
  * Cheap fingerprint of the static system prompt. Surfaces in `aiRun.promptVersion`
@@ -261,26 +285,19 @@ export interface CoachAgentPair {
   primary: Agent;
   fallback: Agent;
   primaryModelName: string;
+  fallbackModelName: string | null;
+  tierAgents: Record<ModelTier, Agent>;
+  tierModels: Record<ModelTier, LanguageModel>;
+  tierModelNames: Record<ModelTier, string>;
+  prepareStep: ModelTierPrepareStep;
 }
 
+export type ModelTierPrepareStep = (options: {
+  steps: ReadonlyArray<{ toolCalls?: ReadonlyArray<{ toolName: string }> }>;
+}) => { model: LanguageModel };
+
 export function buildCoachAgents(apiKey: string, userTimezone?: string): CoachAgentPair {
-  const provider = createGoogleGenerativeAI({ apiKey });
-  const primaryModelName = "gemini-3-flash-preview";
-  const fallbackModelName = "gemini-2.5-flash";
-
-  const primary = new Agent(components.agent, {
-    name: "Roni",
-    languageModel: provider(primaryModelName),
-    ...makeCoachAgentConfig({ userTimezone, provider: "gemini", modelId: primaryModelName }),
-  });
-
-  const fallback = new Agent(components.agent, {
-    name: "Roni (Fallback)",
-    languageModel: provider(fallbackModelName),
-    ...makeCoachAgentConfig({ userTimezone, provider: "gemini", modelId: fallbackModelName }),
-  });
-
-  return { primary, fallback, primaryModelName };
+  return buildCoachAgentsForProvider({ provider: "gemini", apiKey, userTimezone });
 }
 
 export interface ProviderAgentArgs {
@@ -292,48 +309,81 @@ export interface ProviderAgentArgs {
   timing?: CoachContextTiming;
 }
 
+export function selectCoachPrepareStepTier(
+  initialTier: ModelTier,
+  steps: ReadonlyArray<{ toolCalls?: ReadonlyArray<{ toolName: string }> }>,
+): ModelTier {
+  if (initialTier === "programming" || initialTier === "router") return initialTier;
+
+  const hasProgrammingToolCall = steps.some((step) =>
+    step.toolCalls?.some((toolCall) => PROGRAMMING_TOOL_NAMES.has(toolCall.toolName)),
+  );
+  return hasProgrammingToolCall ? "programming" : initialTier;
+}
+
+export function createModelTierPrepareStep(args: {
+  initialTier: ModelTier;
+  tierModels: Record<ModelTier, LanguageModel>;
+  escalationMode?: "allow-programming" | "fixed-tier";
+}): ModelTierPrepareStep {
+  const { initialTier, tierModels, escalationMode = "allow-programming" } = args;
+  if (escalationMode === "fixed-tier") return () => ({ model: tierModels[initialTier] });
+  return ({ steps }) => ({ model: tierModels[selectCoachPrepareStepTier(initialTier, steps)] });
+}
+
 export function buildCoachAgentsForProvider(args: ProviderAgentArgs): CoachAgentPair {
   const { provider, apiKey, modelOverride, userTimezone, retrievalEnabled, timing } = args;
   const config = getProviderConfig(provider);
-
-  const primaryModelName = modelOverride || config.primaryModel;
-  if (!primaryModelName) {
-    throw new Error(`Provider ${provider} requires a model override (no default model)`);
-  }
-
-  const primaryModel = config.createLanguageModel(apiKey, primaryModelName);
-  const primary = new Agent(components.agent, {
-    name: "Roni",
-    languageModel: primaryModel,
-    ...makeCoachAgentConfig({
-      userTimezone,
-      provider,
-      modelId: primaryModelName,
-      retrievalEnabled,
-      timing,
-    }),
-  });
-
-  let fallback: Agent;
-  if (config.fallbackModel) {
-    const fallbackModel = config.createLanguageModel(apiKey, config.fallbackModel);
-    fallback = new Agent(components.agent, {
-      name: "Roni (Fallback)",
-      languageModel: fallbackModel,
+  const tierModelNames = buildTierRecord((tier) => getModelForTier(provider, tier, modelOverride));
+  const tierModels = buildTierRecord((tier) =>
+    config.createLanguageModel(apiKey, tierModelNames[tier]),
+  );
+  const tierAgents = buildTierRecord((tier) => {
+    const modelId = tierModelNames[tier];
+    return new Agent(components.agent, {
+      name: getTierAgentName(tier),
+      languageModel: tierModels[tier],
       ...makeCoachAgentConfig({
         userTimezone,
         provider,
-        modelId: config.fallbackModel,
+        modelId,
         retrievalEnabled,
         timing,
       }),
     });
-  } else {
-    // No fallback (OpenRouter) -- reuse primary so streamWithRetry still works
-    fallback = primary;
-  }
+  });
 
-  return { primary, fallback, primaryModelName };
+  const primaryTier: ModelTier = "chat";
+  const fallbackTier = getFallbackTier(primaryTier);
+  const primary = tierAgents[primaryTier];
+  const fallback = config.fallbackModel ? tierAgents[fallbackTier] : primary;
+  const primaryModelName = tierModelNames[primaryTier];
+  const fallbackModelName = config.fallbackModel ? tierModelNames[fallbackTier] : null;
+
+  return {
+    primary,
+    fallback,
+    primaryModelName,
+    fallbackModelName,
+    tierAgents,
+    tierModels,
+    tierModelNames,
+    prepareStep: createModelTierPrepareStep({ initialTier: primaryTier, tierModels }),
+  };
+}
+
+function buildTierRecord<T>(getValue: (tier: ModelTier) => T): Record<ModelTier, T> {
+  return {
+    router: getValue("router"),
+    chat: getValue("chat"),
+    programming: getValue("programming"),
+    summarize: getValue("summarize"),
+  };
+}
+
+function getTierAgentName(tier: ModelTier): string {
+  if (tier === "chat") return "Roni";
+  return `Roni (${tier})`;
 }
 
 // Never pass to streamText/generateText; storage-only (tool approvals).

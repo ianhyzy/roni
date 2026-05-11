@@ -41,7 +41,7 @@ function buildStep(partial: {
     stepNumber: partial.stepNumber ?? 0,
     model: {
       provider: partial.provider ?? "gemini",
-      modelId: partial.modelId ?? "gemini-3-flash-preview",
+      modelId: partial.modelId ?? "gemini-2.5-flash",
     },
     toolCalls: (partial.toolCalls ?? []) as StepResult<ToolSet>["toolCalls"],
     toolResults: (partial.toolResults ?? []) as StepResult<ToolSet>["toolResults"],
@@ -90,7 +90,7 @@ describe("RunAccumulator", () => {
       buildStep({
         stepNumber: 0,
         provider: "gemini",
-        modelId: "gemini-3-flash-preview",
+        modelId: "gemini-2.5-flash",
         finishReason: "tool-calls",
         toolCalls: [{ toolName: "search_exercises" }, { toolName: "get_workout_history" }],
         usage: { inputTokens: 120, outputTokens: 40, cacheReadTokens: 15 },
@@ -100,7 +100,7 @@ describe("RunAccumulator", () => {
       buildStep({
         stepNumber: 1,
         provider: "gemini",
-        modelId: "gemini-3-flash-preview",
+        modelId: "gemini-2.5-flash",
         finishReason: "stop",
         toolCalls: [],
         usage: { inputTokens: 80, outputTokens: 20, cacheReadTokens: 10, cacheWriteTokens: 5 },
@@ -115,7 +115,7 @@ describe("RunAccumulator", () => {
     expect(row.cacheReadTokens).toBe(25);
     expect(row.cacheWriteTokens).toBe(5);
     expect(row.finishReason).toBe("stop"); // latest step wins
-    expect(row.modelId).toBe("gemini-3-flash-preview");
+    expect(row.modelId).toBe("gemini-2.5-flash");
     expect(row.provider).toBe("gemini");
   });
 

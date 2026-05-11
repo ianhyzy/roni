@@ -1,6 +1,6 @@
 import type { Agent } from "@convex-dev/agent";
 import { saveMessage } from "@convex-dev/agent";
-import type { StepResult, ToolSet } from "ai";
+import type { PrepareStepFunction, StepResult, ToolSet } from "ai";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ActionCtx } from "../_generated/server";
 import type { ProviderId } from "./providers";
@@ -83,7 +83,7 @@ describe("streamWithRetry provider response failures", () => {
       {
         primaryAgent: agent,
         fallbackAgent: agent,
-        primaryModelName: "gemini-3-flash-preview",
+        primaryModelName: "gemini-2.5-flash",
         threadId: "thread-1",
         userId: "user-1",
         prompt: "hello",
@@ -195,6 +195,40 @@ function baseStreamWithRetryArgs(provider: ProviderId) {
     environment: "dev" as const,
   };
 }
+
+describe("streamWithRetry prepareStep routing", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("uses the fallback prepareStep when the circuit breaker runs the fallback agent", async () => {
+    const { agent: primaryAgent } = makeSuccessAgent();
+    const { agent: fallbackAgent, captureStreamTextOptions } = makeSuccessAgent();
+    const primaryPrepareStep = vi.fn(() => undefined) as PrepareStepFunction<ToolSet>;
+    const fallbackPrepareStep = vi.fn(() => undefined) as PrepareStepFunction<ToolSet>;
+    runWithPrimaryCircuitBreakerMock.mockImplementationOnce(
+      async (options: { fallbackAgent: Agent; runAttempt: unknown }) => {
+        const runAttempt = options.runAttempt as (agent: Agent) => Promise<unknown>;
+        return await runAttempt(options.fallbackAgent);
+      },
+    );
+    const ctx = {
+      runQuery: vi.fn(async () => ({ page: [] })),
+      runMutation: vi.fn(async () => undefined),
+      runAction: vi.fn(async () => undefined),
+    } as unknown as ActionCtx;
+
+    await streamWithRetry(ctx, {
+      primaryAgent,
+      fallbackAgent,
+      prepareStep: primaryPrepareStep,
+      fallbackPrepareStep,
+      ...baseStreamWithRetryArgs("gemini"),
+    });
+
+    expect(captureStreamTextOptions()?.prepareStep).toBe(fallbackPrepareStep);
+  });
+});
 
 describe("Gemini thinking disabled via providerOptions", () => {
   beforeEach(() => {

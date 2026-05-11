@@ -2,7 +2,51 @@ import { describe, expect, it } from "vitest";
 import { budgetCapStopCondition, estimateInteractionCostUsd } from "./budgetCap";
 
 describe("budgetCapStopCondition", () => {
-  it("estimates interaction cost from cumulative token usage", () => {
+  it("estimates interaction cost from each step model id", () => {
+    const cost = estimateInteractionCostUsd(
+      [
+        {
+          usage: {
+            inputTokens: 10_000,
+            outputTokens: 2_000,
+            totalTokens: 12_000,
+            inputTokenDetails: {
+              noCacheTokens: undefined,
+              cacheReadTokens: undefined,
+              cacheWriteTokens: undefined,
+            },
+            outputTokenDetails: {
+              textTokens: undefined,
+              reasoningTokens: undefined,
+            },
+          },
+          model: { provider: "openai", modelId: "gpt-5.4-nano" },
+        },
+        {
+          usage: {
+            inputTokens: 5_000,
+            outputTokens: 3_000,
+            totalTokens: 8_000,
+            inputTokenDetails: {
+              noCacheTokens: undefined,
+              cacheReadTokens: undefined,
+              cacheWriteTokens: undefined,
+            },
+            outputTokenDetails: {
+              textTokens: undefined,
+              reasoningTokens: undefined,
+            },
+          },
+          model: { provider: "openai", modelId: "gpt-5.4" },
+        },
+      ] as Parameters<typeof estimateInteractionCostUsd>[0],
+      "openai",
+    );
+
+    expect(cost).toBeCloseTo(0.062, 6);
+  });
+
+  it("uses conservative provider pricing when a step omits model metadata", () => {
     const cost = estimateInteractionCostUsd(
       [
         {
@@ -21,31 +65,11 @@ describe("budgetCapStopCondition", () => {
             },
           },
         },
-        {
-          usage: {
-            inputTokens: 5_000,
-            outputTokens: 3_000,
-            totalTokens: 8_000,
-            inputTokenDetails: {
-              noCacheTokens: undefined,
-              cacheReadTokens: undefined,
-              cacheWriteTokens: undefined,
-            },
-            outputTokenDetails: {
-              textTokens: undefined,
-              reasoningTokens: undefined,
-            },
-          },
-        },
-      ],
-      {
-        maxInteractionUsd: 0.1,
-        inputUsdPerMillion: 2.5,
-        outputUsdPerMillion: 15,
-      },
+      ] as Parameters<typeof estimateInteractionCostUsd>[0],
+      "openai",
     );
 
-    expect(cost).toBeCloseTo(0.1125, 6);
+    expect(cost).toBeCloseTo(0.055, 6);
   });
 
   it("fires once the cumulative BYOK cost crosses the provider cap", () => {

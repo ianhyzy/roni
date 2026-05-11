@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyPromptIntent, selectCoachRoute } from "./chatProcessing";
+import { classifyPromptIntent, selectCoachTierRoute } from "./chatProcessing";
 
 describe("classifyPromptIntent", () => {
   const chars = (length: number) => "x".repeat(length);
@@ -24,71 +24,112 @@ describe("classifyPromptIntent", () => {
   });
 });
 
-describe("selectCoachRoute", () => {
-  const primaryAgent = { name: "primary" };
-  const fallbackAgent = { name: "fallback" };
+describe("selectCoachTierRoute", () => {
+  const tierAgents = {
+    router: { name: "router" },
+    chat: { name: "chat" },
+    programming: { name: "programming" },
+    summarize: { name: "summarize" },
+  };
+  const tierModelNames = {
+    router: "router-model",
+    chat: "chat-model",
+    programming: "programming-model",
+    summarize: "summarize-model",
+  };
 
-  it("uses the fallback model as the first attempt for trivial prompts", () => {
-    const route = selectCoachRoute(
+  it("uses the router model as the first attempt for trivial prompts", () => {
+    const route = selectCoachTierRoute(
       {
-        primary: primaryAgent,
-        fallback: fallbackAgent,
-        primaryModelName: "claude-sonnet-4-6",
-        fallbackModelName: "claude-haiku-4-5",
+        tierAgents,
+        tierModelNames,
+        fallbackModelName: "router-model",
       },
       "trivial",
     );
 
-    expect(route.primary).toBe(fallbackAgent);
-    expect(route.fallback).toBe(primaryAgent);
-    expect(route.primaryModelName).toBe("claude-haiku-4-5");
+    expect(route.primary).toBe(tierAgents.router);
+    expect(route.fallback).toBe(tierAgents.chat);
+    expect(route.primaryModelName).toBe("router-model");
+    expect(route.fallbackModelName).toBe("chat-model");
+    expect(route.primaryTier).toBe("router");
+    expect(route.fallbackTier).toBe("chat");
   });
 
-  it("keeps the primary model first for complex prompts", () => {
-    const route = selectCoachRoute(
+  it("uses the programming model first for complex prompts", () => {
+    const route = selectCoachTierRoute(
       {
-        primary: primaryAgent,
-        fallback: fallbackAgent,
-        primaryModelName: "claude-sonnet-4-6",
-        fallbackModelName: "claude-haiku-4-5",
+        tierAgents,
+        tierModelNames,
+        fallbackModelName: "router-model",
       },
       "complex",
     );
 
-    expect(route.primary).toBe(primaryAgent);
-    expect(route.fallback).toBe(fallbackAgent);
-    expect(route.primaryModelName).toBe("claude-sonnet-4-6");
+    expect(route.primary).toBe(tierAgents.programming);
+    expect(route.fallback).toBe(tierAgents.chat);
+    expect(route.primaryModelName).toBe("programming-model");
+    expect(route.fallbackModelName).toBe("chat-model");
+    expect(route.primaryTier).toBe("programming");
+    expect(route.fallbackTier).toBe("chat");
   });
 
-  it("keeps the primary model first for default prompts", () => {
-    const route = selectCoachRoute(
+  it("uses the chat model first for default prompts", () => {
+    const route = selectCoachTierRoute(
       {
-        primary: primaryAgent,
-        fallback: fallbackAgent,
-        primaryModelName: "claude-sonnet-4-6",
-        fallbackModelName: "claude-haiku-4-5",
+        tierAgents,
+        tierModelNames,
+        fallbackModelName: "router-model",
       },
       "default",
     );
 
-    expect(route.primary).toBe(primaryAgent);
-    expect(route.fallback).toBe(fallbackAgent);
-    expect(route.primaryModelName).toBe("claude-sonnet-4-6");
+    expect(route.primary).toBe(tierAgents.chat);
+    expect(route.fallback).toBe(tierAgents.router);
+    expect(route.primaryModelName).toBe("chat-model");
+    expect(route.fallbackModelName).toBe("router-model");
+    expect(route.primaryTier).toBe("chat");
+    expect(route.fallbackTier).toBe("router");
   });
 
-  it("keeps the primary model first when the provider has no fallback model", () => {
-    const route = selectCoachRoute(
+  it("uses programming then chat for approval continuation", () => {
+    const route = selectCoachTierRoute(
       {
-        primary: primaryAgent,
-        fallback: primaryAgent,
-        primaryModelName: "openrouter/auto",
+        tierAgents,
+        tierModelNames,
+        fallbackModelName: "router-model",
+      },
+      "approval_continuation",
+    );
+
+    expect(route.primary).toBe(tierAgents.programming);
+    expect(route.fallback).toBe(tierAgents.chat);
+    expect(route.primaryModelName).toBe("programming-model");
+    expect(route.fallbackModelName).toBe("chat-model");
+    expect(route.primaryTier).toBe("programming");
+    expect(route.fallbackTier).toBe("chat");
+  });
+
+  it("keeps the selected tier as fallback when the provider has no fallback model", () => {
+    const route = selectCoachTierRoute(
+      {
+        tierAgents,
+        tierModelNames: {
+          router: "openrouter/auto",
+          chat: "openrouter/auto",
+          programming: "openrouter/auto",
+          summarize: "openrouter/auto",
+        },
         fallbackModelName: null,
       },
       "trivial",
     );
 
-    expect(route.primary).toBe(primaryAgent);
-    expect(route.fallback).toBe(primaryAgent);
+    expect(route.primary).toBe(tierAgents.router);
+    expect(route.fallback).toBe(tierAgents.router);
     expect(route.primaryModelName).toBe("openrouter/auto");
+    expect(route.fallbackModelName).toBeNull();
+    expect(route.primaryTier).toBe("router");
+    expect(route.fallbackTier).toBe("router");
   });
 });

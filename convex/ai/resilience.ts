@@ -3,7 +3,8 @@
 import type { Agent } from "@convex-dev/agent";
 import type { ModelMessage } from "@ai-sdk/provider-utils";
 import { saveMessage } from "@convex-dev/agent";
-import { stepCountIs, type StepResult, type TelemetrySettings, type ToolSet } from "ai";
+import { stepCountIs } from "ai";
+import type { PrepareStepFunction, StepResult, TelemetrySettings, ToolSet } from "ai";
 import { components, internal } from "../_generated/api";
 import type { ActionCtx } from "../_generated/server";
 import type { Id } from "../_generated/dataModel";
@@ -32,6 +33,8 @@ interface StreamWithRetryArgs {
   primaryAgent: Agent;
   fallbackAgent: Agent;
   primaryModelName: string;
+  prepareStep?: PrepareStepFunction<ToolSet>;
+  fallbackPrepareStep?: PrepareStepFunction<ToolSet>;
   threadId: string;
   userId: string;
   prompt?: string | Array<ModelMessage>;
@@ -68,6 +71,8 @@ export async function streamWithRetry(
     primaryAgent,
     fallbackAgent,
     primaryModelName,
+    prepareStep,
+    fallbackPrepareStep,
     threadId,
     userId,
     isByok,
@@ -137,8 +142,17 @@ export async function streamWithRetry(
       const errorReport = { threadId, userId, isByok, provider };
 
       const runAttempt = async (agent: Agent): Promise<AttemptOutcome> => {
+        const attemptPrepareStep =
+          agent === fallbackAgent ? (fallbackPrepareStep ?? prepareStep) : prepareStep;
         try {
-          await attemptStream({ ctx, agent, promptArgs, telemetry, accumulator });
+          await attemptStream({
+            ctx,
+            agent,
+            promptArgs,
+            prepareStep: attemptPrepareStep,
+            telemetry,
+            accumulator,
+          });
           return { done: true, success: true };
         } catch (error) {
           if (await safeTryReportByok(ctx, { ...errorReport, error })) {
@@ -205,6 +219,7 @@ interface AttemptStreamOptions {
   ctx: ActionCtx;
   agent: Agent;
   promptArgs: PromptArgs;
+  prepareStep?: PrepareStepFunction<ToolSet>;
   telemetry: TelemetryArgs;
   accumulator: RunAccumulator;
 }
@@ -213,6 +228,7 @@ async function attemptStream({
   ctx,
   agent,
   promptArgs,
+  prepareStep,
   telemetry,
   accumulator,
 }: AttemptStreamOptions): Promise<void> {
@@ -235,6 +251,7 @@ async function attemptStream({
         ...promptArgs,
         abortSignal: controller.signal,
         stopWhen,
+        prepareStep,
         experimental_telemetry: buildTelemetryConfig(telemetry),
         experimental_context: { runId: telemetry.runId },
         // @convex-dev/agent drops thought_signature from stored tool calls; disabling thinking prevents Gemini from requiring them on replay.

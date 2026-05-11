@@ -9,6 +9,7 @@ import { components, internal } from "./_generated/api";
 import {
   buildCoachAgentsForProvider,
   type CoachContextTiming,
+  createModelTierPrepareStep,
   shouldUseCrossThreadSearch,
   STATIC_INSTRUCTIONS_HASH,
 } from "./ai/coach";
@@ -16,7 +17,7 @@ import { checkDailyBudget } from "./ai/budget";
 import { streamWithRetry } from "./ai/resilience";
 import type { RunAccumulator } from "./ai/runTelemetry";
 import { sanitizeTimezone } from "./ai/timeDecay";
-import { getProviderConfig, type ProviderId } from "./ai/providers";
+import { getFallbackTier, type ModelTier, type ProviderId } from "./ai/providers";
 import * as analytics from "./lib/posthog";
 import {
   assertThreadOwnership,
@@ -34,14 +35,20 @@ const TRIVIAL_PROMPT_MAX_CHARS = 30;
 const COMPLEX_INTENT_KEYWORDS = ["program", "plan", "build", "swap", "push", "deload"] as const;
 
 export type RoutingIntent = "trivial" | "complex" | "default";
+type CoachRouteIntent = RoutingIntent | "approval_continuation";
 
 interface CoachRoute<TAgent> {
   primary: TAgent;
   fallback: TAgent;
   primaryModelName: string;
+  fallbackModelName: string | null;
+  primaryTier: ModelTier;
+  fallbackTier: ModelTier;
 }
 
-interface CoachRouteOptions<TAgent> extends CoachRoute<TAgent> {
+interface CoachTierRouteOptions<TAgent> {
+  tierAgents: Record<ModelTier, TAgent>;
+  tierModelNames: Record<ModelTier, string>;
   fallbackModelName: string | null;
 }
 
@@ -54,23 +61,57 @@ export function classifyPromptIntent(prompt: string): RoutingIntent {
   return "default";
 }
 
-export function selectCoachRoute<TAgent>(
-  agents: CoachRouteOptions<TAgent>,
-  intent: RoutingIntent,
+export function selectCoachTierRoute<TAgent>(
+  agents: CoachTierRouteOptions<TAgent>,
+  intent: CoachRouteIntent,
 ): CoachRoute<TAgent> {
-  if (intent !== "trivial" || !agents.fallbackModelName) {
+  const primaryTier = getPrimaryTierForIntent(intent);
+  if (!agents.fallbackModelName) {
     return {
-      primary: agents.primary,
-      fallback: agents.fallback,
-      primaryModelName: agents.primaryModelName,
+      primary: agents.tierAgents[primaryTier],
+      fallback: agents.tierAgents[primaryTier],
+      primaryModelName: agents.tierModelNames[primaryTier],
+      fallbackModelName: null,
+      primaryTier,
+      fallbackTier: primaryTier,
     };
   }
 
+  const fallbackTier = getFallbackTier(primaryTier);
   return {
-    primary: agents.fallback,
-    fallback: agents.primary,
-    primaryModelName: agents.fallbackModelName,
+    primary: agents.tierAgents[primaryTier],
+    fallback: agents.tierAgents[fallbackTier],
+    primaryModelName: agents.tierModelNames[primaryTier],
+    fallbackModelName: agents.tierModelNames[fallbackTier],
+    primaryTier,
+    fallbackTier,
   };
+}
+
+function getPrimaryTierForIntent(intent: CoachRouteIntent): ModelTier {
+  switch (intent) {
+    case "trivial":
+      return "router";
+    case "default":
+      return "chat";
+    case "complex":
+    case "approval_continuation":
+      return "programming";
+    default: {
+      const _exhaustive: never = intent;
+      return _exhaustive;
+    }
+  }
+}
+
+function buildTierPrepareStep(
+  tierModels: Parameters<typeof createModelTierPrepareStep>[0]["tierModels"],
+  initialTier: ModelTier,
+  escalationMode?: "fixed-tier",
+): ReturnType<typeof createModelTierPrepareStep> {
+  return createModelTierPrepareStep(
+    escalationMode ? { initialTier, tierModels, escalationMode } : { initialTier, tierModels },
+  );
 }
 
 async function persistRun(ctx: ActionCtx, accumulator: RunAccumulator): Promise<void> {
@@ -136,13 +177,7 @@ export const processMessage = internalAction({
         retrievalEnabled,
         timing: contextTiming,
       });
-      const route = selectCoachRoute(
-        {
-          ...agents,
-          fallbackModelName: getProviderConfig(providerConfig.provider).fallbackModel,
-        },
-        routingIntent,
-      );
+      const route = selectCoachTierRoute(agents, routingIntent);
       await recordRoutingIntent(ctx, {
         userId,
         threadId,
@@ -154,6 +189,12 @@ export const processMessage = internalAction({
           primaryAgent: route.primary,
           fallbackAgent: route.fallback,
           primaryModelName: route.primaryModelName,
+          prepareStep: buildTierPrepareStep(agents.tierModels, route.primaryTier),
+          fallbackPrepareStep: buildTierPrepareStep(
+            agents.tierModels,
+            route.fallbackTier,
+            "fixed-tier",
+          ),
           threadId,
           userId,
           promptMessageId: messageId,
@@ -215,17 +256,24 @@ export const continueAfterApproval = action({
       const providerConfig = await resolveUserProviderConfig(ctx, userId);
       provider = providerConfig.provider;
 
-      const { primary, fallback, primaryModelName } = buildCoachAgentsForProvider({
+      const agents = buildCoachAgentsForProvider({
         ...providerConfig,
         userTimezone,
         retrievalEnabled,
         timing: contextTiming,
       });
+      const route = selectCoachTierRoute(agents, "approval_continuation");
       accumulator = await withByokErrorSanitization(() =>
         streamWithRetry(ctx, {
-          primaryAgent: primary,
-          fallbackAgent: fallback,
-          primaryModelName,
+          primaryAgent: route.primary,
+          fallbackAgent: route.fallback,
+          primaryModelName: route.primaryModelName,
+          prepareStep: buildTierPrepareStep(agents.tierModels, route.primaryTier),
+          fallbackPrepareStep: buildTierPrepareStep(
+            agents.tierModels,
+            route.fallbackTier,
+            "fixed-tier",
+          ),
           threadId,
           userId,
           promptMessageId: messageId,

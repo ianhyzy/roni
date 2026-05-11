@@ -10,9 +10,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
 const DEFAULT_MODEL_BY_PROVIDER: Record<ProviderId, string> = {
-  gemini: "gemini-3-flash-preview",
+  gemini: "gemini-2.5-flash",
   claude: "claude-sonnet-4-6",
-  openai: "gpt-5.4",
+  openai: "gpt-5.4-mini",
   openrouter: "openrouter/auto",
 };
 

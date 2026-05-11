@@ -27,26 +27,26 @@ describe("estimateAttemptCostUsd", () => {
     expect(
       estimateAttemptCostUsd({
         provider: "openrouter",
-        model: "google/gemini-3-flash-preview",
+        model: "google/gemini-2.5-flash",
         inputTokens: 200_000,
         outputTokens: 25_000,
         cacheReadTokens: 50_000,
         cacheWriteTokens: 0,
       }),
-    ).toBeCloseTo(0.1525, 4);
+    ).toBeCloseTo(0.109, 4);
   });
 
-  it("returns undefined for unknown models", () => {
+  it("uses conservative pricing for unknown OpenRouter override models", () => {
     expect(
       estimateAttemptCostUsd({
         provider: "openrouter",
-        model: "mystery/model",
+        model: "google/gemini-3-flash-preview",
         inputTokens: 1_000,
         outputTokens: 1_000,
         cacheReadTokens: 0,
         cacheWriteTokens: 0,
       }),
-    ).toBeUndefined();
+    ).toBeCloseTo(0.03, 6);
   });
 });
 

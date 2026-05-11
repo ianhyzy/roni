@@ -33,7 +33,7 @@ describe("runWithPrimaryCircuitBreaker", () => {
         outputTokens: 2,
         cacheReadTokens: 0,
         cacheWriteTokens: 0,
-        modelId: "gemini-3-flash-preview",
+        modelId: "gemini-2.5-flash",
       })),
     } as unknown as RunAccumulator;
     const runAttempt = vi.fn(async () => ({ done: true, success: false }) as const);
@@ -44,7 +44,7 @@ describe("runWithPrimaryCircuitBreaker", () => {
       ctx,
       primaryAgent: {} as Agent,
       fallbackAgent: {} as Agent,
-      primaryModelName: "gemini-3-flash-preview",
+      primaryModelName: "gemini-2.5-flash",
       provider: "gemini",
       runId: "run-1",
       threadId: "thread-1",
@@ -63,7 +63,7 @@ describe("runWithPrimaryCircuitBreaker", () => {
       runId: "run-1",
       userId: "user-1" as Id<"users">,
       threadId: "thread-1",
-      model: "gemini-3-flash-preview",
+      model: "gemini-2.5-flash",
       errorClass: "TerminalPrimaryAttemptFailure",
     });
     expect(ctx.runAction).toHaveBeenCalledTimes(1);

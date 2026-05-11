@@ -1,36 +1,16 @@
 import type { StepResult, StopCondition, ToolSet } from "ai";
-import type { ProviderId } from "./providers";
+import {
+  getConservativeModelPricing,
+  getModelPricing,
+  type ModelPricing,
+  type ProviderId,
+} from "./providers";
 
-interface ProviderBudgetCapConfig {
-  maxInteractionUsd: number;
-  inputUsdPerMillion: number;
-  outputUsdPerMillion: number;
-}
-
-const PROVIDER_BUDGET_CAPS: Record<ProviderId, ProviderBudgetCapConfig> = {
-  gemini: {
-    maxInteractionUsd: 0.1,
-    inputUsdPerMillion: 0.5,
-    outputUsdPerMillion: 3,
-  },
-  claude: {
-    maxInteractionUsd: 0.1,
-    inputUsdPerMillion: 3,
-    outputUsdPerMillion: 15,
-  },
-  openai: {
-    maxInteractionUsd: 0.1,
-    inputUsdPerMillion: 2.5,
-    outputUsdPerMillion: 15,
-  },
-  // `openrouter/auto` routes across different providers at the selected model's
-  // price. Use a conservative ceiling so BYOK users are protected even when the
-  // router picks a more expensive backend.
-  openrouter: {
-    maxInteractionUsd: 0.1,
-    inputUsdPerMillion: 5,
-    outputUsdPerMillion: 25,
-  },
+const PROVIDER_BUDGET_CAPS: Record<ProviderId, number> = {
+  gemini: 0.1,
+  claude: 0.1,
+  openai: 0.1,
+  openrouter: 0.1,
 };
 
 export interface BudgetCapTrip {
@@ -39,38 +19,62 @@ export interface BudgetCapTrip {
   stepCount: number;
 }
 
+type StepModelInput = Partial<Pick<StepResult<ToolSet>, "model" | "response">>;
+type StepCostInput = Pick<StepResult<ToolSet>, "usage"> & StepModelInput;
+
 export function estimateInteractionCostUsd(
-  steps: ReadonlyArray<Pick<StepResult<ToolSet>, "usage">>,
-  config: ProviderBudgetCapConfig,
+  steps: ReadonlyArray<StepCostInput>,
+  provider: ProviderId,
 ): number {
   return steps.reduce((total, step) => {
+    const pricing = getPricingForStep(provider, step);
     const inputTokens = step.usage?.inputTokens ?? 0;
+    const cacheReadTokens = step.usage?.inputTokenDetails?.cacheReadTokens ?? 0;
+    const cacheWriteTokens = step.usage?.inputTokenDetails?.cacheWriteTokens ?? 0;
+    const noCacheTokens =
+      step.usage?.inputTokenDetails?.noCacheTokens ??
+      Math.max(0, inputTokens - cacheReadTokens - cacheWriteTokens);
     const outputTokens = step.usage?.outputTokens ?? 0;
     return (
       total +
-      (inputTokens * config.inputUsdPerMillion + outputTokens * config.outputUsdPerMillion) /
+      (noCacheTokens * pricing.inputUsdPerMillion +
+        cacheReadTokens * pricing.cacheReadUsdPerMillion +
+        cacheWriteTokens * pricing.cacheWriteUsdPerMillion +
+        outputTokens * pricing.outputUsdPerMillion) /
         1_000_000
     );
   }, 0);
 }
 
-function getStepModelId(step: StepResult<ToolSet>): string | undefined {
-  const responseModel = (step.response as { model?: { modelId?: string } })?.model;
-  return responseModel?.modelId ?? step.model?.modelId;
+function getStepModelId(step: StepModelInput): string | undefined {
+  return getResponseModelId(step.response) ?? step.model?.modelId;
+}
+
+function getResponseModelId(response: StepModelInput["response"]): string | undefined {
+  if (!response || typeof response !== "object" || !("model" in response)) return undefined;
+  const model = response.model;
+  if (!model || typeof model !== "object" || !("modelId" in model)) return undefined;
+  return typeof model.modelId === "string" ? model.modelId : undefined;
+}
+
+function getPricingForStep(provider: ProviderId, step: StepModelInput): ModelPricing {
+  const modelId = getStepModelId(step);
+  if (!modelId) return getConservativeModelPricing(provider);
+  return getModelPricing(provider, modelId) ?? getConservativeModelPricing(provider);
 }
 
 export function budgetCapStopCondition(
   provider: ProviderId,
   onTrip?: (trip: BudgetCapTrip) => void,
 ): StopCondition<ToolSet> {
-  const config = PROVIDER_BUDGET_CAPS[provider];
+  const maxInteractionUsd = PROVIDER_BUDGET_CAPS[provider];
   let tripped = false;
 
   return ({ steps }) => {
     if (tripped) return true;
 
-    const estimatedCostUsd = estimateInteractionCostUsd(steps, config);
-    if (estimatedCostUsd < config.maxInteractionUsd) return false;
+    const estimatedCostUsd = estimateInteractionCostUsd(steps, provider);
+    if (estimatedCostUsd < maxInteractionUsd) return false;
 
     tripped = true;
     const lastStep = steps[steps.length - 1];

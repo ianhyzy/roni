@@ -32,7 +32,7 @@ export interface HarnessResult {
 }
 
 export interface HarnessOptions {
-  /** Override the model used for the agent run; defaults to the flash preview. */
+  /** Override the model used for the agent run; defaults to the Gemini chat tier. */
   modelId?: string;
 }
 
@@ -45,7 +45,7 @@ export async function runScenarioAgainstPrompt(
   scenario: EvalScenario,
   options: HarnessOptions = {},
 ): Promise<HarnessResult> {
-  const modelId = options.modelId ?? "gemini-3-flash-preview";
+  const modelId = options.modelId ?? "gemini-2.5-flash";
   const system = `${buildInstructions()}\n\n<training-data>\n${scenario.snapshot}\n</training-data>`;
   const result = await generateText({
     model: google(modelId),

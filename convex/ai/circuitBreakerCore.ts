@@ -1,4 +1,10 @@
-import type { ProviderId } from "./providers";
+import {
+  getConservativeModelPricing,
+  getModelPricing,
+  isValidProvider,
+  type ModelPricing,
+  type ProviderId,
+} from "./providers";
 
 export const CIRCUIT_BREAKER_WINDOW_MS = 60_000;
 export const CIRCUIT_BREAKER_OPEN_MS = 5 * 60_000;
@@ -21,82 +27,6 @@ export interface StoredCircuitBreakerState {
   lastOpenFailureCount?: number;
   lastOpenFailedCostUsd?: number;
 }
-
-interface ModelRate {
-  inputUsdPerMillion: number;
-  cacheReadUsdPerMillion: number;
-  cacheWriteUsdPerMillion: number;
-  outputUsdPerMillion: number;
-}
-
-const MODEL_RATES: ReadonlyArray<{
-  matches: readonly string[];
-  rate: ModelRate;
-}> = [
-  {
-    matches: ["gpt-5.4-mini"],
-    rate: {
-      inputUsdPerMillion: 0.75,
-      cacheReadUsdPerMillion: 0.075,
-      cacheWriteUsdPerMillion: 0.75,
-      outputUsdPerMillion: 4.5,
-    },
-  },
-  {
-    matches: ["gpt-5.4"],
-    rate: {
-      inputUsdPerMillion: 2.5,
-      cacheReadUsdPerMillion: 0.25,
-      cacheWriteUsdPerMillion: 2.5,
-      outputUsdPerMillion: 15,
-    },
-  },
-  {
-    matches: ["claude-haiku-4.5", "claude-haiku-4-5"],
-    rate: {
-      inputUsdPerMillion: 1,
-      cacheReadUsdPerMillion: 0.1,
-      cacheWriteUsdPerMillion: 1.25,
-      outputUsdPerMillion: 5,
-    },
-  },
-  {
-    matches: ["claude-sonnet-4.6", "claude-sonnet-4-6"],
-    rate: {
-      inputUsdPerMillion: 3,
-      cacheReadUsdPerMillion: 0.3,
-      cacheWriteUsdPerMillion: 3.75,
-      outputUsdPerMillion: 15,
-    },
-  },
-  {
-    matches: ["gemini-3-flash-preview"],
-    rate: {
-      inputUsdPerMillion: 0.5,
-      cacheReadUsdPerMillion: 0.05,
-      cacheWriteUsdPerMillion: 0.05,
-      outputUsdPerMillion: 3,
-    },
-  },
-  {
-    matches: ["gemini-2.5-flash-lite", "gemini-2.5-flash-lite-preview"],
-    rate: {
-      inputUsdPerMillion: 0.1,
-      cacheReadUsdPerMillion: 0.01,
-      cacheWriteUsdPerMillion: 0.01,
-      outputUsdPerMillion: 0.4,
-    },
-  },
-  {
-    matches: ["gemini-2.5-flash"],
-    rate: {
-      inputUsdPerMillion: 0.3,
-      cacheReadUsdPerMillion: 0.03,
-      cacheWriteUsdPerMillion: 0.03,
-      outputUsdPerMillion: 2.5,
-    },
-  },
-] as const;
 
 export interface AttemptCostInput {
   provider: string;
@@ -125,7 +55,7 @@ export interface HalfOpenProbeResolution {
 }
 
 export function estimateAttemptCostUsd(input: AttemptCostInput): number | undefined {
-  const rate = getModelRate(input.model);
+  const rate = getModelRate(input.provider, input.model);
   if (!rate) return undefined;
 
   const cacheReadTokens = Math.max(0, input.cacheReadTokens);
@@ -244,14 +174,7 @@ export function resolveHalfOpenProbeResult(args: {
   };
 }
 
-function getModelRate(model: string): ModelRate | undefined {
-  const normalizedModel = normalizeModel(model);
-  const match = MODEL_RATES.find(({ matches }) =>
-    matches.some((candidate) => normalizedModel.startsWith(candidate)),
-  );
-  return match?.rate;
-}
-
-function normalizeModel(model: string): string {
-  return model.trim().toLowerCase().split("/").pop() ?? model.trim().toLowerCase();
+function getModelRate(provider: string, model: string): ModelPricing | undefined {
+  const providerId = isValidProvider(provider) ? provider : "openrouter";
+  return getModelPricing(providerId, model) ?? getConservativeModelPricing(providerId);
 }
