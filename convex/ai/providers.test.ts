@@ -96,7 +96,7 @@ describe("getProviderConfig", () => {
   it("resolves explicit tier models", () => {
     expect(getModelForTier("gemini", "router")).toBe("gemini-2.5-flash-lite");
     expect(getModelForTier("gemini", "chat")).toBe("gemini-2.5-flash");
-    expect(getModelForTier("gemini", "programming")).toBe("gemini-2.5-pro");
+    expect(getModelForTier("gemini", "programming")).toBe("gemini-2.5-flash");
     expect(getModelForTier("gemini", "summarize")).toBe("gemini-2.5-flash-lite");
     expect(getModelForTier("claude", "programming")).toBe("claude-opus-4-7");
     expect(getModelForTier("openai", "router")).toBe("gpt-5.4-nano");

@@ -281,7 +281,7 @@ export const PROVIDERS: Record<ProviderId, ProviderConfig> = {
     modelPolicy: {
       router: "gemini-2.5-flash-lite",
       chat: "gemini-2.5-flash",
-      programming: "gemini-2.5-pro",
+      programming: "gemini-2.5-flash",
       summarize: "gemini-2.5-flash-lite",
     },
     keyRegex: /^AIza[A-Za-z0-9_-]{35}$/,
