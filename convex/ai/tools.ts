@@ -23,7 +23,7 @@ export const KNOWN_TRAINING_TYPES = [
 
 export const searchExercisesTool = createTool({
   description:
-    "Search Tonal's exercise catalog by name, muscle group, and/or training type. Use this before naming, suggesting, swapping, or programming exercises; results include canonical Tonal names, movement IDs, accessory requirements, and duration-vs-rep behavior. Default match is name-strict (matches name/shortName only) — set looseMatch:true to also match in descriptions if a strict search returns nothing.",
+    "Search Tonal's exercise catalog by name, muscle group, and/or training type. Use when the coach needs canonical Tonal exercise names, movement IDs, accessory requirements, or whether a movement uses reps versus duration. Do not use for the user's completed workout history, performance trends, or plan details. Inputs can search by name, muscle group, training type, and optional loose description matching; returns matching catalog rows with movementId, name, muscleGroups, accessory, trainingTypes, and isDurationBased.",
   inputSchema: z.object({
     name: z
       .string()
@@ -72,7 +72,7 @@ export const searchExercisesTool = createTool({
 
 export const getStrengthScoresTool = createTool({
   description:
-    "Get Tonal Strength Scores by body region. These are a PROPRIETARY fitness metric on a 0-999 scale — NOT weight in pounds. Higher means stronger relative to the user's body. Use actual workout history (avgWeightLbs) for real weight data.",
+    "Get Tonal Strength Scores by body region. Use when the user asks about Tonal's proprietary strength score, body-region strength, overall score, or percentile. Do not use these values as lifted weight in pounds; use workout history or workout detail for actual load data. Inputs are empty; returns regional 0-999 scores, overall score, percentile, and a warning note about the metric.",
   inputSchema: z.object({}),
   execute: withToolTracking(
     "get_strength_scores",
@@ -109,7 +109,8 @@ export const getStrengthScoresTool = createTool({
 });
 
 export const getStrengthHistoryTool = createTool({
-  description: "Get strength score history over time by region (last 30 entries per region).",
+  description:
+    "Get Tonal Strength Score history over time by region. Use when the user asks whether their proprietary strength scores are rising or falling across recent entries. Do not use for exercise-level weights, reps, PRs, plateaus, or completed workout lists. Inputs are empty; returns up to 30 recent strength-score history entries per region.",
   inputSchema: z.object({}),
   execute: withToolTracking(
     "get_strength_history",
@@ -125,7 +126,8 @@ export const getStrengthHistoryTool = createTool({
 });
 
 export const getMuscleReadinessTool = createTool({
-  description: "Get muscle readiness (0-100) per muscle group.",
+  description:
+    "Get Tonal muscle readiness on a 0-100 scale per muscle group. Use when deciding whether to train, avoid, or reduce volume for fatigued muscles. Do not use as a completed-workout volume report or a substitute for injury restrictions. Inputs are empty; returns current readiness values keyed by muscle group.",
   inputSchema: z.object({}),
   execute: withToolTracking(
     "get_muscle_readiness",
@@ -140,7 +142,7 @@ export const getMuscleReadinessTool = createTool({
 
 export const getWorkoutHistoryTool = createTool({
   description:
-    "LIST a window of recent completed workouts: one row per workout with activityId, date, title, target area, total volume, duration. Start here when the user asks 'what have I done lately' or you need an activityId to drill into. Does NOT include exercise names or per-movement details — call get_workout_detail with the activityId for that. Does NOT include PR/plateau/trend analysis — call get_workout_performance for that.",
+    "List a window of recent completed Tonal workouts. Use when the user asks what they have done recently or when another tool needs an activityId for a specific completed workout. Do not use for exercise names, per-set details, PRs, plateaus, or multi-workout trend analysis. Input is an optional limit; returns one row per workout with activityId, date, title, targetArea, totalVolume, duration, and type.",
   inputSchema: z.object({
     limit: z.number().optional().default(20).describe("Max workouts to return"),
   }),
@@ -168,7 +170,7 @@ export const getWorkoutHistoryTool = createTool({
 
 export const getWorkoutDetailTool = createTool({
   description:
-    "DRILL into a SINGLE completed workout by activityId: returns every exercise (with resolved movementName + muscleGroups), every set (weight, reps, duration, PR flag), per-movement summaries. Use this when the user asks about specific exercises in a specific workout — never guess from titles. Requires an activityId (get one from get_workout_history first). Does NOT compare across workouts — that is get_workout_performance.",
+    "Retrieve full details for one completed Tonal workout by activityId. Use when the user asks which exercises, sets, reps, durations, weights, or PR flags appeared in a specific workout. Do not use for listing many workouts or comparing progress across workouts; use get_workout_history or get_workout_performance for those. Input is activityId from get_workout_history; returns resolved exercise names, muscle groups, per-set data, and per-movement summaries.",
   inputSchema: z.object({
     activityId: z.string().describe("Activity ID from workout history"),
   }),
@@ -189,7 +191,8 @@ export const getWorkoutDetailTool = createTool({
 });
 
 export const getTrainingFrequencyTool = createTool({
-  description: "Training frequency per muscle group from recent history.",
+  description:
+    "Summarize recent training frequency by target area or muscle group. Use when the user asks how often they have trained areas like legs, chest, back, or shoulders in the recent history window. Do not use for set-volume recommendations, muscle readiness, or exercise-level performance. Inputs are empty; returns sessionsPerArea, lastTrainedPerArea, totalSessions, and periodDays.",
   inputSchema: z.object({}),
   execute: withToolTracking("get_training_frequency", async (ctx, _input, _options) => {
     const userId = requireUserId(ctx);
@@ -225,7 +228,7 @@ export const getTrainingFrequencyTool = createTool({
 
 export const createWorkoutTool = createTool({
   description:
-    "Create a ONE-OFF custom workout on Tonal. ONLY for single standalone workouts, NEVER for weekly programming. For weekly plans (Push/Pull/Legs, Upper/Lower, etc.), use program_week instead. Every movementId MUST come from a prior search_exercises call. For duration-based exercises (isDurationBased=true from search_exercises), specify 'duration' in seconds instead of 'reps'.",
+    "Create one standalone custom workout on Tonal outside the weekly plan. Use when the user asks for a single one-off workout to push directly to Tonal. Do not use for weekly programming, draft week edits, or multiple scheduled sessions; use program_week, rebuild_day, or the draft modification tools for those. Inputs require a title and blocks of searched movementIds with reps for rep-based movements or duration seconds for duration-based movements; returns push success details or a validation error.",
   inputSchema: z.object({
     title: z
       .string()
@@ -254,6 +257,35 @@ export const createWorkoutTool = createTool({
       .min(1)
       .max(10),
   }),
+  inputExamples: [
+    {
+      input: {
+        title: "Upper Body Strength",
+        blocks: [
+          {
+            exercises: [
+              {
+                movementId: "movement-id-from-search-exercises-1",
+                sets: 3,
+                reps: 10,
+                spotter: false,
+                eccentric: false,
+                warmUp: false,
+              },
+              {
+                movementId: "duration-movement-id-from-search",
+                sets: 3,
+                duration: 30,
+                spotter: false,
+                eccentric: false,
+                warmUp: false,
+              },
+            ],
+          },
+        ],
+      },
+    },
+  ],
   execute: withToolTracking(
     "create_workout",
     async (
@@ -338,7 +370,8 @@ export const createWorkoutTool = createTool({
   ),
 });
 export const deleteWorkoutTool = createTool({
-  description: "Delete a custom workout from Tonal.",
+  description:
+    "Delete a standalone custom workout from Tonal by workoutId. Use when the user explicitly wants a custom workout removed from Tonal. Do not use to discard a draft weekly plan or remove one day from the current week; use delete_week_plan or week modification tools for that. Input is a Tonal workoutId; returns deleted:true when the removal succeeds.",
   inputSchema: z.object({
     workoutId: z.string().describe("Tonal workout ID"),
   }),

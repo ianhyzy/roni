@@ -16,7 +16,7 @@ import { requireUserId, withToolTracking } from "./helpers";
 
 export const rebuildDayTool = createTool({
   description:
-    "Rebuild a single day's workout in the current week plan with full block authoring. Prefer this over create_workout when the user's change is to a day already in their week plan — create_workout creates a standalone workout outside the plan. Use this when the user wants the day's structure changed in a way that swap_exercise / add_exercise / set_warmup_block cannot accomplish (e.g. 'make Wednesday a pull/hinge day with a custom warmup, 4 main blocks, and a finisher'). Replaces the day's draft workout. If the day's workout was already pushed to Tonal, the new plan is created as a draft — the user must approve_week_plan to push it. Every movementId MUST come from a prior search_exercises result. For duration-based exercises, use 'duration' (seconds); for rep-based, use 'reps'. Pass warmUp:true to mark warmup exercises.",
+    "Rebuild one day's workout inside the current weekly plan with full block authoring. Use when the user wants a structural rewrite that swap_exercise, add_exercise, set_warmup_block, or adjust_session_duration cannot express, such as a custom warmup plus multiple main blocks and a finisher. Do not use for standalone custom workouts, full-week programming, simple single-exercise edits, or direct pushes to Tonal. Inputs require dayIndex, optional title, and blocks whose movementIds came from search_exercises with reps for rep-based movements or duration seconds for duration-based movements; returns a draft rebuild message that still requires approve_week_plan to push.",
   inputSchema: z.object({
     dayIndex: z.number().int().min(0).max(6).describe("Day of the week: 0=Monday..6=Sunday"),
     title: z

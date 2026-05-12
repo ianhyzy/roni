@@ -27,13 +27,13 @@ function validateSessionDuration(value: unknown): SessionDuration | undefined {
 }
 
 export const programWeekTool = createTool({
-  description: `Program the user's full training week. Creates draft workouts for each training day based on their split, available days, and session duration.
+  description: `Program the user's full training week by creating draft workouts for each training day. Use when the user asks for a weekly plan, a new training week, or a full split such as Push/Pull/Legs, Upper/Lower, Full Body, or Bro Split. Do not use for one standalone workout, a single-day draft rewrite, a 1:1 exercise swap, or pushing an already-created plan. Inputs may provide preferredSplit, trainingDays, targetDays, and sessionDurationMinutes, or omit them to use saved preferences; returns a draft week summary, weekPlanId, reasoningHints, and any restriction warnings.
 
-IMPORTANT: The backend algorithm selects the exact exercises, sets, and reps — you do NOT. Your job is to call this tool, then faithfully describe what it returned in the \`summary\` field. Never pre-announce specific exercises before calling this tool (e.g. "I'll program bench press, rows, and squats..."), because the algorithm may pick differently based on user history, muscle readiness, injuries, and progressive overload. Never describe exercise names, sets, or reps that are not present in the returned \`summary\`.
+IMPORTANT: The backend algorithm selects the exact exercises, sets, and reps. The coach should call this tool, then faithfully describe what it returned in the \`summary\` field. Never pre-announce specific exercises before calling this tool (e.g. "I'll program bench press, rows, and squats..."), because the algorithm may pick differently based on user history, muscle readiness, injuries, and progressive overload. Never describe exercise names, sets, or reps that are not present in the returned \`summary\`.
 
 Duration-based movements in the summary use a duration (seconds) instead of reps. Describe them in seconds (e.g. "30s hold") — never as "4x10".
 
-Returns a summary of the full week plan with exercises, sets, reps/duration, and progressive overload targets. The plan is NOT pushed to Tonal yet — present it to the user for approval first, then use approve_week_plan. If the user already has saved preferences, you can omit the parameters to use their saved preferences.`,
+The plan is NOT pushed to Tonal yet. Present it to the user for approval first, then use approve_week_plan.`,
   inputSchema: z.object({
     preferredSplit: z
       .enum(["ppl", "upper_lower", "full_body", "bro_split"])
@@ -59,6 +59,23 @@ Returns a summary of the full week plan with exercises, sets, reps/duration, and
       .optional()
       .describe("Session duration. Omit to use saved preferences."),
   }),
+  inputExamples: [
+    { input: {} },
+    {
+      input: {
+        preferredSplit: "upper_lower",
+        trainingDays: [0, 2, 4, 5],
+        sessionDurationMinutes: "45",
+      },
+    },
+    {
+      input: {
+        preferredSplit: "ppl",
+        targetDays: 3,
+        sessionDurationMinutes: "60",
+      },
+    },
+  ],
   execute: withToolTracking(
     "program_week",
     async (

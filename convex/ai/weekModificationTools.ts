@@ -20,7 +20,7 @@ import { requireUserId, toSessionDuration, withToolTracking } from "./helpers";
 
 export const swapExerciseTool = createTool({
   description:
-    "Swap one exercise for another in a specific day's draft workout. Provide the day index (0=Monday..6=Sunday) and the old/new movement IDs (from search_exercises). Only works on draft workouts.",
+    "Swap one exercise for another in a specific day's draft workout. Use when the user wants a direct replacement in the current weekly plan and the rest of the day should stay intact. Do not use for standalone workouts, already-pushed Tonal workouts, adding volume, moving sessions, or rebuilding the day structure. Inputs require dayIndex plus oldMovementId and newMovementId from search_exercises; returns a success message or a draft-plan error.",
   inputSchema: z.object({
     dayIndex: z
       .number()
@@ -83,7 +83,7 @@ export const swapExerciseTool = createTool({
 
 export const addExerciseTool = createTool({
   description:
-    "Add an exercise to a specific day's draft workout. Use this when the user wants to include an extra exercise (e.g., a finisher, an isolation move) without rebuilding the week. The exercise is added as a new straight-set block before the cooldown. Pass warmUp:true to mark the exercise as a warmup. The movementId MUST come from a prior search_exercises result.",
+    "Add one exercise to a specific day's draft workout in the current weekly plan. Use when the user wants an extra finisher, isolation movement, warmup movement, or single added exercise without rebuilding the day. Do not use for replacing an existing exercise, authoring several blocks, changing the session duration, standalone workouts, or already-pushed Tonal workouts. Inputs require dayIndex, a movementId from search_exercises, sets, and either reps or duration; returns a success message with updated block and exercise counts or a draft-plan error.",
   inputSchema: z.object({
     dayIndex: z.number().int().min(0).max(6).describe("Day of the week: 0=Monday..6=Sunday"),
     movementId: z.string().describe("The movement ID to add (from search_exercises)"),
@@ -105,6 +105,26 @@ export const addExerciseTool = createTool({
         "Mark this exercise as a warmup. Sets warmUp:true on the persisted exercise so Tonal renders it as a warmup. Use for mobility, activation, and prep movements at the top of the session.",
       ),
   }),
+  inputExamples: [
+    {
+      input: {
+        dayIndex: 2,
+        movementId: "movement-id-from-search-exercises",
+        sets: 3,
+        reps: 12,
+        dropSet: true,
+      },
+    },
+    {
+      input: {
+        dayIndex: 0,
+        movementId: "duration-movement-id-from-search",
+        sets: 2,
+        duration: 30,
+        warmUp: true,
+      },
+    },
+  ],
   execute: withToolTracking(
     "add_exercise",
     async (
@@ -166,7 +186,7 @@ export const addExerciseTool = createTool({
 
 export const setWarmupBlockTool = createTool({
   description:
-    "Set the warmup block for a specific day's draft workout. Replaces the existing warmup block (if any) or inserts a new warmup block at the start. Each exercise is marked warmUp:true. Use this when the user asks for a specific set of warmup movements (e.g. 'add Cat-Cow, Glute Bridge, and Dead Bug as the warmup'). All movementIds MUST come from prior search_exercises results.",
+    "Set the complete warmup block for a specific day's draft workout. Use when the user asks for a specific warmup sequence or multiple prep movements at the start of a day. Do not use for one regular added exercise, replacing a main lift, standalone workouts, or already-pushed Tonal workouts. Inputs require dayIndex and ordered warmup exercises with movementIds from search_exercises; returns a success message or a draft-plan error.",
   inputSchema: z.object({
     dayIndex: z.number().int().min(0).max(6).describe("Day of the week: 0=Monday..6=Sunday"),
     exercises: z
@@ -237,7 +257,7 @@ export const setWarmupBlockTool = createTool({
 
 export const moveSessionTool = createTool({
   description:
-    "Move a training session from one day to another by swapping the two day slots. For example, move Push day from Monday (0) to Wednesday (2). Both slots swap entirely (session type, workout, status).",
+    "Move a training session inside the current week by swapping two day slots. Use when the user wants a programmed session moved from one weekday to another while preserving each day's full workout, session type, and status. Do not use to change exercises, change duration, delete a session, or create a new week. Inputs require fromDayIndex and toDayIndex; returns a success message or a week-plan error.",
   inputSchema: z.object({
     fromDayIndex: z.number().int().min(0).max(6).describe("Source day index: 0=Monday..6=Sunday"),
     toDayIndex: z
@@ -291,7 +311,7 @@ export const moveSessionTool = createTool({
 
 export const adjustSessionDurationTool = createTool({
   description:
-    "Change the duration of a training session on a specific day. Re-selects exercises to fit the new time limit (30 min = 5 exercises, 45 min = 7, 60 min = 9). Creates a new draft workout and replaces the old one.",
+    "Change the target duration of a specific training day in the current week. Use when the user wants an existing draft day shortened or lengthened to 30, 45, or 60 minutes and is comfortable with the algorithm re-selecting exercises. Do not use for adding one exercise, swapping one exercise, moving a session, or manually authoring blocks. Inputs require dayIndex and newDurationMinutes; returns a success message after a new draft workout replaces the old one.",
   inputSchema: z.object({
     dayIndex: z.number().int().min(0).max(6).describe("Day of the week: 0=Monday..6=Sunday"),
     newDurationMinutes: z.enum(["30", "45", "60"]).describe("New session duration in minutes"),

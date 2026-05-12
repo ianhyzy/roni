@@ -22,7 +22,7 @@ import { computeWeeklyVolume } from "../coach/periodization";
 
 export const recordFeedbackTool = createTool({
   description:
-    "Record post-workout feedback from the user. Call this when the user rates a session or reports RPE. Always ask for feedback after discussing a completed workout.",
+    "Record post-workout feedback from the user. Use when the user gives an RPE, session rating, or notes about a completed workout. Do not use before identifying the completed activity or for general mood check-ins unrelated to a workout. Inputs require activityId, RPE, rating, and optional notes; returns the recorded RPE and rating.",
   inputSchema: z.object({
     activityId: z.string().describe("Tonal activity ID for the workout"),
     rpe: z
@@ -48,7 +48,7 @@ export const recordFeedbackTool = createTool({
 
 export const getRecentFeedbackTool = createTool({
   description:
-    "Get recent workout feedback (RPE and ratings) to understand training load and adjust intensity.",
+    "Get recent workout feedback entries with RPE, ratings, notes, and dates. Use when adjusting training load, deciding whether fatigue is accumulating, or contextualizing a user's recent experience. Do not use for objective performance trends, workout history, or muscle readiness. Input is an optional limit; returns recent feedback rows.",
   inputSchema: z.object({
     limit: z.number().optional().default(5).describe("Number of recent entries"),
   }),
@@ -74,7 +74,7 @@ export const getRecentFeedbackTool = createTool({
 
 export const checkDeloadTool = createTool({
   description:
-    "Check if the user should take a deload week based on their training block schedule and recent RPE. Call this before programming a new week.",
+    "Check whether the user should take a deload week based on their current training block and recent RPE. Use before programming a new week or when the user reports unusually high fatigue. Do not use as a medical assessment or as a substitute for pain/injury handling. Inputs are empty; returns shouldDeload, reason, and current block details.",
   inputSchema: z.object({}),
   execute: withToolTracking("check_deload", async (ctx, _input, _options) => {
     const userId = requireUserId(ctx);
@@ -102,7 +102,7 @@ export const checkDeloadTool = createTool({
 
 export const startTrainingBlockTool = createTool({
   description:
-    "Start a new training block (mesocycle). Use 'building' for normal training, 'deload' for recovery weeks. The system auto-transitions: 3 weeks building → 1 week deload.",
+    "Start a new training block or mesocycle. Use when the user begins structured programming, switches block focus, or needs a building, deload, or testing block established. Do not use to advance an existing block one week or to create individual workouts. Inputs require blockType, totalWeeks, and optional label; returns the started block type and length.",
   inputSchema: z.object({
     blockType: z.enum(["building", "deload", "testing"]),
     totalWeeks: z.number().min(1).max(8).describe("How many weeks for this block"),
@@ -131,7 +131,7 @@ export const startTrainingBlockTool = createTool({
 
 export const advanceTrainingBlockTool = createTool({
   description:
-    "Advance the current training block to the next week. Call this after programming a new week. Auto-transitions building → deload and deload → building.",
+    "Advance the current training block to the next week. Use after a new training week has been programmed and the block state should move forward. Do not use to start a brand-new mesocycle, force a deload decision, or update workout performance. Inputs are empty; returns whether a transition occurred and the new block summary.",
   inputSchema: z.object({}),
   execute: withToolTracking("advance_training_block", async (ctx, _input, _options) => {
     const userId = requireUserId(ctx);
@@ -154,7 +154,7 @@ export const advanceTrainingBlockTool = createTool({
 
 export const setGoalTool = createTool({
   description:
-    "Create a measurable training goal with a deadline. E.g., 'Increase bench press avg weight from 65 to 85 lbs by June 1'.",
+    "Create a measurable training goal with a target value and deadline. Use when the user sets a specific strength, volume, consistency, or body-composition target that can be tracked numerically. Do not use for vague aspirations without a metric, current progress updates, or completed-goal celebration; use update_goal_progress for progress changes. Inputs require title, category, metric, baselineValue, targetValue, and ISO deadline; returns created:true and initial progress.",
   inputSchema: z.object({
     title: z.string().describe("Goal description"),
     category: z.enum(["strength", "volume", "consistency", "body_composition"]),
@@ -163,6 +163,28 @@ export const setGoalTool = createTool({
     targetValue: z.number().describe("Target value"),
     deadline: z.string().describe("ISO date string deadline, e.g. 2026-06-01"),
   }),
+  inputExamples: [
+    {
+      input: {
+        title: "Increase bench press average weight to 85 lbs",
+        category: "strength",
+        metric: "bench_press_avg_weight_lbs",
+        baselineValue: 65,
+        targetValue: 85,
+        deadline: "2026-06-01",
+      },
+    },
+    {
+      input: {
+        title: "Complete 4 Tonal sessions per week",
+        category: "consistency",
+        metric: "weekly_tonal_sessions",
+        baselineValue: 2,
+        targetValue: 4,
+        deadline: "2026-07-01",
+      },
+    },
+  ],
   execute: withToolTracking(
     "set_goal",
     async (ctx, input, _options): Promise<{ created: boolean; progress: string }> => {
@@ -178,7 +200,7 @@ export const setGoalTool = createTool({
 
 export const updateGoalProgressTool = createTool({
   description:
-    "Update a goal's current value after analyzing workout data. Call this when you notice progress toward a user's goal.",
+    "Update the current value for an existing measurable training goal. Use after workout analysis or user-provided data shows progress toward a saved goal. Do not use to create a new goal, infer progress without data, or update goals unrelated to training metrics. Inputs require goalId and currentValue; returns updated:true, whether the target was reached, and the stored current value.",
   inputSchema: z.object({
     goalId: z.string().describe("Goal ID"),
     currentValue: z.number().describe("Updated current value"),
@@ -195,7 +217,8 @@ export const updateGoalProgressTool = createTool({
 });
 
 export const getGoalsTool = createTool({
-  description: "Get the user's active training goals with progress.",
+  description:
+    "Get the user's active training goals with computed progress. Use when tailoring coaching to saved goals, checking whether workout analysis affects a goal, or reminding the user what they are chasing. Do not use to create or update goal values. Inputs are empty; returns active goals with goalId, title, category, baseline, current, target, progress, and deadline.",
   inputSchema: z.object({}),
   execute: withToolTracking("get_goals", async (ctx, _input, _options) => {
     const userId = requireUserId(ctx);
@@ -226,7 +249,7 @@ export const getGoalsTool = createTool({
 
 export const reportInjuryTool = createTool({
   description:
-    "Record a new injury or limitation. This automatically affects future exercise selection — exercises matching the avoidance keywords will be excluded.",
+    "Record a new injury, pain report, or physical limitation. Use when the user reports pain, discomfort beyond normal soreness, or a movement restriction that should affect future programming. Do not use for ordinary post-workout fatigue, disliked exercises, or resolved injuries. Inputs require area, severity, avoidance keywords, and optional notes; returns the recorded area and severity.",
   inputSchema: z.object({
     area: z.string().describe("Body area: 'left shoulder', 'lower back', 'right knee', etc."),
     severity: z.enum(["mild", "moderate", "severe"]),
@@ -258,7 +281,8 @@ export const reportInjuryTool = createTool({
 });
 
 export const resolveInjuryTool = createTool({
-  description: "Mark an injury as resolved. The exercise restrictions will be lifted.",
+  description:
+    "Mark an active injury or limitation as resolved. Use only after the user confirms the issue has improved enough that restrictions can be lifted. Do not use for new pain reports, partial limitations, or temporary workout substitutions. Input is injuryId from get_injuries; returns resolved:true.",
   inputSchema: z.object({
     injuryId: z.string().describe("Injury ID to resolve"),
   }),
@@ -273,7 +297,8 @@ export const resolveInjuryTool = createTool({
 });
 
 export const getInjuriesTool = createTool({
-  description: "Get the user's active injuries and limitations.",
+  description:
+    "Get the user's active injuries and limitations. Use before programming around pain, checking why movements are excluded, or confirming whether restrictions are still active. Do not use for general soreness or muscle readiness. Inputs are empty; returns active injury IDs, areas, severity, avoidance keywords, notes, and reported dates.",
   inputSchema: z.object({}),
   execute: withToolTracking("get_injuries", async (ctx, _input, _options) => {
     const userId = requireUserId(ctx);
@@ -297,7 +322,7 @@ export const getInjuriesTool = createTool({
 
 export const getWeeklyVolumeTool = createTool({
   description:
-    "Analyze weekly training volume per muscle group. Shows sets per muscle group vs evidence-based recommendations (10-20 sets/week for most groups). Use this to identify under-trained or over-trained muscles.",
+    "Analyze current weekly training volume by muscle group against recommended set ranges. Use when the user asks about under-training, over-training, bodybuilding balance, or whether the current week has enough volume. Do not use for recent workout frequency, muscle readiness, or per-exercise performance trends. Inputs are empty; returns weekStartDate and muscle-group volume rows with weeklySets, recommended range, and status.",
   inputSchema: z.object({}),
   execute: withToolTracking("get_weekly_volume", async (ctx, _input, _options) => {
     const userId = requireUserId(ctx);

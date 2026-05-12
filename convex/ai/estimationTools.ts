@@ -4,7 +4,8 @@ import { internal } from "../_generated/api";
 import { requireUserId, withToolTracking } from "./helpers";
 
 export const estimateDurationTool = createTool({
-  description: "Estimate workout duration from exercise blocks.",
+  description:
+    "Estimate workout duration from proposed exercise blocks before creating or rebuilding a workout. Use when the coach needs to check whether a manually authored block layout is likely to fit the user's time target. Do not use for weekly algorithmic programming, completed workout duration, or Tonal push status. Inputs are blocks with searched movementIds, sets, and reps or duration seconds; returns estimatedMinutes or a validation error.",
   inputSchema: z.object({
     blocks: z
       .array(

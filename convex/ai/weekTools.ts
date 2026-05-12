@@ -86,7 +86,7 @@ interface WeekPlanDetails {
 
 export const getWeekPlanDetailsTool = createTool({
   description:
-    "Retrieve the current week's training plan with full exercise details (names, muscle groups, sets, reps, push status). Use this to show the user their plan or to check what's already programmed before making changes.",
+    "Retrieve the current week's training plan with resolved exercise details. Use when the user asks to see the plan or when the coach needs to inspect the existing draft before modifying it. Do not use to create, approve, delete, or analyze completed workout performance. Inputs are empty; returns the current week plan with day status, session type, estimated duration, movement IDs, exercise names, muscle groups, sets, reps, and duration seconds.",
   inputSchema: z.object({}),
   execute: withToolTracking(
     "get_week_plan_details",
@@ -169,7 +169,7 @@ export const getWeekPlanDetailsTool = createTool({
 
 export const deleteWeekPlanTool = createTool({
   description:
-    "Delete the current week's training plan and all its draft workouts. Use this when the user wants to start over or discard the current plan.",
+    "Delete the current week's training plan and all linked draft workouts. Use when the user wants to discard the current weekly draft or start the week over. Do not use to delete a standalone Tonal custom workout or to remove only one exercise from a draft day. Inputs are empty; returns deleted:true or a message when no current week plan exists.",
   inputSchema: z.object({}),
   execute: withToolTracking(
     "delete_week_plan",
@@ -206,7 +206,7 @@ export const deleteWeekPlanTool = createTool({
 
 export const getWorkoutPerformanceTool = createTool({
   description:
-    "ANALYZE per-movement trends across recent training: PRs (personal records), plateaus, regressions, progression. Use this for 'how am I progressing on bench press', 'am I plateauing', 'recap my recent gains'. Does NOT list individual workouts — that is get_workout_history. Does NOT show per-set detail of one workout — that is get_workout_detail.",
+    "Analyze per-movement performance trends across recent completed training. Use when the user asks about PRs, plateaus, regressions, progression, recent gains, or whether a lift is improving. Do not use to list individual workouts or inspect one workout's per-set details; use get_workout_history or get_workout_detail for those. Inputs are empty; returns a workout performance summary with movement-level trend signals.",
   inputSchema: z.object({}),
   execute: withToolTracking(
     "get_workout_performance",
@@ -227,7 +227,7 @@ export const getWorkoutPerformanceTool = createTool({
 
 export const approveWeekPlanTool = createTool({
   description:
-    "Push all draft workouts in the current week plan to Tonal. Use after the user verbally approves the plan in chat. Reports per-workout push status.",
+    "Push all draft workouts in the current week plan to Tonal. Use only after the user clearly approves the draft plan in chat, such as saying it looks good, send it, or push it. Do not use before a plan exists or while the user is still requesting changes. Inputs are empty; returns per-day push status and a divergence note if Tonal stores any workout differently than requested.",
   inputSchema: z.object({}),
   execute: withToolTracking(
     "approve_week_plan",

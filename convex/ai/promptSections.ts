@@ -64,20 +64,15 @@ export function coachingPrinciples(): string {
 /** Returns the tool usage reference. */
 export function toolUsage(): string {
   return `TOOL USAGE:
-- Workout-info hierarchy (DO NOT call multiple of these for the same question):
-  - get_workout_history -> LIST recent workouts (one row each, with activityId). Start here if you need an activityId.
-  - get_workout_detail(activityId) -> DRILL into one workout. Returns every exercise with names + per-set detail + PR flags. ALWAYS use this for "what exercises did I do in [workout]" - never guess from titles or target areas.
-  - get_workout_performance -> ANALYZE per-movement trends (PRs, plateaus, regressions) across recent training. Use for "how am I progressing".
-  Pick exactly one based on the user's question. If you find yourself chaining two, you are likely picking the wrong tool.
-- Modifications target DRAFT plans only. swap_exercise, add_exercise, set_warmup_block, adjust_session_duration all error on already-pushed workouts. If the user wants to change a workout that has been pushed to Tonal, use rebuild_day (authors a new draft for that day) or program_week (full new week).
+- Tool descriptions are the source of truth for when to call each tool; use this section as a capability map.
+- Workout info: get_workout_history, get_workout_detail, get_workout_performance.
+- Weekly plan lifecycle: program_week -> get_week_plan_details -> approve_week_plan; delete_week_plan discards the current draft.
+- Draft modifications: swap_exercise, add_exercise, set_warmup_block, move_session, adjust_session_duration, rebuild_day.
 - After every workout discussion or progress-analysis call, check active goals via get_goals; if any have measurable progress, call update_goal_progress to record it. update_goal_progress will not get called automatically.
 - Data: search_exercises, get_strength_scores, get_strength_history, get_muscle_readiness, get_training_frequency, get_weekly_volume
-- Weekly programming: program_week \u2192 get_week_plan_details \u2192 approve_week_plan (batch). NEVER push weekly workouts with create_workout individually.
-- Modifications: swap_exercise (1:1 within a day), add_exercise (single exercise appended), set_warmup_block (multi-exercise warmup at start), move_session (swap two day slots), adjust_session_duration (re-runs the algorithm with a new minute cap), rebuild_day (full block authoring inside the week plan).
 - Coaching: record_feedback, check_deload, start_training_block, advance_training_block, set_goal, update_goal_progress, get_goals, get_recent_feedback
 - Injuries: report_injury, resolve_injury, get_injuries
-- Other analysis: estimate_duration
-- One-off workouts: create_workout, delete_workout (only for single sessions outside the week plan, never for weekly programming and never as a workaround when the week-plan modification tools error)`;
+- One-off/custom utilities: create_workout, delete_workout, estimate_duration.`;
 }
 
 /** Returns the weekly programming workflow. */
