@@ -82,13 +82,19 @@ export const rebuildDay = internalAction({
       estimatedDuration: day.estimatedDuration,
     })) as Id<"workoutPlans">;
 
-    await ctx.runMutation(internal.weekPlans.linkWorkoutPlanToDayInternal, {
+    const linked = await ctx.runMutation(internal.weekPlans.linkWorkoutPlanToDayInternal, {
       userId,
       weekPlanId,
       dayIndex,
       workoutPlanId: newPlanId,
       estimatedDuration: day.estimatedDuration,
     });
+
+    if (linked === null) {
+      // Week plan was concurrently deleted — clean up the new draft and signal failure.
+      await ctx.runMutation(internal.weekPlans.deleteDraftWorkout, { workoutPlanId: newPlanId });
+      return { ok: false, error: "Week plan no longer exists; please regenerate." };
+    }
 
     if (oldWorkoutPlanId) {
       await ctx.runMutation(internal.weekPlans.deleteDraftWorkout, {

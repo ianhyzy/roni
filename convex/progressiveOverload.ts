@@ -142,8 +142,9 @@ async function fetchWorkoutHistoryOrEmpty(
       userId,
       limit: maxActivities,
     });
-  } catch (error) {
-    if (isTonalAuthError(error)) throw error;
+  } catch {
+    // fetchWorkoutHistory already handles session expiry by returning []; any
+    // remaining throw here is a transient network/server error — degrade to [].
     return [];
   }
 }
@@ -178,7 +179,7 @@ export const getPerMovementHistory = internalAction({
           activityId,
         });
       } catch (error) {
-        if (isTonalAuthError(error)) throw error;
+        if (isTonalAuthError(error)) break; // Session expired mid-loop; return what we have
         console.error(
           `[progressiveOverload] Failed to fetch detail for activity ${activityId}`,
           error,

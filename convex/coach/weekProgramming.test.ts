@@ -134,58 +134,49 @@ describe("programWeek return shape contract", () => {
 // Two concurrent calls to generateDraftWeekPlan can interleave like this:
 //   Call A creates weekPlanId
 //   Call B sees existing plan → deletes it → creates its own weekPlanId
-//   Call A tries linkWorkoutPlanToDayInternal → "Week plan not found"
+//   Call A calls linkWorkoutPlanToDayInternal → returns null (plan gone)
 //
-// The fix wraps the link step in a try-catch that returns { success: false }
-// with a retry suggestion instead of letting the error propagate as an
-// unhandled action failure (which Convex would report to Sentry).
+// The fix checks for a null return from linkWorkoutPlanToDayInternal and
+// returns { success: false } with a retry suggestion instead of letting the
+// error propagate as an unhandled action failure (which Convex reports to Sentry).
 // ---------------------------------------------------------------------------
 describe("generateDraftWeekPlan link-step race condition handler", () => {
-  // Simulate the catch logic added to the link step in generateDraftWeekPlan.
-  function simulateLinkStepCatch(err: Error): { success: false; error: string } | never {
-    if (err.message.includes("Week plan not found")) {
-      // Mirrors the real handler: clean up, then return structured failure.
+  // Simulate the null-check logic added to the link step in generateDraftWeekPlan.
+  function simulateLinkStepNullCheck(
+    linked: string | null,
+  ): { success: false; error: string } | { success: true } {
+    if (linked === null) {
       return {
         success: false,
         error:
           "The week plan was modified by a concurrent request. Please try generating the plan again.",
       };
     }
-    throw err;
+    return { success: true };
   }
 
-  it("returns structured failure when link throws 'Week plan not found'", () => {
-    const err = new Error("Week plan not found or access denied");
-
-    const result = simulateLinkStepCatch(err);
+  it("returns structured failure when link returns null (plan concurrently deleted)", () => {
+    const result = simulateLinkStepNullCheck(null);
 
     expect(result.success).toBe(false);
-    expect(result.error).toContain("concurrent");
-    expect(result.error).toContain("generating");
+    if (!result.success) {
+      expect(result.error).toContain("concurrent");
+      expect(result.error).toContain("generating");
+    }
   });
 
-  it("re-throws unexpected errors from the link step unchanged", () => {
-    const err = new Error("database connection failed");
+  it("returns success when link returns a valid id", () => {
+    const result = simulateLinkStepNullCheck("weekPlanId123");
 
-    expect(() => simulateLinkStepCatch(err)).toThrow("database connection failed");
+    expect(result.success).toBe(true);
   });
 
   it("structured failure is distinguishable from success by 'success' discriminant", () => {
-    const err = new Error("Week plan not found or access denied");
-    const result: { success: true } | { success: false; error: string } =
-      simulateLinkStepCatch(err);
+    const result = simulateLinkStepNullCheck(null);
 
     expect(result.success).toBe(false);
     if (!result.success) {
       expect(typeof result.error).toBe("string");
     }
-  });
-
-  it("does not treat 'Workout plan not found' as the race-condition case", () => {
-    // Only the week plan not-found triggers the race handler; workout-plan
-    // not-found is a different validation error that should propagate normally.
-    const err = new Error("Workout plan not found or access denied");
-
-    expect(() => simulateLinkStepCatch(err)).toThrow("Workout plan not found");
   });
 });

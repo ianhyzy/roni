@@ -63,7 +63,9 @@ export const setDayStatusInternal = internalMutation({
   },
 });
 
-/** Internal: link a workout plan to a day (used by programWeek action). */
+/** Internal: link a workout plan to a day (used by programWeek action).
+ *  Returns null when the week plan no longer exists (concurrent deletion race);
+ *  throws only for true security violations (userId mismatch on an existing doc). */
 export const linkWorkoutPlanToDayInternal = internalMutation({
   args: {
     userId: v.id("users"),
@@ -73,14 +75,13 @@ export const linkWorkoutPlanToDayInternal = internalMutation({
     status: v.optional(dayStatusValidator),
     estimatedDuration: v.optional(v.number()),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx, args): Promise<Id<"weekPlans"> | null> => {
     if (args.dayIndex < 0 || args.dayIndex > 6) {
       throw new Error("dayIndex must be 0 (Monday) through 6 (Sunday)");
     }
     const plan = await ctx.db.get(args.weekPlanId);
-    if (!plan || plan.userId !== args.userId) {
-      throw new Error("Week plan not found or access denied");
-    }
+    if (!plan) return null; // Concurrent deletion — caller should handle gracefully
+    if (plan.userId !== args.userId) throw new Error("Week plan access denied");
     const workout = await ctx.db.get(args.workoutPlanId);
     if (!workout || workout.userId !== args.userId) {
       throw new Error("Workout plan not found or access denied");

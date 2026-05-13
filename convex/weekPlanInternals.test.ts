@@ -27,6 +27,97 @@ async function seedWeekPlan(
   );
 }
 
+async function seedWorkoutPlan(
+  t: ReturnType<typeof convexTest>,
+  userId: Id<"users">,
+): Promise<Id<"workoutPlans">> {
+  return t.run(async (ctx) =>
+    ctx.db.insert("workoutPlans", {
+      userId,
+      title: "Test Workout",
+      blocks: [],
+      status: "draft",
+      source: "ai",
+      createdAt: Date.now(),
+    }),
+  );
+}
+
+describe("linkWorkoutPlanToDayInternal", () => {
+  test("links a workout plan to a day and returns the weekPlanId", async () => {
+    const t = convexTest(schema, modules);
+    const userId = await t.run(async (ctx) => ctx.db.insert("users", {}));
+    const weekPlanId = await seedWeekPlan(t, userId);
+    const workoutPlanId = await seedWorkoutPlan(t, userId);
+
+    const result = await t.mutation(internal.weekPlanInternals.linkWorkoutPlanToDayInternal, {
+      userId,
+      weekPlanId,
+      dayIndex: 0,
+      workoutPlanId,
+    });
+
+    expect(result).toBe(weekPlanId);
+    const plan = await t.run(async (ctx) => ctx.db.get(weekPlanId));
+    expect(plan?.days[0].workoutPlanId).toBe(workoutPlanId);
+  });
+
+  test("returns null when the week plan no longer exists (concurrent deletion race)", async () => {
+    // Fixes TONALCOACH-12: instead of throwing "Week plan not found or access denied"
+    // (which Convex would report to Sentry), return null so callers can handle it
+    // gracefully without generating noise.
+    const t = convexTest(schema, modules);
+    const userId = await t.run(async (ctx) => ctx.db.insert("users", {}));
+    const weekPlanId = await seedWeekPlan(t, userId);
+    const workoutPlanId = await seedWorkoutPlan(t, userId);
+
+    // Delete the week plan to simulate the race condition
+    await t.run(async (ctx) => ctx.db.delete(weekPlanId));
+
+    const result = await t.mutation(internal.weekPlanInternals.linkWorkoutPlanToDayInternal, {
+      userId,
+      weekPlanId,
+      dayIndex: 0,
+      workoutPlanId,
+    });
+
+    expect(result).toBeNull();
+  });
+
+  test("throws access denied when week plan belongs to a different user", async () => {
+    const t = convexTest(schema, modules);
+    const ownerId = await t.run(async (ctx) => ctx.db.insert("users", {}));
+    const attackerId = await t.run(async (ctx) => ctx.db.insert("users", {}));
+    const weekPlanId = await seedWeekPlan(t, ownerId);
+    const workoutPlanId = await seedWorkoutPlan(t, attackerId);
+
+    await expect(
+      t.mutation(internal.weekPlanInternals.linkWorkoutPlanToDayInternal, {
+        userId: attackerId,
+        weekPlanId,
+        dayIndex: 0,
+        workoutPlanId,
+      }),
+    ).rejects.toThrow("Week plan access denied");
+  });
+
+  test("throws when dayIndex is out of range", async () => {
+    const t = convexTest(schema, modules);
+    const userId = await t.run(async (ctx) => ctx.db.insert("users", {}));
+    const weekPlanId = await seedWeekPlan(t, userId);
+    const workoutPlanId = await seedWorkoutPlan(t, userId);
+
+    await expect(
+      t.mutation(internal.weekPlanInternals.linkWorkoutPlanToDayInternal, {
+        userId,
+        weekPlanId,
+        dayIndex: 7,
+        workoutPlanId,
+      }),
+    ).rejects.toThrow("dayIndex must be 0");
+  });
+});
+
 describe("deleteWeekPlanInternal", () => {
   test("deletes a week plan that belongs to the user", async () => {
     const t = convexTest(schema, modules);

@@ -164,13 +164,20 @@ async function fillWorkoutsPhase(
       blocks,
     })) as { success: boolean; planId?: Id<"workoutPlans"> };
     if (result.success && result.planId) {
-      await ctx.runMutation(internal.weekPlans.linkWorkoutPlanToDayInternal, {
+      const linked = await ctx.runMutation(internal.weekPlans.linkWorkoutPlanToDayInternal, {
         userId,
         weekPlanId,
         dayIndex,
         workoutPlanId: result.planId,
         estimatedDuration: sessionDurationMinutes,
       });
+      if (linked === null) {
+        // Week plan was concurrently deleted; the pushed workout exists on Tonal
+        // but has no week-plan slot. Log and continue — the sync job will reconcile.
+        console.warn(
+          `[weekProgrammingDirect] Week plan ${weekPlanId} deleted before day ${dayIndex} could be linked`,
+        );
+      }
     }
   }
 }

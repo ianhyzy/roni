@@ -113,31 +113,41 @@ async function enrichWorkoutActivities(
 /** Fetch recent workout history (newest 200). Used by incremental sync. */
 export const fetchWorkoutHistory = internalAction({
   args: { userId: v.id("users"), limit: v.optional(v.number()) },
-  handler: async (ctx, { userId, limit }): Promise<Activity[]> =>
-    withTokenRetry(ctx, userId, async (token, tonalUserId) => {
-      const activities = await cachedFetch<Activity[]>(ctx, {
-        userId,
-        dataType: "workoutHistory_v3",
-        ttl: CACHE_TTLS.workoutHistory,
-        fetcher: async () => {
-          const items = await fetchRecentWorkoutActivities<WorkoutActivityDetail>(
-            token,
-            tonalUserId,
-            WORKOUT_HISTORY_PAGE_LIMIT,
-          );
-          return enrichWorkoutActivities(
-            ctx,
-            userId,
-            token,
-            tonalUserId,
-            items,
-            0,
-            WORKOUT_HISTORY_PAGE_LIMIT,
-          );
-        },
+  handler: async (ctx, { userId, limit }): Promise<Activity[]> => {
+    try {
+      return await withTokenRetry(ctx, userId, async (token, tonalUserId) => {
+        const activities = await cachedFetch<Activity[]>(ctx, {
+          userId,
+          dataType: "workoutHistory_v3",
+          ttl: CACHE_TTLS.workoutHistory,
+          fetcher: async () => {
+            const items = await fetchRecentWorkoutActivities<WorkoutActivityDetail>(
+              token,
+              tonalUserId,
+              WORKOUT_HISTORY_PAGE_LIMIT,
+            );
+            return enrichWorkoutActivities(
+              ctx,
+              userId,
+              token,
+              tonalUserId,
+              items,
+              0,
+              WORKOUT_HISTORY_PAGE_LIMIT,
+            );
+          },
+        });
+        return limit != null ? activities.slice(0, limit) : activities;
       });
-      return limit != null ? activities.slice(0, limit) : activities;
-    }),
+    } catch (error) {
+      // Session expiry is persisted to the DB by markExpiredAndThrow before this
+      // throw, so the frontend reconnect prompt fires independently. Returning []
+      // prevents every caller from generating a separate Sentry error for the
+      // same expected user-level condition.
+      if (error instanceof Error && error.message.includes("session expired")) return [];
+      throw error;
+    }
+  },
 });
 
 /** Fetch one page of workout history at the given offset. Used by backfill to
@@ -152,30 +162,37 @@ interface PageResult {
  *  so backfill batching (20 items/invocation from a 200-item page) doesn't re-fetch. */
 export const fetchWorkoutHistoryPage = internalAction({
   args: { userId: v.id("users"), offset: v.number() },
-  handler: async (ctx, { userId, offset }): Promise<PageResult> =>
-    withTokenRetry(ctx, userId, async (token, tonalUserId) =>
-      cachedFetch<PageResult>(ctx, {
-        userId,
-        dataType: `workoutPage:${offset}`,
-        ttl: CACHE_TTLS.workoutHistory,
-        fetcher: async () => {
-          const { items, pgTotal } = await fetchWorkoutActivitiesPage<WorkoutActivityDetail>(
-            token,
-            tonalUserId,
-            offset,
-            WORKOUT_HISTORY_PAGE_LIMIT,
-          );
-          const activities = await enrichWorkoutActivities(
-            ctx,
-            userId,
-            token,
-            tonalUserId,
-            items,
-            offset,
-            WORKOUT_HISTORY_PAGE_LIMIT,
-          );
-          return { activities, pageSize: items.length, pgTotal };
-        },
-      }),
-    ),
+  handler: async (ctx, { userId, offset }): Promise<PageResult> => {
+    try {
+      return await withTokenRetry(ctx, userId, async (token, tonalUserId) =>
+        cachedFetch<PageResult>(ctx, {
+          userId,
+          dataType: `workoutPage:${offset}`,
+          ttl: CACHE_TTLS.workoutHistory,
+          fetcher: async () => {
+            const { items, pgTotal } = await fetchWorkoutActivitiesPage<WorkoutActivityDetail>(
+              token,
+              tonalUserId,
+              offset,
+              WORKOUT_HISTORY_PAGE_LIMIT,
+            );
+            const activities = await enrichWorkoutActivities(
+              ctx,
+              userId,
+              token,
+              tonalUserId,
+              items,
+              offset,
+              WORKOUT_HISTORY_PAGE_LIMIT,
+            );
+            return { activities, pageSize: items.length, pgTotal };
+          },
+        }),
+      );
+    } catch (error) {
+      if (error instanceof Error && error.message.includes("session expired"))
+        return { activities: [], pageSize: 0, pgTotal: 0 };
+      throw error;
+    }
+  },
 });

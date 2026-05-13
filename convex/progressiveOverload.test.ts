@@ -245,36 +245,49 @@ describe("getPerMovementHistory Tonal API resilience", () => {
     expect(result).toEqual([]);
   });
 
-  it("rethrows session-expired errors so reconnect prompts are not masked", async () => {
+  it("returns empty array when session is expired (not re-thrown)", async () => {
+    // fetchWorkoutHistory now returns [] on session expiry (persisted to DB before
+    // the throw, so the reconnect prompt fires independently). fetchWorkoutHistoryOrEmpty
+    // therefore receives [] without an exception, and getPerMovementHistory returns [].
     const ctx = {
-      runAction: vi.fn().mockRejectedValue(new Error("Tonal session expired — please reconnect")),
-      runQuery: vi.fn(),
+      runAction: vi.fn().mockResolvedValue([]),
+      runQuery: vi.fn().mockResolvedValue([]), // getAllMovements returns []
     } as unknown as ActionCtx;
 
-    await expect(
-      getPerMovementHistoryHandler(ctx, {
-        userId: "test-user-123" as Id<"users">,
-        maxActivities: 20,
-      }),
-    ).rejects.toThrow("session expired");
-    expect(ctx.runQuery).not.toHaveBeenCalled();
+    const result = await getPerMovementHistoryHandler(ctx, {
+      userId: "test-user-123" as Id<"users">,
+      maxActivities: 20,
+    });
+
+    expect(Array.isArray(result)).toBe(true);
+    expect(result.length).toBe(0);
   });
 
-  it("rethrows session-expired errors from detail fetches", async () => {
+  it("stops fetching details and returns partial results when session expires mid-loop", async () => {
+    // If the token expires after the history list is fetched but during detail
+    // fetching, we break out of the loop and return whatever we accumulated.
     const ctx = {
       runAction: vi
         .fn()
-        .mockResolvedValueOnce([{ activityId: "activity-1", activityTime: "2026-03-10T10:00:00Z" }])
+        // First call: fetchWorkoutHistory returns two activities
+        .mockResolvedValueOnce([
+          { activityId: "activity-1", activityTime: "2026-03-10T10:00:00Z" },
+          { activityId: "activity-2", activityTime: "2026-03-11T10:00:00Z" },
+        ])
+        // Second call: fetchWorkoutDetail for activity-1 succeeds (no sets → empty map)
+        .mockResolvedValueOnce(null)
+        // Third call: fetchWorkoutDetail for activity-2 → session expired
         .mockRejectedValueOnce(new Error("Tonal session expired — please reconnect")),
       runQuery: vi.fn().mockResolvedValue([]),
     } as unknown as ActionCtx;
 
-    await expect(
-      getPerMovementHistoryHandler(ctx, {
-        userId: "test-user-123" as Id<"users">,
-        maxActivities: 20,
-      }),
-    ).rejects.toThrow("session expired");
-    expect(ctx.runAction).toHaveBeenCalledTimes(2);
+    const result = await getPerMovementHistoryHandler(ctx, {
+      userId: "test-user-123" as Id<"users">,
+      maxActivities: 20,
+    });
+
+    // Should return partial data (empty since activity-1 had no sets), not throw
+    expect(Array.isArray(result)).toBe(true);
+    expect(ctx.runAction).toHaveBeenCalledTimes(3);
   });
 });

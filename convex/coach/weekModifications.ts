@@ -377,13 +377,20 @@ export const adjustDayDuration = internalAction({
       estimatedDuration: newDurationMinutes,
     })) as Id<"workoutPlans">;
 
-    // Link to week plan
-    await ctx.runMutation(internal.weekPlans.linkWorkoutPlanToDayInternal, {
+    // Link to week plan. If the week plan was concurrently deleted, clean up
+    // the orphaned draft and surface a retryable error to the AI.
+    const linked = await ctx.runMutation(internal.weekPlans.linkWorkoutPlanToDayInternal, {
       userId,
       weekPlanId,
       dayIndex,
       workoutPlanId: newPlanId,
       estimatedDuration: newDurationMinutes,
     });
+    if (linked === null) {
+      await ctx.runMutation(internal.weekPlans.deleteDraftWorkout, { workoutPlanId: newPlanId });
+      throw new Error(
+        "The week plan was modified by a concurrent request. Please try the modification again.",
+      );
+    }
   },
 });
