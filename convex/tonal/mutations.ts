@@ -182,7 +182,12 @@ export const pushWorkoutToTonal = internalAction({
           id: string;
           sets?: { movementId: string; prescribedReps?: number; prescribedDuration?: number }[];
         }>(token, `/v6/user-workouts/${tonalWorkoutId}`);
-        console.log('[trace shape #308] keys:', Object.keys(stored ?? {}).join(','), '| preview:', JSON.stringify(stored).slice(0, 800));
+        console.log(
+          "[trace shape #308] keys:",
+          Object.keys(stored ?? {}).join(","),
+          "| preview:",
+          JSON.stringify(stored).slice(0, 800),
+        );
         if (stored.sets !== undefined) {
           // sets[] in the request is already expanded one-per-set, so each row counts as 1.
           const intended = sets.map((s) => ({ movementId: s.movementId, sets: 1 }));
