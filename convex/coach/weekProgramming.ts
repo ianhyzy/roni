@@ -286,28 +286,23 @@ export const generateDraftWeekPlan = internalAction({
       // Link to week plan. Guard against a race where a concurrent
       // generateDraftWeekPlan call deleted the plan we just created (it
       // checks for an existing plan and deletes it before creating its own).
-      // If that happens, clean up the draft we just saved and bail out so
-      // the caller can retry rather than surfacing a confusing server error.
-      try {
-        await ctx.runMutation(internal.weekPlans.linkWorkoutPlanToDayInternal, {
-          userId: args.userId,
-          weekPlanId,
-          dayIndex,
+      // linkWorkoutPlanToDayInternal returns null when the plan is gone.
+      const linked = (await ctx.runMutation(internal.weekPlans.linkWorkoutPlanToDayInternal, {
+        userId: args.userId,
+        weekPlanId,
+        dayIndex,
+        workoutPlanId: planId,
+        estimatedDuration: sessionDurationMinutes,
+      })) as Id<"workoutPlans"> | null;
+      if (linked === null) {
+        await ctx.runMutation(internal.weekPlans.deleteDraftWorkout, {
           workoutPlanId: planId,
-          estimatedDuration: sessionDurationMinutes,
         });
-      } catch (err) {
-        if (err instanceof Error && err.message.includes("Week plan not found")) {
-          await ctx.runMutation(internal.weekPlans.deleteDraftWorkout, {
-            workoutPlanId: planId,
-          });
-          return {
-            success: false,
-            error:
-              "The week plan was modified by a concurrent request. Please try generating the plan again.",
-          };
-        }
-        throw err;
+        return {
+          success: false,
+          error:
+            "The week plan was modified by a concurrent request. Please try generating the plan again.",
+        };
       }
 
       // Build summary for agent display

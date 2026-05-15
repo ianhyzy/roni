@@ -110,34 +110,47 @@ async function enrichWorkoutActivities(
   );
 }
 
-/** Fetch recent workout history (newest 200). Used by incremental sync. */
+/** Fetch recent workout history (newest 200). Used by incremental sync.
+ *  Returns [] when the Tonal session is expired — the token is already marked
+ *  expired in userProfiles, so the frontend reconnect modal will appear on the
+ *  next DB read without needing this action to throw. */
 export const fetchWorkoutHistory = internalAction({
   args: { userId: v.id("users"), limit: v.optional(v.number()) },
-  handler: async (ctx, { userId, limit }): Promise<Activity[]> =>
-    withTokenRetry(ctx, userId, async (token, tonalUserId) => {
-      const activities = await cachedFetch<Activity[]>(ctx, {
-        userId,
-        dataType: "workoutHistory_v3",
-        ttl: CACHE_TTLS.workoutHistory,
-        fetcher: async () => {
-          const items = await fetchRecentWorkoutActivities<WorkoutActivityDetail>(
-            token,
-            tonalUserId,
-            WORKOUT_HISTORY_PAGE_LIMIT,
-          );
-          return enrichWorkoutActivities(
-            ctx,
-            userId,
-            token,
-            tonalUserId,
-            items,
-            0,
-            WORKOUT_HISTORY_PAGE_LIMIT,
-          );
-        },
+  handler: async (ctx, { userId, limit }): Promise<Activity[]> => {
+    try {
+      return await withTokenRetry(ctx, userId, async (token, tonalUserId) => {
+        const activities = await cachedFetch<Activity[]>(ctx, {
+          userId,
+          dataType: "workoutHistory_v3",
+          ttl: CACHE_TTLS.workoutHistory,
+          fetcher: async () => {
+            const items = await fetchRecentWorkoutActivities<WorkoutActivityDetail>(
+              token,
+              tonalUserId,
+              WORKOUT_HISTORY_PAGE_LIMIT,
+            );
+            return enrichWorkoutActivities(
+              ctx,
+              userId,
+              token,
+              tonalUserId,
+              items,
+              0,
+              WORKOUT_HISTORY_PAGE_LIMIT,
+            );
+          },
+        });
+        return limit != null ? activities.slice(0, limit) : activities;
       });
-      return limit != null ? activities.slice(0, limit) : activities;
-    }),
+    } catch (error) {
+      // Session expired: markExpiredAndThrow already wrote the expiry flag to
+      // userProfiles, so the frontend will show the reconnect modal. Return an
+      // empty list so background callers (triggers, progressive overload) degrade
+      // gracefully rather than propagating an error to Sentry.
+      if (error instanceof Error && error.message.includes("session expired")) return [];
+      throw error;
+    }
+  },
 });
 
 /** Fetch one page of workout history at the given offset. Used by backfill to

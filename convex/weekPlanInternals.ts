@@ -63,7 +63,10 @@ export const setDayStatusInternal = internalMutation({
   },
 });
 
-/** Internal: link a workout plan to a day (used by programWeek action). */
+/** Internal: link a workout plan to a day (used by programWeek action).
+ *  Returns null when the week plan no longer exists or belongs to a different
+ *  user — this is an expected concurrent-delete race, not a logic error.
+ *  Callers must check for null and clean up any orphaned draft workout. */
 export const linkWorkoutPlanToDayInternal = internalMutation({
   args: {
     userId: v.id("users"),
@@ -73,13 +76,16 @@ export const linkWorkoutPlanToDayInternal = internalMutation({
     status: v.optional(dayStatusValidator),
     estimatedDuration: v.optional(v.number()),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx, args): Promise<Id<"weekPlans"> | null> => {
     if (args.dayIndex < 0 || args.dayIndex > 6) {
       throw new Error("dayIndex must be 0 (Monday) through 6 (Sunday)");
     }
     const plan = await ctx.db.get(args.weekPlanId);
     if (!plan || plan.userId !== args.userId) {
-      throw new Error("Week plan not found or access denied");
+      // Expected concurrent-delete race: the week plan was replaced or removed
+      // by a parallel generateDraftWeekPlan call. Return null so the caller can
+      // clean up the orphaned draft and retry rather than surfacing an error.
+      return null;
     }
     const workout = await ctx.db.get(args.workoutPlanId);
     if (!workout || workout.userId !== args.userId) {

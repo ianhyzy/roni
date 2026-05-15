@@ -340,3 +340,28 @@ describe("computePushDivergence", () => {
     expect(div!.extraMovements).toContain("z");
   });
 });
+
+// ---------------------------------------------------------------------------
+// createWorkout push-failure path (TONALCOACH-2A regression)
+// ---------------------------------------------------------------------------
+
+describe("enrichPushErrorMessage in push-failure handling", () => {
+  it("produces a structured error string without throwing", () => {
+    // Regression: createWorkout used to do throw new Error(pushResult.error) for
+    // the { error: string } return from pushWorkoutToTonal, which surfaced the
+    // error as an uncaught action failure in Sentry. The fix handles the error
+    // return value directly without an intermediate throw.
+    const message = enrichPushErrorMessage(
+      'Tonal API 500: {"message":"","status":500}',
+      "Friday: Core & Straps Rehab",
+      ["mv-1", "mv-2"],
+    );
+
+    // Must be a plain string, not thrown
+    expect(typeof message).toBe("string");
+    expect(message).toContain("Friday: Core & Straps Rehab");
+    expect(message).toContain("500");
+    expect(message).toContain("mv-1");
+    expect(message).toContain("mv-2");
+  });
+});

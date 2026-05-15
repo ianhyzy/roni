@@ -286,47 +286,18 @@ export const createWorkout = internalAction({
   > => {
     await rateLimiter.limit(ctx, "createTonalWorkout", { key: userId, throws: true });
     const sets = expandBlocksToSets(blocks as BlockInput[]);
-    try {
-      const tonalTitle = title;
-      const pushResult = await ctx.runAction(internal.tonal.mutations.pushWorkoutToTonal, {
-        userId,
-        title: tonalTitle,
-        blocks,
-      });
-      if ("error" in pushResult) {
-        throw new Error(pushResult.error);
-      }
-      const { id, pushDivergence } = pushResult;
-      const now = Date.now();
-      const planId = await ctx.runMutation(internal.workoutPlans.create, {
-        userId,
-        tonalWorkoutId: id,
-        source: WORKOUT_SOURCE,
-        title,
-        blocks,
-        status: "pushed",
-        createdAt: now,
-        pushedAt: now,
-      });
-      await ctx.runMutation(internal.tonal.cache.setCacheEntry, {
-        userId,
-        dataType: "customWorkouts",
-        data: null,
-        fetchedAt: 0,
-        expiresAt: 0,
-      });
 
-      return {
-        success: true,
-        workoutId: id,
-        title,
-        setCount: sets.length,
-        planId,
-        pushDivergence,
-      };
-    } catch (e) {
-      const message = e instanceof Error ? e.message : String(e);
-      console.error("[createWorkout] Tonal push failed", e);
+    const pushResult = await ctx.runAction(internal.tonal.mutations.pushWorkoutToTonal, {
+      userId,
+      title,
+      blocks,
+    });
+
+    if ("error" in pushResult) {
+      // Push returned a structured failure (e.g. Tonal 500). Record the plan as
+      // failed and surface the reason to the caller — no exception needed.
+      const message = pushResult.error;
+      console.error("[createWorkout] Tonal push failed", message);
       void ctx.runAction(internal.discord.notifyError, {
         source: "createWorkout",
         message: `Workout push failed for "${title}": ${message}`,
@@ -342,6 +313,35 @@ export const createWorkout = internalAction({
       });
       return { success: false, error: message, planId };
     }
+
+    const { id, pushDivergence } = pushResult;
+    const now = Date.now();
+    const planId = await ctx.runMutation(internal.workoutPlans.create, {
+      userId,
+      tonalWorkoutId: id,
+      source: WORKOUT_SOURCE,
+      title,
+      blocks,
+      status: "pushed",
+      createdAt: now,
+      pushedAt: now,
+    });
+    await ctx.runMutation(internal.tonal.cache.setCacheEntry, {
+      userId,
+      dataType: "customWorkouts",
+      data: null,
+      fetchedAt: 0,
+      expiresAt: 0,
+    });
+
+    return {
+      success: true,
+      workoutId: id,
+      title,
+      setCount: sets.length,
+      planId,
+      pushDivergence,
+    };
   },
 });
 

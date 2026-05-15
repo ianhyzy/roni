@@ -8,7 +8,6 @@ import { action, internalAction } from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { ActionCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
-import { TonalApiError } from "./tonal/client";
 import type { Activity, Movement, SetActivity, WorkoutActivityDetail } from "./tonal/types";
 import { generatePerformanceSummary } from "./coach/prDetection";
 
@@ -125,13 +124,6 @@ export type PerMovementHistoryEntry = {
   sessions: MovementSessionSnapshot[];
 };
 
-function isTonalAuthError(error: unknown): boolean {
-  return (
-    (error instanceof TonalApiError && error.status === 401) ||
-    (error instanceof Error && error.message.includes("session expired"))
-  );
-}
-
 async function fetchWorkoutHistoryOrEmpty(
   ctx: ActionCtx,
   userId: Id<"users">,
@@ -142,8 +134,10 @@ async function fetchWorkoutHistoryOrEmpty(
       userId,
       limit: maxActivities,
     });
-  } catch (error) {
-    if (isTonalAuthError(error)) throw error;
+  } catch {
+    // fetchWorkoutHistory handles session-expired internally (returns []).
+    // Any remaining error here is unexpected; return empty so callers degrade
+    // gracefully rather than aborting progressive-overload computations.
     return [];
   }
 }
@@ -178,7 +172,6 @@ export const getPerMovementHistory = internalAction({
           activityId,
         });
       } catch (error) {
-        if (isTonalAuthError(error)) throw error;
         console.error(
           `[progressiveOverload] Failed to fetch detail for activity ${activityId}`,
           error,

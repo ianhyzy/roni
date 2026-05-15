@@ -245,22 +245,25 @@ describe("getPerMovementHistory Tonal API resilience", () => {
     expect(result).toEqual([]);
   });
 
-  it("rethrows session-expired errors so reconnect prompts are not masked", async () => {
+  it("returns empty array when session is expired (token already marked in DB)", async () => {
+    // fetchWorkoutHistory now catches session-expired and returns []. This means
+    // getPerMovementHistory should also return [] gracefully — the reconnect modal
+    // is triggered by the tonalTokenExpired DB field, not by thrown errors.
     const ctx = {
       runAction: vi.fn().mockRejectedValue(new Error("Tonal session expired — please reconnect")),
-      runQuery: vi.fn(),
+      runQuery: vi.fn().mockResolvedValue([]),
     } as unknown as ActionCtx;
 
-    await expect(
-      getPerMovementHistoryHandler(ctx, {
-        userId: "test-user-123" as Id<"users">,
-        maxActivities: 20,
-      }),
-    ).rejects.toThrow("session expired");
-    expect(ctx.runQuery).not.toHaveBeenCalled();
+    const result = await getPerMovementHistoryHandler(ctx, {
+      userId: "test-user-123" as Id<"users">,
+      maxActivities: 20,
+    });
+    expect(result).toEqual([]);
   });
 
-  it("rethrows session-expired errors from detail fetches", async () => {
+  it("skips activities whose detail fetch fails (including session-expired mid-run)", async () => {
+    // When fetchWorkoutDetail throws for one activity, we skip it and continue.
+    // This prevents a single failing detail from aborting the entire computation.
     const ctx = {
       runAction: vi
         .fn()
@@ -269,12 +272,12 @@ describe("getPerMovementHistory Tonal API resilience", () => {
       runQuery: vi.fn().mockResolvedValue([]),
     } as unknown as ActionCtx;
 
-    await expect(
-      getPerMovementHistoryHandler(ctx, {
-        userId: "test-user-123" as Id<"users">,
-        maxActivities: 20,
-      }),
-    ).rejects.toThrow("session expired");
+    const result = await getPerMovementHistoryHandler(ctx, {
+      userId: "test-user-123" as Id<"users">,
+      maxActivities: 20,
+    });
+    // Activity was skipped due to the error; result is empty but no throw.
+    expect(result).toEqual([]);
     expect(ctx.runAction).toHaveBeenCalledTimes(2);
   });
 });
