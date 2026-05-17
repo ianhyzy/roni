@@ -50,6 +50,10 @@ export function isQuotaError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   const text = gatherErrorText(error);
   if (isInputTokenCountQuota(text)) return true;
+  // Free-tier rate-limit metrics (generate_content_free_tier_requests,
+  // generate_content_free_tier_input_token_count, etc.) are excluded from
+  // isInputTokenCountQuota above but must still be treated as quota errors.
+  if (text.includes("free_tier")) return true;
   if (text.includes("you exceeded your current quota")) return true;
   if (text.includes("resource_exhausted") && text.includes("quota")) return true;
   if (text.includes("insufficient_quota")) return true;
@@ -69,8 +73,15 @@ export function isContextLimitError(error: unknown): boolean {
 // Require both the metric name AND an exceed/quota signal — a hypothetical
 // malformed-prompt error that mentions `input_token_count` shouldn't be
 // reclassified as a transient quota error and silently swallow Discord pages.
+//
+// "free_tier" in the metric name means this is a cumulative rate-limit on
+// free-tier token usage (e.g. generate_content_free_tier_input_token_count),
+// NOT a per-request context-window overflow. Exclude it here so callers
+// like isContextLimitError don't surface the wrong user message. isQuotaError
+// catches free-tier errors explicitly via the "free_tier" check.
 function isInputTokenCountQuota(text: string): boolean {
   if (!text.includes("input_token_count")) return false;
+  if (text.includes("free_tier")) return false;
   return (
     text.includes("quota") ||
     text.includes("exceed") || // matches exceed / exceeds / exceeded

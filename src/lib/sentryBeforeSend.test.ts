@@ -72,6 +72,14 @@ describe("shouldDropSentryEvent", () => {
     expect(shouldDropSentryEvent(eventWithValue(msg), hintWithError(msg))).toBe(true);
   });
 
+  it("drops Gemini free-tier input_token_count quota errors (generate_content_free_tier_input_token_count)", () => {
+    // Regression: this metric variant shares the generate_content_free_tier prefix
+    // but was not previously covered by the more specific _requests filter.
+    const msg =
+      "Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_input_token_count, limit: 250000, model: gemini-2.5-flash-lite";
+    expect(shouldDropSentryEvent(eventWithValue(msg), hintWithError(msg))).toBe(true);
+  });
+
   it("drops Gemini prepayment-credits-depleted billing errors", () => {
     const payload =
       "Your prepayment credits are depleted. Please go to AI Studio at https://ai.studio/projects to manage your project and billing.";
@@ -89,6 +97,16 @@ describe("shouldDropSentryEvent", () => {
     // "provider_overload", the client-side stream processor re-throws that
     // code verbatim. Suppress it the same way as the raw message form.
     const payload = "provider_overload";
+    expect(shouldDropSentryEvent(eventWithValue(payload), hintWithError(payload))).toBe(true);
+  });
+
+  it("drops rate_limit sanitized finalize codes re-thrown by the client stream consumer", () => {
+    const payload = "rate_limit";
+    expect(shouldDropSentryEvent(eventWithValue(payload), hintWithError(payload))).toBe(true);
+  });
+
+  it("drops context_limit sanitized finalize codes re-thrown by the client stream consumer", () => {
+    const payload = "context_limit";
     expect(shouldDropSentryEvent(eventWithValue(payload), hintWithError(payload))).toBe(true);
   });
 

@@ -73,6 +73,26 @@ describe("isQuotaError", () => {
 
     expect(isQuotaError(error)).toBe(true);
   });
+
+  it("returns true for free-tier input_token_count metric error (inner message only)", () => {
+    // Covers the case where only the inner Gemini error body reaches the
+    // classifier without the outer "You exceeded your current quota" wrapper.
+    const error = new Error(
+      "Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_input_token_count, " +
+        "limit: 250000, model: gemini-2.5-flash-lite",
+    );
+
+    expect(isQuotaError(error)).toBe(true);
+  });
+
+  it("returns true for free-tier requests metric error (inner message only)", () => {
+    const error = new Error(
+      "Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, " +
+        "limit: 20, model: gemini-3-flash",
+    );
+
+    expect(isQuotaError(error)).toBe(true);
+  });
 });
 
 describe("isContextLimitError", () => {
@@ -107,6 +127,18 @@ describe("isContextLimitError", () => {
     // requirement — a malformed-prompt error mentioning the field name
     // shouldn't be reclassified as a transient quota error.
     const error = new Error("validation failed for field input_token_count");
+
+    expect(isContextLimitError(error)).toBe(false);
+  });
+
+  it("returns false for free-tier rate-limit errors containing input_token_count", () => {
+    // generate_content_free_tier_input_token_count is a cumulative rate limit
+    // on free-tier token usage, NOT a per-request context-window overflow.
+    // It must NOT produce the "conversation too long" message.
+    const error = new Error(
+      "Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_input_token_count, " +
+        "limit: 250000, model: gemini-2.5-flash-lite",
+    );
 
     expect(isContextLimitError(error)).toBe(false);
   });
@@ -189,6 +221,19 @@ describe("finalize reason normalization for provider errors", () => {
         "limit: 20, model: gemini-3-flash\nPlease retry in 18.825585699s.",
     );
     expect(classifyTransientError(geminiQuotaError) ?? "error").toBe("rate_limit");
+  });
+
+  it("maps free-tier input_token_count quota errors to rate_limit, not context_limit", () => {
+    // Regression: generate_content_free_tier_input_token_count contains
+    // "input_token_count", but it is a cumulative rate limit on free-tier
+    // token usage — NOT a per-request context-window overflow.
+    const error = new Error(
+      "You exceeded your current quota, please check your plan and billing details. " +
+        "For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. " +
+        "Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_input_token_count, " +
+        "limit: 250000, model: gemini-2.5-flash-lite\nPlease retry in 39.85848842s.",
+    );
+    expect(classifyTransientError(error)).toBe("rate_limit");
   });
 
   it("maps non-classifiable errors to the 'error' fallback", () => {
