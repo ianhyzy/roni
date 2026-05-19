@@ -296,6 +296,31 @@ describe("resolveProviderApiKey", () => {
     expect(result).toBe(HOUSE_KEY);
   });
 
+  it("grandfathered user with invalid selectedProvider falls back to house key (not Unknown provider throw)", async () => {
+    // Regression: byok.ts:62 previously cast profile.selectedProvider to
+    // ProviderId without validation, causing getProviderConfig() to throw
+    // "Unknown provider: <value>" when the db held a stale/invalid string.
+    process.env.GOOGLE_GENERATIVE_AI_API_KEY = HOUSE_KEY;
+    const grandfatheredCreationTime = BYOK_REQUIRED_AFTER - 1;
+    const profile = makeProfile({
+      selectedProvider: "anthropic" as Doc<"userProfiles">["selectedProvider"],
+    });
+
+    const result = await resolveProviderApiKey(profile, grandfatheredCreationTime);
+
+    expect(result).toBe(HOUSE_KEY);
+  });
+
+  it("grandfathered user with null selectedProvider falls back to house key", async () => {
+    process.env.GOOGLE_GENERATIVE_AI_API_KEY = HOUSE_KEY;
+    const grandfatheredCreationTime = BYOK_REQUIRED_AFTER - 1;
+    const profile = makeProfile({ selectedProvider: undefined });
+
+    const result = await resolveProviderApiKey(profile, grandfatheredCreationTime);
+
+    expect(result).toBe(HOUSE_KEY);
+  });
+
   it("end-to-end: prepareGeminiKeyForStorage ciphertext resolves back to the original key", async () => {
     // Composite regression guard: the encrypt-in-save path and the
     // decrypt-in-resolve path must use the same encryption key format.

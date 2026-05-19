@@ -38,6 +38,13 @@ const SUPPRESSED_MESSAGE_SUBSTRINGS: readonly string[] = [
   "exceeded your current quota",
   "model is currently experiencing high demand",
   "RESOURCE_EXHAUSTED",
+  // Sanitized finalize code written by getFinalizeCodeForError when a transient
+  // provider error is stored in messages:finalizeMessage. The client's stream
+  // consumer re-throws the stored code verbatim. Mirrors sentryBeforeSend.ts.
+  "provider_overload",
+  // Gemini free-tier metric quota errors (different format from the billing
+  // quota message above). Mirrors sentryBeforeSend.ts.
+  "generate_content_free_tier_requests",
   // Gemini paid-tier billing exhaustion: surfaces as "Your prepayment credits
   // are depleted." for both BYOK and house-key users. classifyByokError maps
   // this to byok_quota_exceeded server-side, but the raw string can still

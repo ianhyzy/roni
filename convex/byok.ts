@@ -59,7 +59,10 @@ export async function resolveProviderKey(
 
   // Fallback: for grandfathered users, use house key if no BYOK key is configured
   if (!isBYOKRequired(userCreationTime)) {
-    const gfProvider = (profile?.selectedProvider as ProviderId) ?? "gemini";
+    const gfProvider: ProviderId =
+      profile?.selectedProvider && isValidProvider(profile.selectedProvider)
+        ? profile.selectedProvider
+        : "gemini";
     if (gfProvider !== "gemini") {
       const encrypted = profile?.[
         getProviderConfig(gfProvider).keyFieldName as keyof typeof profile

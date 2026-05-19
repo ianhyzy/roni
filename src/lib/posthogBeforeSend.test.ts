@@ -100,6 +100,45 @@ describe("shouldDropPosthogEvent", () => {
     expect(dropped).toBe(true);
   });
 
+  it("drops provider_overload sanitized finalize codes re-thrown by the client stream consumer", () => {
+    const event = makeEvent({
+      properties: { $exception_message: "provider_overload" },
+    });
+
+    const dropped = shouldDropPosthogEvent(event);
+
+    expect(dropped).toBe(true);
+  });
+
+  it("drops Gemini free-tier metric quota errors (generate_content_free_tier_requests)", () => {
+    const event = makeEvent({
+      properties: {
+        $exception_values: [
+          {
+            value:
+              "Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 20, model: gemini-3-flash",
+          },
+        ],
+      },
+    });
+
+    const dropped = shouldDropPosthogEvent(event);
+
+    expect(dropped).toBe(true);
+  });
+
+  it("drops provider_overload even when nested inside a wrapped exception value", () => {
+    const event = makeEvent({
+      properties: {
+        $exception_values: [{ value: "Error reading stream" }, { value: "provider_overload" }],
+      },
+    });
+
+    const dropped = shouldDropPosthogEvent(event);
+
+    expect(dropped).toBe(true);
+  });
+
   it("drops Firefox reader-mode injection errors", () => {
     const event = makeEvent({
       properties: {
