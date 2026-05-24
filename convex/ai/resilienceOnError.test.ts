@@ -209,4 +209,43 @@ describe("onError pre-emptive finalization", () => {
       }),
     );
   });
+
+  it("finalizes a streaming-status message when onError fires mid-stream", async () => {
+    // Reproduces the production regression: Gemini begins yielding text (message
+    // transitions "pending" → "streaming"), then returns an overload error event.
+    // finalizePendingMessages previously filtered to status === "pending" only,
+    // so the streaming message was skipped, and the agent library's finalizeMessage
+    // ran on it — hitting the raw error delta and throwing, which Convex's Sentry
+    // integration captured as TONALCOACH-1C.
+    const highDemandError = new Error(
+      "This model is currently experiencing high demand. Spikes in demand are usually temporary.",
+    );
+    const streamText = vi.fn(
+      async (options: { onError?: (args: { error: unknown }) => Promise<void> }) => {
+        await options.onError?.({ error: highDemandError });
+        return { text: Promise.reject(highDemandError) };
+      },
+    );
+    const agent = {
+      continueThread: vi.fn(async () => ({ thread: { streamText } })),
+    } as unknown as Agent;
+    const runQuery = vi.fn(async () => ({
+      page: [{ _id: "streaming-msg", status: "streaming" }],
+    }));
+    const runMutation = vi.fn(async () => undefined);
+
+    await streamWithRetry({ runQuery, runMutation, runAction: vi.fn() } as unknown as ActionCtx, {
+      primaryAgent: agent,
+      fallbackAgent: agent,
+      ...baseStreamWithRetryArgs("gemini"),
+    });
+
+    expect(runMutation).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        messageId: "streaming-msg",
+        result: { status: "failed", error: "provider_overload" },
+      }),
+    );
+  });
 });
