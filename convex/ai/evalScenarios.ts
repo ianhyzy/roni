@@ -264,6 +264,45 @@ export const EVAL_SCENARIOS: EvalScenario[] = [
       ],
     },
   },
+  {
+    name: "Approves plan without gatekeeping",
+    capability: "approval_and_push",
+    description:
+      "User explicitly approves the week plan; coach confirms the action without asking redundant questions or claiming inability",
+    snapshot: mockSnapshot({
+      savedPreferences: { split: "Push/Pull/Legs", days: 3, duration: 45 },
+      recentWorkouts: [
+        "[TODAY] 2026-04-07 | Pull Day | Back, Biceps | Deadlift avg 135lbs | 4200lbs vol",
+      ],
+    }),
+    userMessage: "Love it. Send this week's plan to my Tonal.",
+    rubric: {
+      mustNotContain: [
+        "can't push",
+        "unable to push",
+        "don't have access",
+        "cannot send",
+        "i am unable",
+      ],
+      patterns: [/push|send|tonal|approv|plan|workout|week/i],
+      maxLength: 600,
+    },
+  },
+  {
+    name: "Pushes specific day without refusal",
+    capability: "approval_and_push",
+    description:
+      "User asks to push a specific day's workout; coach acts on it rather than claiming it cannot do so",
+    snapshot: mockSnapshot({
+      savedPreferences: { split: "Upper/Lower", days: 4, duration: 45 },
+    }),
+    userMessage: "Go ahead and push Monday's workout to Tonal.",
+    rubric: {
+      mustNotContain: ["i cannot", "not able to", "unfortunately i", "i don't have the ability"],
+      patterns: [/monday|push|send|tonal|workout|approv|done|will/i],
+      maxLength: 500,
+    },
+  },
 ];
 
 export function scenariosByCapability(capability: Capability): EvalScenario[] {
