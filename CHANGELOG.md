@@ -2,6 +2,28 @@
 
 All notable changes to this project are documented here. This file is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commits on `main`. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.10.0](https://github.com/JeffOtano/roni/compare/v0.9.2...v0.10.0) (2026-05-24)
+
+
+### Features
+
+* add AI model tier policy ([#368](https://github.com/JeffOtano/roni/issues/368)) ([bfee634](https://github.com/JeffOtano/roni/commit/bfee634134628393d45aec44dd41514aa2ab819a))
+
+
+### Bug Fixes
+
+* **ai:** finalize streaming-status messages on stream errors ([#375](https://github.com/JeffOtano/roni/issues/375)) ([b604304](https://github.com/JeffOtano/roni/commit/b60430409ed9151cbddf6bebdf66aad27d7504cc))
+* classify ECONNRESET as transient and guard listMessages against unauthenticated calls ([#372](https://github.com/JeffOtano/roni/issues/372)) ([b1f86e2](https://github.com/JeffOtano/roni/commit/b1f86e2c24fb385932d02f253e3068993e79d71c))
+* misclassify free-tier input_token_count quota as context limit ([#378](https://github.com/JeffOtano/roni/issues/378)) ([4e6ec10](https://github.com/JeffOtano/roni/commit/4e6ec10e1579bf3186608414ac5fd22cc2eed7eb))
+* route gemini programming tier to flash ([#370](https://github.com/JeffOtano/roni/issues/370)) ([baa3b31](https://github.com/JeffOtano/roni/commit/baa3b318709834c46a80bd18db4c9960787b99b5))
+* **telemetry+deps:** sync PostHog suppression list with Sentry; fix protobufjs high-severity CVEs ([#390](https://github.com/JeffOtano/roni/issues/390)) ([09e4253](https://github.com/JeffOtano/roni/commit/09e425337396908d31ce17fa500beb429663c953))
+* treat Tonal session expiry as expected condition, not Sentry error (TONALCOACH-3Z) ([#377](https://github.com/JeffOtano/roni/issues/377)) ([8698870](https://github.com/JeffOtano/roni/commit/869887023d278826202d1c5d62e4f8e1f03dbe08))
+
+
+### Performance Improvements
+
+* **ai:** clarify coach tool routing descriptions ([#371](https://github.com/JeffOtano/roni/issues/371)) ([df81e7e](https://github.com/JeffOtano/roni/commit/df81e7ec440b5609f758e062de4db3c37fdc7231))
+
 ## [0.9.2](https://github.com/JeffOtano/roni/compare/v0.9.1...v0.9.2) (2026-05-11)
 
 
