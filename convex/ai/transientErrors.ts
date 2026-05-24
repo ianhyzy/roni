@@ -108,6 +108,8 @@ export function isTransientError(error: unknown): boolean {
 
     const lower = error.message.toLowerCase();
     if (lower.includes("timeout") || lower.includes("aborted")) return true;
+    // TCP-level connection resets from the provider are transient network errors.
+    if (lower.includes("econnreset") || lower.includes("econnrefused")) return true;
     if (TRANSIENT_MESSAGE_PATTERNS.some((p) => lower.includes(p))) return true;
 
     const status = (error as Error & { status?: number }).status;
@@ -152,6 +154,7 @@ export function classifyTransientError(error: unknown): TransientErrorKind | nul
     if (error.name === "TimeoutError" || error.name === "AbortError") return "timeout";
     const lower = error.message.toLowerCase();
     if (lower.includes("timeout") || lower.includes("aborted")) return "timeout";
+    if (lower.includes("econnreset") || lower.includes("econnrefused")) return "network";
     if (OVERLOAD_MESSAGE_PATTERNS.some((p) => lower.includes(p))) return "provider_overload";
     if (
       lower.includes("rate limit") ||

@@ -5,7 +5,9 @@ import {
   classifyTransientError,
   isContextLimitError,
   isQuotaError,
+  isTransientError,
 } from "./transientErrors";
+import { getFinalizeCodeForError } from "./resilience";
 
 function apiCallError(overrides: {
   statusCode?: number;
@@ -251,5 +253,35 @@ describe("finalize reason normalization for provider errors", () => {
       responseBody: "input_token_count exceeds limit quota",
     });
     expect(classifyTransientError(contextError) ?? "error").toBe("context_limit");
+  });
+});
+
+describe("ECONNRESET / ECONNREFUSED transient classification", () => {
+  it("isTransientError returns true for ECONNRESET errors", () => {
+    const error = new Error("Cannot connect to API: read ECONNRESET");
+    expect(isTransientError(error)).toBe(true);
+  });
+
+  it("isTransientError returns true for ECONNREFUSED errors", () => {
+    const error = new Error("connect ECONNREFUSED 127.0.0.1:443");
+    expect(isTransientError(error)).toBe(true);
+  });
+
+  it("classifyTransientError maps ECONNRESET to network", () => {
+    const error = new Error("Cannot connect to API: read ECONNRESET");
+    expect(classifyTransientError(error)).toBe("network");
+  });
+
+  it("classifyTransientError maps ECONNREFUSED to network", () => {
+    const error = new Error("connect ECONNREFUSED 127.0.0.1:443");
+    expect(classifyTransientError(error)).toBe("network");
+  });
+
+  it("getFinalizeCodeForError returns network for ECONNRESET (not raw Error name)", () => {
+    // Without this fix, getFinalizeCodeForError returned "Error" (the error's .name)
+    // because ECONNRESET was not classified as transient. With the fix it returns "network"
+    // so the pending message is finalized with a sanitized code.
+    const error = new Error("Cannot connect to API: read ECONNRESET");
+    expect(getFinalizeCodeForError(error)).toBe("network");
   });
 });

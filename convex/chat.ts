@@ -126,7 +126,12 @@ export const listMessages = query({
   },
   handler: async (ctx, args) => {
     const userId = await getEffectiveUserId(ctx);
-    if (!userId) throw new Error("Not authenticated");
+    // Return an empty page rather than throwing when auth is not yet established.
+    // The subscription re-evaluates once the Convex auth token arrives, so the UI
+    // never gets stuck — it briefly shows "no messages" instead of an error.
+    if (!userId) {
+      return { page: [], isDone: true, continueCursor: "", streams: undefined };
+    }
     await assertThreadOwnership(ctx, args.threadId, userId);
 
     const paginated = await listUIMessages(ctx, components.agent, {

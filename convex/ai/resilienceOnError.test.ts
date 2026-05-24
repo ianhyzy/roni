@@ -210,6 +210,41 @@ describe("onError pre-emptive finalization", () => {
     );
   });
 
+  it("finalizes with network code for ECONNRESET stream errors", async () => {
+    // ECONNRESET is a TCP-level connection reset from the provider. Before the fix,
+    // isTransientError returned false for ECONNRESET, so the error was terminal and
+    // the finalize code was "Error" (the error's .name). After the fix, it is
+    // classified as transient/network so the finalize code is "network".
+    const econnresetError = new Error("Cannot connect to API: read ECONNRESET");
+    const streamText = vi.fn(
+      async (options: { onError?: (args: { error: unknown }) => Promise<void> }) => {
+        await options.onError?.({ error: econnresetError });
+        return { text: Promise.reject(econnresetError) };
+      },
+    );
+    const agent = {
+      continueThread: vi.fn(async () => ({ thread: { streamText } })),
+    } as unknown as Agent;
+    const runQuery = vi.fn(async () => ({
+      page: [{ _id: "pending-econnreset", status: "pending" }],
+    }));
+    const runMutation = vi.fn(async () => undefined);
+
+    await streamWithRetry({ runQuery, runMutation, runAction: vi.fn() } as unknown as ActionCtx, {
+      primaryAgent: agent,
+      fallbackAgent: agent,
+      ...baseStreamWithRetryArgs("gemini"),
+    });
+
+    expect(runMutation).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        messageId: "pending-econnreset",
+        result: { status: "failed", error: "network" },
+      }),
+    );
+  });
+
   it("finalizes a streaming-status message when onError fires mid-stream", async () => {
     // Reproduces the production regression: Gemini begins yielding text (message
     // transitions "pending" → "streaming"), then returns an overload error event.
