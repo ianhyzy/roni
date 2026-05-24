@@ -10,6 +10,7 @@ import {
   type PerMovementHistoryEntry,
 } from "./progressiveOverload";
 import schema from "./schema";
+import { TonalSessionExpiredError } from "./tonal/tokenRetry";
 import type { WorkoutActivityDetail } from "./tonal/types";
 
 const modules = import.meta.glob("./**/*.*s");
@@ -246,9 +247,11 @@ describe("getPerMovementHistory Tonal API resilience", () => {
   });
 
   it("rethrows session-expired errors so reconnect prompts are not masked", async () => {
+    // fetchWorkoutHistory swallows TonalSessionExpiredError and returns [].
+    // fetchWorkoutHistoryOrEmpty detects expiry by checking profile.tonalTokenExpiresAt === 0.
     const ctx = {
-      runAction: vi.fn().mockRejectedValue(new Error("Tonal session expired — please reconnect")),
-      runQuery: vi.fn(),
+      runAction: vi.fn().mockResolvedValue([]),
+      runQuery: vi.fn().mockResolvedValue({ tonalTokenExpiresAt: 0 }),
     } as unknown as ActionCtx;
 
     await expect(
@@ -256,8 +259,7 @@ describe("getPerMovementHistory Tonal API resilience", () => {
         userId: "test-user-123" as Id<"users">,
         maxActivities: 20,
       }),
-    ).rejects.toThrow("session expired");
-    expect(ctx.runQuery).not.toHaveBeenCalled();
+    ).rejects.toBeInstanceOf(TonalSessionExpiredError);
   });
 
   it("rethrows session-expired errors from detail fetches", async () => {
@@ -265,7 +267,7 @@ describe("getPerMovementHistory Tonal API resilience", () => {
       runAction: vi
         .fn()
         .mockResolvedValueOnce([{ activityId: "activity-1", activityTime: "2026-03-10T10:00:00Z" }])
-        .mockRejectedValueOnce(new Error("Tonal session expired — please reconnect")),
+        .mockRejectedValueOnce(new TonalSessionExpiredError()),
       runQuery: vi.fn().mockResolvedValue([]),
     } as unknown as ActionCtx;
 
@@ -274,7 +276,7 @@ describe("getPerMovementHistory Tonal API resilience", () => {
         userId: "test-user-123" as Id<"users">,
         maxActivities: 20,
       }),
-    ).rejects.toThrow("session expired");
+    ).rejects.toBeInstanceOf(TonalSessionExpiredError);
     expect(ctx.runAction).toHaveBeenCalledTimes(2);
   });
 });

@@ -76,7 +76,7 @@ export const checkActivation = internalAction({
     let activities: Activity[];
     try {
       activities = (await ctx.runAction(
-        internal.tonal.mutations.fetchWorkoutHistoryForEligibility,
+        internal.tonal.workoutHistoryProxy.fetchWorkoutHistoryForEligibility,
         { userId },
       )) as Activity[];
     } catch (error) {

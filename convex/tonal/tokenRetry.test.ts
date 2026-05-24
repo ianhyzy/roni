@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { TonalApiError } from "./client";
+import { TonalSessionExpiredError } from "./tokenRetry";
 
 // ---------------------------------------------------------------------------
 // TonalApiError classification
@@ -125,6 +126,46 @@ describe("retry decision logic", () => {
     expect(() => simulateCall()).toThrow(TonalApiError);
     expect(() => simulateCall()).toThrow(TonalApiError);
     expect(callCount).toBe(2);
-    // In the real code, this marks the token as expired
+    // In the real code, this marks the token as expired and throws TonalSessionExpiredError
+  });
+});
+
+// ---------------------------------------------------------------------------
+// TonalSessionExpiredError
+// ---------------------------------------------------------------------------
+
+describe("TonalSessionExpiredError", () => {
+  it("is an instance of Error", () => {
+    const err = new TonalSessionExpiredError();
+
+    expect(err).toBeInstanceOf(Error);
+    expect(err).toBeInstanceOf(TonalSessionExpiredError);
+  });
+
+  it("carries the reconnect message", () => {
+    const err = new TonalSessionExpiredError();
+
+    expect(err.message).toContain("please reconnect");
+    expect(err.message).toContain("/connect-tonal");
+  });
+
+  it("has name set to TonalSessionExpiredError", () => {
+    const err = new TonalSessionExpiredError();
+
+    expect(err.name).toBe("TonalSessionExpiredError");
+  });
+
+  it("is distinguishable from a plain Error with the same message", () => {
+    const plain = new Error("Tonal session expired — please reconnect at /connect-tonal");
+    const typed = new TonalSessionExpiredError();
+
+    expect(typed).toBeInstanceOf(TonalSessionExpiredError);
+    expect(plain).not.toBeInstanceOf(TonalSessionExpiredError);
+  });
+
+  it("is distinguishable from TonalApiError", () => {
+    const apiErr = new TonalApiError(401, "Unauthorized");
+
+    expect(apiErr).not.toBeInstanceOf(TonalSessionExpiredError);
   });
 });

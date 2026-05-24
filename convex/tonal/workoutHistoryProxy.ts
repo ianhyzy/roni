@@ -2,6 +2,7 @@
  * Workout history fetch actions.
  * - fetchWorkoutHistory: recent 200 (for incremental sync)
  * - fetchWorkoutHistoryPage: single page at offset (for backfill)
+ * - fetchWorkoutHistoryForEligibility: last 100 (for activation checks)
  */
 
 import { v } from "convex/values";
@@ -9,9 +10,10 @@ import type { ActionCtx } from "../_generated/server";
 import { internalAction } from "../_generated/server";
 import type { Id } from "../_generated/dataModel";
 import { fetchRecentWorkoutActivities, fetchWorkoutActivitiesPage, tonalFetch } from "./client";
+import { retryOn5xx } from "./mutations";
 import { CACHE_TTLS } from "./cache";
 import { cachedFetch, fetchWorkoutMetaBatch, toActivity } from "./proxy";
-import { withTokenRetry } from "./tokenRetry";
+import { TonalSessionExpiredError, withTokenRetry } from "./tokenRetry";
 import type { Activity, WorkoutActivityDetail } from "./types";
 import type { WorkoutMeta } from "./workoutMeta";
 
@@ -113,31 +115,38 @@ async function enrichWorkoutActivities(
 /** Fetch recent workout history (newest 200). Used by incremental sync. */
 export const fetchWorkoutHistory = internalAction({
   args: { userId: v.id("users"), limit: v.optional(v.number()) },
-  handler: async (ctx, { userId, limit }): Promise<Activity[]> =>
-    withTokenRetry(ctx, userId, async (token, tonalUserId) => {
-      const activities = await cachedFetch<Activity[]>(ctx, {
-        userId,
-        dataType: "workoutHistory_v3",
-        ttl: CACHE_TTLS.workoutHistory,
-        fetcher: async () => {
-          const items = await fetchRecentWorkoutActivities<WorkoutActivityDetail>(
-            token,
-            tonalUserId,
-            WORKOUT_HISTORY_PAGE_LIMIT,
-          );
-          return enrichWorkoutActivities(
-            ctx,
-            userId,
-            token,
-            tonalUserId,
-            items,
-            0,
-            WORKOUT_HISTORY_PAGE_LIMIT,
-          );
-        },
+  handler: async (ctx, { userId, limit }): Promise<Activity[]> => {
+    try {
+      const activities = await withTokenRetry(ctx, userId, async (token, tonalUserId) => {
+        const fetched = await cachedFetch<Activity[]>(ctx, {
+          userId,
+          dataType: "workoutHistory_v3",
+          ttl: CACHE_TTLS.workoutHistory,
+          fetcher: async () => {
+            const items = await fetchRecentWorkoutActivities<WorkoutActivityDetail>(
+              token,
+              tonalUserId,
+              WORKOUT_HISTORY_PAGE_LIMIT,
+            );
+            return enrichWorkoutActivities(
+              ctx,
+              userId,
+              token,
+              tonalUserId,
+              items,
+              0,
+              WORKOUT_HISTORY_PAGE_LIMIT,
+            );
+          },
+        });
+        return limit != null ? fetched.slice(0, limit) : fetched;
       });
-      return limit != null ? activities.slice(0, limit) : activities;
-    }),
+      return activities;
+    } catch (e) {
+      if (e instanceof TonalSessionExpiredError) return [];
+      throw e;
+    }
+  },
 });
 
 /** Fetch one page of workout history at the given offset. Used by backfill to
@@ -149,7 +158,11 @@ interface PageResult {
 }
 
 /** Fetch one page of workout history at the given offset. Cached by userId+offset
- *  so backfill batching (20 items/invocation from a 200-item page) doesn't re-fetch. */
+ *  so backfill batching (20 items/invocation from a 200-item page) doesn't re-fetch.
+ *
+ *  Unlike fetchWorkoutHistory, session expiry is NOT swallowed here: backfill runs
+ *  once at connect time and must fail loudly rather than break the loop with pgTotal=0
+ *  and silently mark syncStatus "complete" with no data. */
 export const fetchWorkoutHistoryPage = internalAction({
   args: { userId: v.id("users"), offset: v.number() },
   handler: async (ctx, { userId, offset }): Promise<PageResult> =>
@@ -178,4 +191,27 @@ export const fetchWorkoutHistoryPage = internalAction({
         },
       }),
     ),
+});
+
+/** Activities for activation eligibility check (separate cache key from fetchWorkoutHistory). */
+export const fetchWorkoutHistoryForEligibility = internalAction({
+  args: { userId: v.id("users") },
+  handler: async (ctx, { userId }): Promise<Activity[]> => {
+    try {
+      return await withTokenRetry(ctx, userId, (token, tonalUserId) =>
+        cachedFetch<Activity[]>(ctx, {
+          userId,
+          dataType: "workoutHistoryEligibility",
+          ttl: 60 * 5,
+          fetcher: () =>
+            retryOn5xx(() =>
+              tonalFetch<Activity[]>(token, `/v6/users/${tonalUserId}/activities?limit=100`),
+            ),
+        }),
+      );
+    } catch (e) {
+      if (e instanceof TonalSessionExpiredError) return [];
+      throw e;
+    }
+  },
 });

@@ -8,7 +8,7 @@ import { TonalApiError, tonalFetch } from "./client";
 import { CACHE_TTLS } from "./cache";
 import { isCacheValueWithinLimit, isConvexSizeError } from "./proxyCacheLimits";
 import { getCachedFetchMemo, getTokenMemo, type TokenEntry } from "./proxyMemo";
-import { withTokenRetry } from "./tokenRetry";
+import { TonalSessionExpiredError, withTokenRetry } from "./tokenRetry";
 import { projectWorkoutDetail } from "./workoutDetailProjection";
 import {
   DEFAULT_TARGET_AREA,
@@ -316,7 +316,7 @@ export const fetchWorkoutDetail = internalAction({
       return projectWorkoutDetail(result);
     } catch (error) {
       // Re-throw auth errors so callers can prompt reconnect.
-      if (error instanceof Error && error.message.includes("session expired")) throw error;
+      if (error instanceof TonalSessionExpiredError) throw error;
       if (error instanceof TonalApiError && error.status === 401) throw error;
       // Network / server errors (e.g. tunnel failures): return null so callers
       // can skip this activity rather than aborting the entire operation.

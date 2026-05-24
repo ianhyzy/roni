@@ -6,8 +6,7 @@ import type { Id } from "../_generated/dataModel";
 import { TonalApiError, tonalFetch } from "./client";
 import { type BlockInput, expandBlocksToSets } from "./transforms";
 import { validateWorkoutBlocks } from "./validation";
-import type { Activity, WorkoutEstimate, WorkoutSetInput } from "./types";
-import { cachedFetch } from "./proxy";
+import type { WorkoutEstimate, WorkoutSetInput } from "./types";
 import { WORKOUT_SOURCE } from "../workoutPlans";
 import { withTokenRetry } from "./tokenRetry";
 import { blockInputValidator } from "../validators";
@@ -239,23 +238,6 @@ export const deleteAllCustomWorkouts = internalAction({
       return { deleted };
     });
   },
-});
-
-/** Activities for activation eligibility check (separate cache key). */
-export const fetchWorkoutHistoryForEligibility = internalAction({
-  args: { userId: v.id("users") },
-  handler: async (ctx, { userId }): Promise<Activity[]> =>
-    withTokenRetry(ctx, userId, (token, tonalUserId) =>
-      cachedFetch<Activity[]>(ctx, {
-        userId,
-        dataType: "workoutHistoryEligibility",
-        ttl: 60 * 5,
-        fetcher: () =>
-          retryOn5xx(() =>
-            tonalFetch<Activity[]>(token, `/v6/users/${tonalUserId}/activities?limit=100`),
-          ),
-      }),
-    ),
 });
 
 export function formatTonalTitle(title: string, now?: Date): string {

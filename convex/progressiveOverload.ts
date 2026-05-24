@@ -9,6 +9,7 @@ import { internal } from "./_generated/api";
 import type { ActionCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { TonalApiError } from "./tonal/client";
+import { TonalSessionExpiredError } from "./tonal/tokenRetry";
 import type { Activity, Movement, SetActivity, WorkoutActivityDetail } from "./tonal/types";
 import { generatePerformanceSummary } from "./coach/prDetection";
 
@@ -127,8 +128,8 @@ export type PerMovementHistoryEntry = {
 
 function isTonalAuthError(error: unknown): boolean {
   return (
-    (error instanceof TonalApiError && error.status === 401) ||
-    (error instanceof Error && error.message.includes("session expired"))
+    error instanceof TonalSessionExpiredError ||
+    (error instanceof TonalApiError && error.status === 401)
   );
 }
 
@@ -137,8 +138,9 @@ async function fetchWorkoutHistoryOrEmpty(
   userId: Id<"users">,
   maxActivities: number,
 ): Promise<Activity[]> {
+  let activities: Activity[];
   try {
-    return await ctx.runAction(internal.tonal.workoutHistoryProxy.fetchWorkoutHistory, {
+    activities = await ctx.runAction(internal.tonal.workoutHistoryProxy.fetchWorkoutHistory, {
       userId,
       limit: maxActivities,
     });
@@ -146,6 +148,13 @@ async function fetchWorkoutHistoryOrEmpty(
     if (isTonalAuthError(error)) throw error;
     return [];
   }
+  // fetchWorkoutHistory returns [] on session expiry (to avoid Sentry noise from
+  // background-job callers). For user-facing paths, detect expiry via profile state.
+  if (activities.length === 0) {
+    const profile = await ctx.runQuery(internal.tonal.cache.getUserProfile, { userId });
+    if (profile?.tonalTokenExpiresAt === 0) throw new TonalSessionExpiredError();
+  }
+  return activities;
 }
 
 // ---------------------------------------------------------------------------

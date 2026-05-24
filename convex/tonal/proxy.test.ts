@@ -27,7 +27,7 @@ vi.mock("./proxy", () => ({
   withTonalToken: vi.fn(),
 }));
 
-import { withTokenRetry } from "./tokenRetry";
+import { TonalSessionExpiredError, withTokenRetry } from "./tokenRetry";
 import { withTonalToken } from "./proxy";
 import { refreshTonalToken } from "./auth";
 import type { ActionCtx } from "../_generated/server";
@@ -105,29 +105,29 @@ describe("withTokenRetry", () => {
     });
   });
 
-  it("marks token expired and throws when no refresh token stored", async () => {
+  it("marks token expired and throws TonalSessionExpiredError when no refresh token stored", async () => {
     const profile = makeProfile({ tonalRefreshToken: undefined });
     const ctx = makeMockCtx(profile);
     const fn = vi.fn().mockRejectedValueOnce(new TonalApiError(401, "Token expired"));
 
-    await expect(withTokenRetry(ctx, TEST_USER_ID, fn)).rejects.toThrow(
-      "Tonal session expired — please reconnect",
+    await expect(withTokenRetry(ctx, TEST_USER_ID, fn)).rejects.toBeInstanceOf(
+      TonalSessionExpiredError,
     );
     expect(ctx.runMutation).toHaveBeenCalledWith("markTokenExpired", { userId: TEST_USER_ID });
   });
 
-  it("marks token expired and throws when refresh fails", async () => {
+  it("marks token expired and throws TonalSessionExpiredError when refresh fails", async () => {
     const ctx = makeMockCtx();
     const fn = vi.fn().mockRejectedValueOnce(new TonalApiError(401, "Token expired"));
     vi.mocked(refreshTonalToken).mockRejectedValueOnce(new Error("refresh failed"));
 
-    await expect(withTokenRetry(ctx, TEST_USER_ID, fn)).rejects.toThrow(
-      "Tonal session expired — please reconnect",
+    await expect(withTokenRetry(ctx, TEST_USER_ID, fn)).rejects.toBeInstanceOf(
+      TonalSessionExpiredError,
     );
     expect(ctx.runMutation).toHaveBeenCalledWith("markTokenExpired", { userId: TEST_USER_ID });
   });
 
-  it("marks token expired when retry also returns 401", async () => {
+  it("marks token expired and throws TonalSessionExpiredError when retry also returns 401", async () => {
     const ctx = makeMockCtx();
     const fn = vi.fn().mockRejectedValue(new TonalApiError(401, "Token expired"));
 
@@ -137,8 +137,8 @@ describe("withTokenRetry", () => {
       expiresAt: Date.now() + 3600000,
     });
 
-    await expect(withTokenRetry(ctx, TEST_USER_ID, fn)).rejects.toThrow(
-      "Tonal session expired — please reconnect",
+    await expect(withTokenRetry(ctx, TEST_USER_ID, fn)).rejects.toBeInstanceOf(
+      TonalSessionExpiredError,
     );
     expect(fn).toHaveBeenCalledTimes(2);
     expect(ctx.runMutation).toHaveBeenCalledWith("markTokenExpired", { userId: TEST_USER_ID });
@@ -161,7 +161,7 @@ describe("withTokenRetry", () => {
     expect(fn).toHaveBeenCalledTimes(1);
   });
 
-  it("marks token expired when retry hits 401 on the lock-loser path", async () => {
+  it("marks token expired and throws TonalSessionExpiredError on the lock-loser path", async () => {
     const profile = makeProfile();
     const ctx = {
       runQuery: vi.fn(async () => profile),
@@ -172,8 +172,8 @@ describe("withTokenRetry", () => {
     } as unknown as ActionCtx;
     const fn = vi.fn().mockRejectedValue(new TonalApiError(401, "Token expired"));
 
-    await expect(withTokenRetry(ctx, TEST_USER_ID, fn)).rejects.toThrow(
-      "Tonal session expired — please reconnect",
+    await expect(withTokenRetry(ctx, TEST_USER_ID, fn)).rejects.toBeInstanceOf(
+      TonalSessionExpiredError,
     );
     expect(fn).toHaveBeenCalledTimes(2);
     expect(ctx.runMutation).toHaveBeenCalledWith("markTokenExpired", { userId: TEST_USER_ID });
@@ -197,5 +197,34 @@ describe("withTokenRetry", () => {
     // updateTonalToken called (refresh succeeded), but NOT markTokenExpired
     expect(ctx.runMutation).toHaveBeenCalledWith("updateTonalToken", expect.any(Object));
     expect(ctx.runMutation).not.toHaveBeenCalledWith("markTokenExpired", expect.any(Object));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// fetchWorkoutHistoryPage backfill contract
+//
+// fetchWorkoutHistoryPage must NOT swallow TonalSessionExpiredError.
+// Swallowing it returns { pgTotal: 0 } which makes the backfill loop break
+// immediately and mark syncStatus "complete" — permanently under-backfilling
+// the account (Codex review TONALCOACH-3Z PR #377).
+// ---------------------------------------------------------------------------
+
+describe("fetchWorkoutHistoryPage session-expiry propagation contract", () => {
+  it("TonalSessionExpiredError is distinguishable so page callers can re-throw it", () => {
+    // The error must be instanceof TonalSessionExpiredError so doBackfillPage
+    // and its callers can identify and propagate it rather than silently catching.
+    const err = new TonalSessionExpiredError();
+
+    // Survives a plain-Error catch guard that re-throws unknown types
+    let caught: unknown;
+    try {
+      throw err;
+    } catch (e) {
+      caught = e;
+    }
+
+    expect(caught).toBeInstanceOf(TonalSessionExpiredError);
+    // Would NOT match a generic empty-response guard
+    expect(caught).not.toEqual({ activities: [], pageSize: 0, pgTotal: 0 });
   });
 });

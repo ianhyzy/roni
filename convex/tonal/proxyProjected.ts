@@ -15,7 +15,7 @@ import { internalAction } from "../_generated/server";
 import { TonalApiError, tonalFetch } from "./client";
 import { CACHE_TTLS } from "./cache";
 import { cachedFetch } from "./proxy";
-import { withTokenRetry } from "./tokenRetry";
+import { TonalSessionExpiredError, withTokenRetry } from "./tokenRetry";
 import { projectCustomWorkouts, projectCustomWorkoutsStrict } from "./customWorkoutsProjection";
 import {
   type ProjectedExternalActivity,
@@ -46,21 +46,26 @@ export async function fetchProjectedFormattedSummary(
 export const fetchStrengthHistory = internalAction({
   args: { userId: v.id("users") },
   handler: async (ctx, { userId }): Promise<StrengthScoreHistoryEntry[]> => {
-    const result = await withTokenRetry(ctx, userId, (token, tonalUserId) =>
-      cachedFetch<StrengthScoreHistoryEntry[]>(ctx, {
-        userId,
-        dataType: "strengthHistory",
-        ttl: CACHE_TTLS.strengthHistory,
-        fetcher: async () => {
-          const raw = await tonalFetch<unknown>(
-            token,
-            `/v6/users/${tonalUserId}/strength-scores/history?limit=200`,
-          );
-          return projectStrengthHistoryStrict(raw);
-        },
-      }),
-    );
-    return projectStrengthHistory(result);
+    try {
+      const result = await withTokenRetry(ctx, userId, (token, tonalUserId) =>
+        cachedFetch<StrengthScoreHistoryEntry[]>(ctx, {
+          userId,
+          dataType: "strengthHistory",
+          ttl: CACHE_TTLS.strengthHistory,
+          fetcher: async () => {
+            const raw = await tonalFetch<unknown>(
+              token,
+              `/v6/users/${tonalUserId}/strength-scores/history?limit=200`,
+            );
+            return projectStrengthHistoryStrict(raw);
+          },
+        }),
+      );
+      return projectStrengthHistory(result);
+    } catch (e) {
+      if (e instanceof TonalSessionExpiredError) return [];
+      throw e;
+    }
   },
 });
 
@@ -70,42 +75,52 @@ export const fetchFormattedSummary = internalAction({
     summaryId: v.string(),
   },
   handler: async (ctx, { userId, summaryId }): Promise<FormattedWorkoutSummary | null> => {
-    const result = await withTokenRetry(ctx, userId, (token, tonalUserId) =>
-      cachedFetch<FormattedWorkoutSummary | null>(ctx, {
-        userId,
-        dataType: `formattedSummary:${summaryId}`,
-        ttl: CACHE_TTLS.workoutHistory,
-        shouldCache: (summary) => summary !== null,
-        fetcher: async () => {
-          return await fetchProjectedFormattedSummary(() =>
-            tonalFetch<unknown>(
-              token,
-              `/v6/formatted/users/${tonalUserId}/workout-summaries/${summaryId}`,
-            ),
-          );
-        },
-      }),
-    );
-    if (result === null) return null;
-    return projectFormattedSummary(result);
+    try {
+      const result = await withTokenRetry(ctx, userId, (token, tonalUserId) =>
+        cachedFetch<FormattedWorkoutSummary | null>(ctx, {
+          userId,
+          dataType: `formattedSummary:${summaryId}`,
+          ttl: CACHE_TTLS.workoutHistory,
+          shouldCache: (summary) => summary !== null,
+          fetcher: async () => {
+            return await fetchProjectedFormattedSummary(() =>
+              tonalFetch<unknown>(
+                token,
+                `/v6/formatted/users/${tonalUserId}/workout-summaries/${summaryId}`,
+              ),
+            );
+          },
+        }),
+      );
+      if (result === null) return null;
+      return projectFormattedSummary(result);
+    } catch (e) {
+      if (e instanceof TonalSessionExpiredError) return null;
+      throw e;
+    }
   },
 });
 
 export const fetchCustomWorkouts = internalAction({
   args: { userId: v.id("users") },
   handler: async (ctx, { userId }): Promise<UserWorkout[]> => {
-    const result = await withTokenRetry(ctx, userId, (token) =>
-      cachedFetch<UserWorkout[]>(ctx, {
-        userId,
-        dataType: "customWorkouts",
-        ttl: CACHE_TTLS.customWorkouts,
-        fetcher: async () => {
-          const raw = await tonalFetch<unknown>(token, `/v6/user-workouts`);
-          return projectCustomWorkoutsStrict(raw);
-        },
-      }),
-    );
-    return projectCustomWorkouts(result);
+    try {
+      const result = await withTokenRetry(ctx, userId, (token) =>
+        cachedFetch<UserWorkout[]>(ctx, {
+          userId,
+          dataType: "customWorkouts",
+          ttl: CACHE_TTLS.customWorkouts,
+          fetcher: async () => {
+            const raw = await tonalFetch<unknown>(token, `/v6/user-workouts`);
+            return projectCustomWorkoutsStrict(raw);
+          },
+        }),
+      );
+      return projectCustomWorkouts(result);
+    } catch (e) {
+      if (e instanceof TonalSessionExpiredError) return [];
+      throw e;
+    }
   },
 });
 
@@ -115,20 +130,25 @@ export const fetchExternalActivities = internalAction({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, { userId, limit = 20 }): Promise<ProjectedExternalActivity[]> => {
-    const result = await withTokenRetry(ctx, userId, (token, tonalUserId) =>
-      cachedFetch<ProjectedExternalActivity[]>(ctx, {
-        userId,
-        dataType: `externalActivities:${limit}`,
-        ttl: CACHE_TTLS.workoutHistory,
-        fetcher: async () => {
-          const raw = await tonalFetch<unknown>(
-            token,
-            `/v6/users/${tonalUserId}/external-activities?limit=${limit}`,
-          );
-          return projectExternalActivitiesStrict(raw);
-        },
-      }),
-    );
-    return projectExternalActivities(result);
+    try {
+      const result = await withTokenRetry(ctx, userId, (token, tonalUserId) =>
+        cachedFetch<ProjectedExternalActivity[]>(ctx, {
+          userId,
+          dataType: `externalActivities:${limit}`,
+          ttl: CACHE_TTLS.workoutHistory,
+          fetcher: async () => {
+            const raw = await tonalFetch<unknown>(
+              token,
+              `/v6/users/${tonalUserId}/external-activities?limit=${limit}`,
+            );
+            return projectExternalActivitiesStrict(raw);
+          },
+        }),
+      );
+      return projectExternalActivities(result);
+    } catch (e) {
+      if (e instanceof TonalSessionExpiredError) return [];
+      throw e;
+    }
   },
 });

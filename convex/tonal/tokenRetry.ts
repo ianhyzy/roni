@@ -9,13 +9,22 @@ import { clearTokenMemo, primeTokenMemo } from "./proxyMemo";
 
 const SESSION_EXPIRED_MSG = "Tonal session expired — please reconnect at /connect-tonal";
 
+/** Thrown (and exported) so read-only actions can catch it and return empty results
+ *  instead of propagating to Sentry as an unhandled error. */
+export class TonalSessionExpiredError extends Error {
+  constructor() {
+    super(SESSION_EXPIRED_MSG);
+    this.name = "TonalSessionExpiredError";
+  }
+}
+
 function isTonal401(error: unknown): error is TonalApiError {
   return error instanceof TonalApiError && error.status === 401;
 }
 
 async function markExpiredAndThrow(ctx: ActionCtx, userId: Id<"users">): Promise<never> {
   await ctx.runMutation(internal.userProfiles.markTokenExpired, { userId });
-  throw new Error(SESSION_EXPIRED_MSG);
+  throw new TonalSessionExpiredError();
 }
 
 /** Decrypt the refresh token, call Auth0, and persist the new credentials. */
