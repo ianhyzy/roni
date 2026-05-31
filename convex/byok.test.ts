@@ -155,6 +155,8 @@ describe("validateGeminiKeyAgainstGoogle", () => {
 describe("prepareGeminiKeyForStorage", () => {
   const TEST_ENCRYPTION_KEY = "00".repeat(32);
   const VALID_KEY = "AIzaSyA1B2C3D4E5F6G7H8I9J0KlMnOpQrStUvW";
+  const VALID_AQ_KEY = "AQ" + "x".repeat(37);
+  const VALID_AQ_DOT_KEY = "AQ." + "x".repeat(36);
 
   it("returns ciphertext that does not contain the plaintext key", async () => {
     const { encrypted } = await prepareGeminiKeyForStorage(VALID_KEY, TEST_ENCRYPTION_KEY);
@@ -173,6 +175,22 @@ describe("prepareGeminiKeyForStorage", () => {
     const { encrypted } = await prepareGeminiKeyForStorage(withNewlines, TEST_ENCRYPTION_KEY);
     const decrypted = await decrypt(encrypted, TEST_ENCRYPTION_KEY);
     expect(decrypted).toBe(VALID_KEY);
+  });
+
+  it("accepts current AQ-prefixed Gemini keys", async () => {
+    const { encrypted } = await prepareGeminiKeyForStorage(VALID_AQ_KEY, TEST_ENCRYPTION_KEY);
+
+    const decrypted = await decrypt(encrypted, TEST_ENCRYPTION_KEY);
+
+    expect(decrypted).toBe(VALID_AQ_KEY);
+  });
+
+  it("accepts current AQ-dot-prefixed Gemini keys", async () => {
+    const { encrypted } = await prepareGeminiKeyForStorage(VALID_AQ_DOT_KEY, TEST_ENCRYPTION_KEY);
+
+    const decrypted = await decrypt(encrypted, TEST_ENCRYPTION_KEY);
+
+    expect(decrypted).toBe(VALID_AQ_DOT_KEY);
   });
 
   it("rejects a key that does not match the Gemini format", async () => {

@@ -284,12 +284,11 @@ export const PROVIDERS: Record<ProviderId, ProviderConfig> = {
       programming: "gemini-2.5-flash",
       summarize: "gemini-2.5-flash-lite",
     },
-    keyRegex: /^AIza[A-Za-z0-9_-]{35}$/,
-    keyFormatError:
-      "Key format looks wrong. Gemini keys start with 'AIza' and are 39 characters long.",
+    keyRegex: /^(?:AIza[A-Za-z0-9_-]{35}|AQ\.?[A-Za-z0-9_-]{20,})$/,
+    keyFormatError: "Key format looks wrong. Gemini keys start with 'AIza' or 'AQ'.",
     keySourceUrl: "https://aistudio.google.com/app/apikey",
     billingUrl: "https://aistudio.google.com/app/apikey",
-    keyPlaceholder: "AIza...",
+    keyPlaceholder: "AQ... or AIza...",
     keyFieldName: "geminiApiKeyEncrypted",
     keyTimestampFieldName: "geminiApiKeyAddedAt",
     createLanguageModel: (apiKey, model) => {

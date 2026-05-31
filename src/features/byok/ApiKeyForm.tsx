@@ -21,11 +21,10 @@ const PROVIDER_UI_CONFIG: Record<
 > = {
   gemini: {
     label: "Google Gemini",
-    keyRegex: /^AIza[A-Za-z0-9_-]{35}$/,
-    keyFormatError:
-      "Key format looks wrong. Gemini keys start with 'AIza' and are 39 characters long.",
+    keyRegex: /^(?:AIza[A-Za-z0-9_-]{35}|AQ\.?[A-Za-z0-9_-]{20,})$/,
+    keyFormatError: "Key format looks wrong. Gemini keys start with 'AIza' or 'AQ'.",
     keySourceUrl: "https://aistudio.google.com/app/apikey",
-    keyPlaceholder: "AIza...",
+    keyPlaceholder: "AQ... or AIza...",
   },
   claude: {
     label: "Anthropic Claude",

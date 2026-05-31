@@ -42,7 +42,7 @@ export async function validateGeminiKeyAgainstGoogle(
   return { valid: false, reason: "unknown" };
 }
 
-const GEMINI_KEY_FORMAT = /^AIza[A-Za-z0-9_-]{35}$/;
+const GEMINI_KEY_FORMAT = /^(?:AIza[A-Za-z0-9_-]{35}|AQ\.?[A-Za-z0-9_-]{20,})$/;
 
 export async function prepareGeminiKeyForStorage(
   apiKey: string,
@@ -50,9 +50,7 @@ export async function prepareGeminiKeyForStorage(
 ): Promise<{ encrypted: string; addedAt: number }> {
   const trimmed = apiKey.trim();
   if (!GEMINI_KEY_FORMAT.test(trimmed)) {
-    throw new Error(
-      "Invalid Gemini API key format. Keys start with 'AIza' and are 39 characters long.",
-    );
+    throw new Error("Invalid Gemini API key format. Gemini keys start with 'AIza' or 'AQ'.");
   }
   const encrypted = await encrypt(trimmed, encryptionKey);
   return { encrypted, addedAt: Date.now() };

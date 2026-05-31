@@ -47,6 +47,14 @@ describe("validateKeyFormat", () => {
     expect(validateKeyFormat("gemini", "AIzaSyA1234567890abcdefghijklmnopqrstuv")).toBe(true);
   });
 
+  it("accepts current AQ-prefixed Gemini keys", () => {
+    expect(validateKeyFormat("gemini", "AQ" + "x".repeat(37))).toBe(true);
+  });
+
+  it("accepts current AQ-dot-prefixed Gemini keys", () => {
+    expect(validateKeyFormat("gemini", "AQ." + "x".repeat(36))).toBe(true);
+  });
+
   it("rejects invalid Gemini key", () => {
     expect(validateKeyFormat("gemini", "sk-ant-bad")).toBe(false);
   });

@@ -4,6 +4,8 @@ import { describe, expect, it, vi } from "vitest";
 import { ApiKeyForm } from "./ApiKeyForm";
 
 const VALID_KEY = "AIza" + "x".repeat(35);
+const VALID_AQ_KEY = "AQ" + "x".repeat(37);
+const VALID_AQ_DOT_KEY = "AQ." + "x".repeat(36);
 
 describe("ApiKeyForm", () => {
   it("calls onSave with a valid key when the user submits", async () => {
@@ -34,6 +36,34 @@ describe("ApiKeyForm", () => {
 
     await waitFor(() => {
       expect(onSave).toHaveBeenCalledWith(VALID_KEY);
+    });
+  });
+
+  it("calls onSave with an AQ-prefixed Gemini key when the user submits", async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn().mockResolvedValue(undefined);
+
+    render(<ApiKeyForm provider="gemini" onSave={onSave} />);
+
+    await user.type(screen.getByLabelText(/api key/i), VALID_AQ_KEY);
+    await user.click(screen.getByRole("button", { name: /save key/i }));
+
+    await waitFor(() => {
+      expect(onSave).toHaveBeenCalledWith(VALID_AQ_KEY);
+    });
+  });
+
+  it("calls onSave with an AQ-dot-prefixed Gemini key when the user submits", async () => {
+    const user = userEvent.setup();
+    const onSave = vi.fn().mockResolvedValue(undefined);
+
+    render(<ApiKeyForm provider="gemini" onSave={onSave} />);
+
+    await user.type(screen.getByLabelText(/api key/i), VALID_AQ_DOT_KEY);
+    await user.click(screen.getByRole("button", { name: /save key/i }));
+
+    await waitFor(() => {
+      expect(onSave).toHaveBeenCalledWith(VALID_AQ_DOT_KEY);
     });
   });
 
