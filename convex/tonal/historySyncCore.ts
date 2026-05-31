@@ -26,6 +26,49 @@ const DETAIL_BATCH_SIZE = 5;
 const BATCH_DELAY_MS = 2000;
 const PROFILE_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
+// Max rows written per persistence mutation. A high-volume user's sync can
+// produce hundreds of new workouts and thousands of performance rows in one
+// pass; each performance insert also recomputes the personal-record aggregate.
+// Writing them all in a single mutation exceeds Convex's per-transaction
+// memory/operation limits and fails the whole refresh. Chunking keeps every
+// mutation within those limits. See historySyncCore.test.ts.
+const PERSIST_CHUNK_SIZE = 50;
+
+/** Split an array into fixed-size chunks. The final chunk may be smaller. */
+function chunk<T>(items: readonly T[], size: number): T[][] {
+  if (size <= 0) throw new Error("chunk size must be positive");
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
+}
+
+/**
+ * Persist synced workouts and performances in bounded mutation batches so a
+ * large incremental backlog never overruns a single transaction's limits.
+ * Empty inputs issue no writes.
+ */
+export async function persistSyncedActivities(
+  ctx: ActionCtx,
+  userId: Id<"users">,
+  payloads: { workouts: WorkoutPayload[]; performances: PerformancePayload[] },
+): Promise<void> {
+  const { workouts, performances } = payloads;
+  for (const workoutChunk of chunk(workouts, PERSIST_CHUNK_SIZE)) {
+    await ctx.runMutation(internal.tonal.historySyncMutations.persistCompletedWorkouts, {
+      userId,
+      workouts: workoutChunk,
+    });
+  }
+  for (const performanceChunk of chunk(performances, PERSIST_CHUNK_SIZE)) {
+    await ctx.runMutation(internal.tonal.historySyncMutations.persistExercisePerformance, {
+      userId,
+      performances: performanceChunk,
+    });
+  }
+}
+
 function activityToWorkoutPayload(activity: Activity): WorkoutPayload {
   const { activityId, activityTime, workoutPreview: p } = activity;
   const date = activityTime.slice(0, 10);
@@ -205,18 +248,7 @@ export async function syncActivitiesAndStrength(
 
   if (batch.length > 0) {
     const { workouts, performances } = await fetchAndBuildPayloads(ctx, userId, batch);
-    if (workouts.length > 0) {
-      await ctx.runMutation(internal.tonal.historySyncMutations.persistCompletedWorkouts, {
-        userId,
-        workouts,
-      });
-    }
-    if (performances.length > 0) {
-      await ctx.runMutation(internal.tonal.historySyncMutations.persistExercisePerformance, {
-        userId,
-        performances,
-      });
-    }
+    await persistSyncedActivities(ctx, userId, { workouts, performances });
   }
 
   return { synced: batch.length, remaining };
