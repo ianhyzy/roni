@@ -132,7 +132,7 @@ async function doCachedFetch<T>(opts: CachedFetchOptions<T>): Promise<T> {
   } catch (error) {
     // Never swallow auth errors -- the user must reconnect
     if (error instanceof TonalApiError && error.status === 401) throw error;
-    if (error instanceof Error && error.message.includes("session expired")) throw error;
+    if (error instanceof TonalSessionExpiredError) throw error;
 
     if (cached) {
       console.warn(`cachedFetch(${dataType}): refresh failed, serving stale data`, error);
