@@ -2,6 +2,8 @@
 
 This file provides guidance to AI coding agents (Claude Code, GitHub Copilot, Cursor, Windsurf, Codex, Gemini, etc.) when working with code in this repository. Follows the [agents.md](https://agents.md) open standard.
 
+> **Learning log:** `docs/learnings.md` records non-obvious bugs caught in PR review, distilled into preventive checks. Skim it before touching related code; add an entry after a review surfaces a real logic/edge-case issue.
+
 ## What This Project Is
 
 Roni is an AI coaching companion for Tonal fitness machines. Users connect their Tonal account, and the AI coach reads their training history, strength scores, and workout data to program custom weekly plans. The coach pushes approved workouts directly to Tonal.
@@ -260,6 +262,7 @@ When principles conflict, the higher number always wins.
 - Validate external input with Zod at the action boundary. Internal functions receive typed data.
 - The Tonal API integration uses `cachedFetch` pattern -- check cache, fetch if expired, update cache.
 - **Schema narrows that could reject existing rows must use widen → migrate → narrow.** Convex validates schema against existing data on `npx convex deploy` (Vercel runs this on every merge to main). A narrowing PR that ships before its data backfill migration runs will fail the deploy and lock prod until recovered. Pattern: PR 1 ships the migration code with the validator still wide; operator runs the migration; PR 2 ships the narrow. The `npm run convex:smoke` pre-push hook catches this against the dev deployment if dev has the same data shape.
+- **One-shot cleanup/watchdog timers must outlast the latest possible row creation, not just the start of the action that schedules them.** A long-running action (retry path: up to 3 × 180s attempts) can create the row it needs to clean up late in its life. Derive the delay from `action-cap + retry-budget + grace` (`STUCK_MESSAGE_WATCHDOG_DELAY_MS` in `convex/ai/stuckMessageWatchdog.ts`), or reschedule while a non-terminal row is still newer than the grace window — otherwise the sweep skips a late row as "too new" and strands it forever. Lock the invariant with a test (e.g. `WATCHDOG_DELAY - GRACE > CONVEX_ACTION_MAX_MS`). See `docs/learnings.md`.
 
 ## Key Type Locations
 
