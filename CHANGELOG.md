@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here. This file is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commits on `main`. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.10.1](https://github.com/JeffOtano/roni/compare/v0.10.0...v0.10.1) (2026-05-31)
+
+
+### Bug Fixes
+
+* **tonal:** replace fragile string check with instanceof TonalSessionExpiredError in cachedFetch ([#392](https://github.com/JeffOtano/roni/issues/392)) ([e8b59ee](https://github.com/JeffOtano/roni/commit/e8b59ee62a6f7a3e408b88928e2da2b83bdb6461))
+
 ## [0.10.0](https://github.com/JeffOtano/roni/compare/v0.9.2...v0.10.0) (2026-05-24)
 
 
