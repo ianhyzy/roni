@@ -15,6 +15,7 @@ import {
 } from "./ai/coach";
 import { checkDailyBudget } from "./ai/budget";
 import { streamWithRetry } from "./ai/resilience";
+import { STUCK_MESSAGE_WATCHDOG_DELAY_MS } from "./ai/stuckMessageWatchdog";
 import type { RunAccumulator } from "./ai/runTelemetry";
 import { sanitizeTimezone } from "./ai/timeDecay";
 import { getFallbackTier, type ModelTier, type ProviderId } from "./ai/providers";
@@ -114,6 +115,18 @@ function buildTierPrepareStep(
   );
 }
 
+// A coach turn's generating action can be killed (the Convex 600s cap, OOM, or
+// a hung tool call) before it finalizes its assistant message, leaving the chat
+// stuck on "generating" forever. Scheduling this durable sweep up front means it
+// still runs after the action dies and fails the orphaned message.
+async function scheduleStuckMessageWatchdog(ctx: ActionCtx, threadId: string): Promise<void> {
+  await ctx.scheduler.runAfter(
+    STUCK_MESSAGE_WATCHDOG_DELAY_MS,
+    internal.ai.stuckMessageWatchdog.finalizeStuckMessagesForThread,
+    { threadId },
+  );
+}
+
 async function persistRun(ctx: ActionCtx, accumulator: RunAccumulator): Promise<void> {
   try {
     await ctx.runMutation(internal.aiUsage.recordRun, accumulator.toRow());
@@ -166,6 +179,8 @@ export const processMessage = internalAction({
     const routingIntent = classifyPromptIntent(prompt);
     const startTime = Date.now();
     try {
+      await scheduleStuckMessageWatchdog(ctx, threadId);
+
       const providerConfig = await resolveUserProviderConfig(ctx, userId);
       provider = providerConfig.provider;
 
@@ -253,6 +268,8 @@ export const continueAfterApproval = action({
     const processingStartedAt = Date.now();
     const startTime = Date.now();
     try {
+      await scheduleStuckMessageWatchdog(ctx, threadId);
+
       const providerConfig = await resolveUserProviderConfig(ctx, userId);
       provider = providerConfig.provider;
 

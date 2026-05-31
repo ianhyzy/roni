@@ -39,6 +39,7 @@ import type * as ai_resilienceCircuitBreaker from "../ai/resilienceCircuitBreake
 import type * as ai_runTelemetry from "../ai/runTelemetry.js";
 import type * as ai_schemas from "../ai/schemas.js";
 import type * as ai_snapshotHelpers from "../ai/snapshotHelpers.js";
+import type * as ai_stuckMessageWatchdog from "../ai/stuckMessageWatchdog.js";
 import type * as ai_timeDecay from "../ai/timeDecay.js";
 import type * as ai_tools from "../ai/tools.js";
 import type * as ai_trainingSnapshotCache from "../ai/trainingSnapshotCache.js";
@@ -219,6 +220,7 @@ declare const fullApi: ApiFromModules<{
   "ai/runTelemetry": typeof ai_runTelemetry;
   "ai/schemas": typeof ai_schemas;
   "ai/snapshotHelpers": typeof ai_snapshotHelpers;
+  "ai/stuckMessageWatchdog": typeof ai_stuckMessageWatchdog;
   "ai/timeDecay": typeof ai_timeDecay;
   "ai/tools": typeof ai_tools;
   "ai/trainingSnapshotCache": typeof ai_trainingSnapshotCache;
