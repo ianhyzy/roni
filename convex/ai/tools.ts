@@ -9,6 +9,7 @@ import type {
   StrengthScoreHistoryEntry,
 } from "../tonal/types";
 import type { EnrichedWorkoutDetail } from "../workoutDetail";
+import { getWellKnownMovement, isWellKnownMovementId } from "../tonal/transforms";
 import { requireUserId, withToolTracking } from "./helpers";
 
 export const KNOWN_TRAINING_TYPES = [
@@ -314,7 +315,11 @@ export const createWorkoutTool = createTool({
         },
       );
       const validIds = new Set(validatedMovements.map((m) => m.id));
-      const invalidIds = allMovementIds.filter((id) => !validIds.has(id));
+      // Well-known synthetic IDs (e.g. Rest) are valid payload values that are
+      // absent from the synced catalog — never flag them as fabricated.
+      const invalidIds = allMovementIds.filter(
+        (id) => !validIds.has(id) && !isWellKnownMovementId(id),
+      );
       if (invalidIds.length > 0) {
         const pctInvalid = invalidIds.length / allMovementIds.length;
         const isLikelyHallucination = pctInvalid > 0.3 || invalidIds.length >= 3;
@@ -330,7 +335,7 @@ export const createWorkoutTool = createTool({
       const movementMap = new Map(validatedMovements.map((m) => [m.id, m]));
       const correctedBlocks = input.blocks.map((block) => ({
         exercises: block.exercises.map((ex) => {
-          const movement = movementMap.get(ex.movementId);
+          const movement = movementMap.get(ex.movementId) ?? getWellKnownMovement(ex.movementId);
           if (movement && !movement.countReps) {
             // Duration-based movement: use duration, ignore reps
             return { ...ex, duration: ex.duration ?? 30, reps: undefined };

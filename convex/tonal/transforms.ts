@@ -28,6 +28,32 @@ export interface MovementCatalogEntry {
   muscleGroups?: string[];
 }
 
+/**
+ * Synthetic Tonal movements that are valid in workout payloads but are NOT
+ * returned by Tonal's `/v6/movements` catalog, so they never land in the
+ * `movements` table. Catalog-membership validation must treat these as valid;
+ * otherwise the coach can never push a workout that injects them (e.g. the
+ * Rest period added to every single-exercise block). All entries are
+ * duration-based — they have no rep count.
+ */
+export const WELL_KNOWN_MOVEMENTS: readonly MovementCatalogEntry[] = [
+  { id: TONAL_REST_MOVEMENT_ID, countReps: false, isAlternating: false },
+];
+
+const WELL_KNOWN_MOVEMENT_MAP: ReadonlyMap<string, MovementCatalogEntry> = new Map(
+  WELL_KNOWN_MOVEMENTS.map((m) => [m.id, m]),
+);
+
+/** True when the id is a synthetic, catalog-exempt movement such as Rest. */
+export function isWellKnownMovementId(id: string): boolean {
+  return WELL_KNOWN_MOVEMENT_MAP.has(id);
+}
+
+/** Catalog entry for a well-known synthetic movement, or undefined if not one. */
+export function getWellKnownMovement(id: string): MovementCatalogEntry | undefined {
+  return WELL_KNOWN_MOVEMENT_MAP.get(id);
+}
+
 interface BuildSetOpts {
   ex: ExerciseInput;
   blockNumber: number;

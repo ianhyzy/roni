@@ -7,11 +7,12 @@ import { TONAL_REST_MOVEMENT_ID } from "./transforms";
 // Test data builders
 // ---------------------------------------------------------------------------
 
+// Mirrors production: Tonal's /v6/movements catalog does NOT return the
+// synthetic Rest sentinel, so it is never present in the movements table.
 const mockCatalog = [
   { id: "uuid-1", name: "Bench Press" },
   { id: "uuid-2", name: "Squat" },
   { id: "uuid-3", name: "Deadlift" },
-  { id: TONAL_REST_MOVEMENT_ID, name: "Rest", countReps: false, onMachine: false },
 ];
 
 function block(movementIds: string[], sets = 3): BlockInput {
@@ -64,6 +65,17 @@ describe("validateMovementIds", () => {
     expect(result.valid).toBe(false);
     expect(result.errors).toHaveLength(1);
   });
+
+  it("accepts the well-known Rest sentinel even when the catalog omits it", () => {
+    const result = validateMovementIds(["uuid-1", TONAL_REST_MOVEMENT_ID], mockCatalog);
+    expect(result.valid).toBe(true);
+    expect(result.errors).toEqual([]);
+  });
+
+  it("accepts the Rest sentinel even against an otherwise-empty catalog", () => {
+    const result = validateMovementIds([TONAL_REST_MOVEMENT_ID], []);
+    expect(result.valid).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -95,7 +107,7 @@ describe("validateWorkoutBlocks — valid blocks", () => {
     expect(result.errors).toEqual([]);
   });
 
-  it("accepts blocks containing the Rest movement", () => {
+  it("accepts blocks containing the Rest sentinel when the catalog omits it (production shape)", () => {
     const blocks = [block(["uuid-1", TONAL_REST_MOVEMENT_ID])];
     const result = validateWorkoutBlocks(blocks, mockCatalog);
     expect(result.valid).toBe(true);

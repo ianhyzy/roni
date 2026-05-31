@@ -1,5 +1,30 @@
 import { describe, expect, it } from "vitest";
-import { type BlockInput, expandBlocksToSets } from "./transforms";
+import {
+  type BlockInput,
+  expandBlocksToSets,
+  getWellKnownMovement,
+  isWellKnownMovementId,
+  TONAL_REST_MOVEMENT_ID,
+} from "./transforms";
+
+describe("well-known synthetic movements", () => {
+  it("recognizes the Rest sentinel as well-known", () => {
+    expect(isWellKnownMovementId(TONAL_REST_MOVEMENT_ID)).toBe(true);
+  });
+
+  it("does not treat catalog movement IDs as well-known", () => {
+    expect(isWellKnownMovementId("uuid-real-movement")).toBe(false);
+  });
+
+  it("exposes the Rest sentinel as a duration-based catalog entry", () => {
+    const rest = getWellKnownMovement(TONAL_REST_MOVEMENT_ID);
+    expect(rest?.countReps).toBe(false);
+  });
+
+  it("returns undefined for non-well-known IDs", () => {
+    expect(getWellKnownMovement("uuid-real-movement")).toBeUndefined();
+  });
+});
 
 describe("expandBlocksToSets single block and supersets", () => {
   it("expands a single exercise block", () => {

@@ -1,4 +1,5 @@
 import type { BlockInput } from "./transforms";
+import { isWellKnownMovementId } from "./transforms";
 
 interface ValidationResult {
   valid: boolean;
@@ -8,6 +9,10 @@ interface ValidationResult {
 /**
  * Validate that all movementIds exist in the catalog.
  * Catalog items must have at least an `id` field.
+ *
+ * Well-known synthetic IDs (e.g. the Rest sentinel) are accepted even though
+ * they are absent from Tonal's synced catalog — they are legitimate payload
+ * values, not fabricated IDs.
  */
 export function validateMovementIds(
   movementIds: string[],
@@ -17,7 +22,7 @@ export function validateMovementIds(
   const errors: string[] = [];
 
   for (const id of movementIds) {
-    if (!catalogIds.has(id)) {
+    if (!catalogIds.has(id) && !isWellKnownMovementId(id)) {
       errors.push(`Unknown movementId: ${id}`);
     }
   }
