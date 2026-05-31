@@ -2,6 +2,20 @@
 
 All notable changes to this project are documented here. This file is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commits on `main`. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.10.2](https://github.com/JeffOtano/roni/compare/v0.10.1...v0.10.2) (2026-05-31)
+
+
+### Bug Fixes
+
+* **chat:** finalize orphaned messages so chat can't hang on "generating" ([#412](https://github.com/JeffOtano/roni/issues/412)) ([a9f8a76](https://github.com/JeffOtano/roni/commit/a9f8a76016215464943796c44a3289487103b3fa)), closes [#399](https://github.com/JeffOtano/roni/issues/399)
+* **tonal:** accept well-known Rest sentinel in movement validation ([#410](https://github.com/JeffOtano/roni/issues/410)) ([0dc15f6](https://github.com/JeffOtano/roni/commit/0dc15f6895ee9c07863c43cc7c537264abb4800a))
+* **tonal:** persist synced history in bounded mutation chunks (OOM on large-history refresh) ([#413](https://github.com/JeffOtano/roni/issues/413)) ([ea2dda5](https://github.com/JeffOtano/roni/commit/ea2dda53ac9657ccbf19b6b34205d55df022faf6))
+
+
+### Documentation
+
+* add PR review learnings log ([#415](https://github.com/JeffOtano/roni/issues/415)) ([8fd7479](https://github.com/JeffOtano/roni/commit/8fd7479b1e674206444c37f8488d15af4619c805))
+
 ## [0.10.1](https://github.com/JeffOtano/roni/compare/v0.10.0...v0.10.1) (2026-05-31)
 
 
