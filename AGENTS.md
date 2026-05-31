@@ -298,6 +298,16 @@ The following are enforced by tooling -- you don't need to remember them:
 - **Security:** `npm audit --audit-level=high` runs in CI
 - **E2E:** Playwright smoke tests run on pull requests
 
+## Learning From Past Reviews
+
+`docs/pr-review-learnings.md` is a running log of recurring, legitimate issues
+raised in past PR review (broad `catch` blocks that swallow auth-expiry/non-transient
+errors, tests that don't exercise the real production path, exact-match model
+pricing that bypasses budget guardrails, watchdog/sweep timing windows). Skim the
+matching section before touching Tonal fetch helpers, AI cost/budget paths, test
+fixtures, or scheduled sweeps -- and append a new entry when review surfaces a
+fresh recurring gap.
+
 <!-- convex-ai-start -->
 
 This project uses [Convex](https://convex.dev) as its backend.

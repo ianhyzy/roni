@@ -53,6 +53,9 @@ docs/superpowers/
 .agent/*
 .agents/*
 .claude/*
+# Track the shared SessionStart hook + settings; keep local overrides ignored.
+!.claude/settings.json
+!.claude/hooks
 .factory/*
 .junie/*
 .kiro/*
