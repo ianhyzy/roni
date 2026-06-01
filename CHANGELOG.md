@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here. This file is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commits on `main`. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.10.4](https://github.com/JeffOtano/roni/compare/v0.10.3...v0.10.4) (2026-06-01)
+
+
+### Documentation
+
+* log error-boundary and credential-validation review learnings ([94f9d47](https://github.com/JeffOtano/roni/commit/94f9d47549859cd1b08fcac76502c4fbaa88fb29))
+
 ## [0.10.3](https://github.com/JeffOtano/roni/compare/v0.10.2...v0.10.3) (2026-06-01)
 
 
