@@ -2,6 +2,15 @@
 
 All notable changes to this project are documented here. This file is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commits on `main`. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.10.3](https://github.com/JeffOtano/roni/compare/v0.10.2...v0.10.3) (2026-06-01)
+
+
+### Bug Fixes
+
+* **byok:** accept AQ Gemini API keys ([#417](https://github.com/JeffOtano/roni/issues/417)) ([f229561](https://github.com/JeffOtano/roni/commit/f22956197de9b3ac8a8919fb8fe2e75aa849992a))
+* isolate Garmin failures on schedule detail ([#426](https://github.com/JeffOtano/roni/issues/426)) ([fd02236](https://github.com/JeffOtano/roni/commit/fd022363b7ab1f2eb780b8aed4db10d97055976e))
+* normalize Tonal sub-account profile data ([3503888](https://github.com/JeffOtano/roni/commit/350388841ea4757fbf55f74ebb28f382dde58f9c))
+
 ## [0.10.2](https://github.com/JeffOtano/roni/compare/v0.10.1...v0.10.2) (2026-05-31)
 
 
