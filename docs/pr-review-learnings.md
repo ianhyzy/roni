@@ -1,6 +1,6 @@
 # PR Review Learnings
 
-Last reviewed: 2026-05-31
+Last reviewed: 2026-06-01
 
 A running log of recurring, legitimate issues raised in pull-request review that
 agents (and humans) should pre-empt. Each entry records the **problem**, **why
@@ -152,12 +152,85 @@ exactly the slow/retried turns it was built for.
   stateless — but if you keep it single-shot, prove the timing window covers the
   worst-case retry path.
 
+## 5. Error boundaries around optional integrations must recover and log
+
+**Seen in:** #426 (2 review threads, both P2)
+
+**Problem.** A new React error boundary wrapped the optional Garmin
+"send-to-Garmin" card on the schedule detail page so a failure there couldn't
+take down the whole route. But the boundary had two gaps:
+
+- **No recovery.** It set `hasError` once on a `workoutPlanId:date` key and then
+  returned `null` forever. A _transient_ `useQuery` failure (auth/session
+  refresh, a momentary Convex query error) permanently hid the controls until
+  the route remounted or the user navigated away — even though the query would
+  have recovered on its own.
+- **No logging.** It swallowed the render/query error without a
+  `componentDidCatch` (or other) log path. Because it also stopped the app-level
+  `ErrorBoundary` from seeing the error, a Garmin regression looked
+  indistinguishable from "the optional integration is simply absent" — operators
+  lost the only signal that the card was failing.
+
+**Why it matters.** An error boundary added _for resilience_ can quietly make
+things worse: it converts a recoverable, observable failure into a permanent,
+invisible one. The integration appears gone rather than broken, so neither the
+user nor Sentry/operators ever learn it regressed.
+
+**Preventive checks.**
+
+- Give every error boundary a **recovery path**: a retry control that resets the
+  boundary state (or render from local safe query state) so a transient failure
+  clears when the underlying query recovers. Don't latch `hasError` for the life
+  of the key.
+- Always **log the caught error** in `componentDidCatch` (or equivalent) with a
+  named message, even when you intentionally keep the rest of the page visible —
+  a boundary that hides a card must not also hide the signal.
+- When a boundary deliberately stops the app-level `ErrorBoundary` from seeing an
+  error, it owns the observability for that subtree. Confirm the error still
+  reaches the logs.
+- Add regression coverage for the **recovery** transition (toggle the mocked
+  query failure → success and assert the card returns), not just the
+  failure-hides-card case.
+
+## 6. Validate new credential/ID formats against a real example, and update every copy of the check
+
+**Seen in:** #417 (P1)
+
+**Problem.** The PR existed to unblock Google "Express Mode" Gemini keys, which
+are issued with an `AQ.` prefix (e.g. `AQ.Ab8...`). The validation regex allowed
+only `[A-Za-z0-9_-]` immediately after `AQ`, so it rejected the literal dot —
+meaning the change failed to accept the exact key format it was written to
+support. The same regex was **duplicated in three places** (`convex/ai/providers.ts`,
+the `prepareGeminiKeyForStorage` storage helper, and the client-side
+`ApiKeyForm`); the dot had to be added to all three or the key would still fail
+at one layer.
+
+**Why it matters.** A validator written from an assumed format rather than a real
+sample silently defeats its own purpose — the feature ships "done" but the
+target input still bounces. And when the same rule is copied across client +
+storage + provider layers, fixing one copy leaves the others to reject the input
+at a different boundary, which is hard to diagnose.
+
+**Preventive checks.**
+
+- Before changing a format validator (API-key prefix, ID pattern, sentinel),
+  paste a **real, full example** of the target value and confirm the
+  pattern/branch actually accepts it end-to-end — don't infer the charset.
+- Grep for **every copy** of the validation rule (client form, storage helper,
+  provider/server check) and update them together; add a matching test in each
+  file so a future divergence is caught. Consider whether the duplicated regex
+  should be a single shared constant.
+- Add a positive test using the literal target format (here, an `AQ.`-prefixed
+  key) at each validation layer.
+
 ---
 
 ## How to use this log
 
 - Before opening a PR that touches **Tonal fetch helpers, AI cost/budget paths,
-  test fixtures, or scheduled sweeps**, skim the matching section above.
+  test fixtures, scheduled sweeps, React error boundaries around optional
+  integrations, or credential/format validators**, skim the matching section
+  above.
 - When a review surfaces a _new_ recurring, legitimate gap (not stylistic, not
   one-off), add an entry here with the PR reference so the next agent inherits
   the lesson.
