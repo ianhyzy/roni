@@ -93,6 +93,47 @@ describe("forceRefreshUserDataWithDeps", () => {
     expect(logError).not.toHaveBeenCalled();
   });
 
+  it("preserves stored measurements when Tonal returns nullable profile fields", async () => {
+    const deleteUserCacheEntries = vi.fn().mockResolvedValue(undefined);
+    const backfillUserHistory = vi.fn().mockResolvedValue({
+      newWorkouts: 0,
+      totalActivities: 8,
+    });
+    const fetchUserProfile = vi.fn().mockResolvedValue(
+      buildTonalUser({
+        heightInches: null,
+        weightPounds: null,
+        workoutsPerWeek: null,
+      }),
+    );
+    const updateProfileData = vi.fn().mockResolvedValue(undefined);
+
+    await forceRefreshUserDataWithDeps(USER_ID, {
+      deleteUserCacheEntries,
+      backfillUserHistory,
+      fetchUserProfile,
+      fetchStrengthDistribution: vi.fn().mockResolvedValue({}),
+      fetchWorkoutHistory: vi.fn().mockResolvedValue([]),
+      fetchExternalActivities: vi.fn().mockResolvedValue([]),
+      getExistingProfileData: vi.fn().mockResolvedValue({
+        heightInches: 70,
+        weightPounds: 180,
+        workoutsPerWeek: 5,
+      }),
+      updateProfileData,
+      now: () => 2345,
+    });
+
+    expect(updateProfileData).toHaveBeenCalledWith({
+      userId: USER_ID,
+      profileData: expect.objectContaining({
+        heightInches: 70,
+        weightPounds: 180,
+        workoutsPerWeek: 5,
+      }),
+    });
+  });
+
   it("logs warm-up failures and still returns the backfill result", async () => {
     const deleteUserCacheEntries = vi.fn().mockResolvedValue(undefined);
     const backfillUserHistory = vi.fn().mockResolvedValue({

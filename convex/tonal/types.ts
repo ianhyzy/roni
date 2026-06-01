@@ -5,12 +5,12 @@ export interface TonalUser {
   firstName: string;
   lastName: string;
   gender?: string;
-  heightInches: number;
-  weightPounds: number;
+  heightInches: number | null;
+  weightPounds: number | null;
   auth0Id: string;
   dateOfBirth: string;
   username: string;
-  workoutsPerWeek: number;
+  workoutsPerWeek: number | null;
   workoutDurationMin: number;
   workoutDurationMax: number;
   tonalStatus: string;

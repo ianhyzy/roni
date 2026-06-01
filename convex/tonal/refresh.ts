@@ -39,6 +39,15 @@ interface ForceRefreshDeps {
   deleteUserCacheEntries: (args: { userId: Id<"users">; dataTypes: string[] }) => Promise<unknown>;
   backfillUserHistory: (args: { userId: Id<"users"> }) => Promise<BackfillResult>;
   fetchUserProfile: (args: { userId: Id<"users"> }) => Promise<TonalUser>;
+  getExistingProfileData?: (args: { userId: Id<"users"> }) => Promise<
+    | {
+        heightInches?: number;
+        weightPounds?: number;
+        workoutsPerWeek?: number;
+      }
+    | null
+    | undefined
+  >;
   fetchStrengthDistribution: (args: { userId: Id<"users"> }) => Promise<unknown>;
   fetchWorkoutHistory: (args: { userId: Id<"users">; limit: number }) => Promise<unknown>;
   fetchExternalActivities: (args: { userId: Id<"users">; limit: number }) => Promise<unknown>;
@@ -74,9 +83,11 @@ export async function forceRefreshUserDataWithDeps(
 
   if (profileResult.status === "fulfilled") {
     try {
+      const existingProfileData = await deps.getExistingProfileData?.({ userId });
+
       await deps.updateProfileData({
         userId,
-        profileData: toUserProfileData(profileResult.value),
+        profileData: toUserProfileData(profileResult.value, { existingProfileData }),
       });
     } catch (error) {
       logError(
@@ -127,6 +138,10 @@ export const forceRefreshUserData = internalAction({
         return { newWorkouts: result.synced, totalActivities: result.totalFetched };
       },
       fetchUserProfile: (args) => ctx.runAction(internal.tonal.proxy.fetchUserProfile, args),
+      getExistingProfileData: async (args) => {
+        const profile = await ctx.runQuery(internal.userProfiles.getByUserId, args);
+        return profile?.profileData;
+      },
       fetchStrengthDistribution: (args) =>
         ctx.runAction(internal.tonal.proxy.fetchStrengthDistribution, args),
       fetchWorkoutHistory: (args) =>

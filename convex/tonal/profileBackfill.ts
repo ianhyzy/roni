@@ -28,7 +28,7 @@ export const backfillAllProfiles = internalAction({
         });
         await ctx.runMutation(internal.userProfiles.updateProfileData, {
           userId: profile.userId,
-          profileData: toUserProfileData(u),
+          profileData: toUserProfileData(u, { existingProfileData: profile.profileData }),
         });
         success++;
       } catch (err) {

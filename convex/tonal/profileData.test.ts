@@ -75,4 +75,23 @@ describe("toUserProfileData", () => {
 
     expect(result.gender).toBeUndefined();
   });
+
+  it("normalizes nullable sub-account numeric fields", () => {
+    const tonalUser = JSON.parse(
+      JSON.stringify({
+        ...buildTonalUser({ accountType: "sub_account" }),
+        heightInches: null,
+        weightPounds: null,
+        workoutsPerWeek: null,
+      }),
+    ) as TonalUser;
+
+    const result = toUserProfileData(tonalUser);
+
+    expect(result).toMatchObject({
+      heightInches: 0,
+      weightPounds: 0,
+      workoutsPerWeek: 0,
+    });
+  });
 });

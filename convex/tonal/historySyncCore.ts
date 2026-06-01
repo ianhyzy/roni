@@ -264,7 +264,7 @@ export async function maybeRefreshProfile(ctx: ActionCtx, userId: Id<"users">): 
     const u = await ctx.runAction(internal.tonal.proxy.fetchUserProfile, { userId });
     await ctx.runMutation(internal.userProfiles.updateProfileData, {
       userId,
-      profileData: toUserProfileData(u),
+      profileData: toUserProfileData(u, { existingProfileData: profile.profileData }),
     });
   } catch (err) {
     console.error("[historySync] Profile refresh failed", err);
