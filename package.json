@@ -96,8 +96,8 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@commitlint/cli": "^21.0.1",
-    "@commitlint/config-conventional": "^21.0.1",
+    "@commitlint/cli": "^21.0.2",
+    "@commitlint/config-conventional": "^21.0.2",
     "@edge-runtime/vm": "^5.0.0",
     "@next/bundle-analyzer": "^16.2.6",
     "@playwright/test": "^1.60.0",
@@ -114,13 +114,13 @@
     "eslint-config-next": "16.2.6",
     "husky": "^9.1.7",
     "jsdom": "^29.1.0",
-    "knip": "^6.14.2",
-    "lint-staged": "^17.0.5",
+    "knip": "^6.15.0",
+    "lint-staged": "^17.0.7",
     "prettier": "^3.8.3",
     "tailwindcss": "^4.2.2",
-    "tsx": "^4.22.3",
+    "tsx": "^4.22.4",
     "typescript": "^6.0.3",
-    "vite": "^8.0.14",
+    "vite": "^8.0.15",
     "vitest": "^4.1.4"
   },
   "overrides": {
