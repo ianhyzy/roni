@@ -49,8 +49,15 @@ const recordPrimaryAttemptSuccessRef = makeFunctionReference<
 
 export type AttemptOutcome =
   | { done: true; success: true }
-  | { done: true; success: false }
+  | { done: true; success: false; errorClass: string }
   | { done: false; error: unknown };
+
+type FallbackOutcome =
+  | { status: "pending" }
+  | { status: "succeeded" }
+  | { status: "failed"; errorClass: string }
+  | { status: "not_attempted"; reason: string };
+type CompletedFallbackOutcome = Exclude<FallbackOutcome, { status: "pending" }>;
 
 interface CircuitBreakerFlowArgs {
   ctx: ActionCtx;
@@ -90,10 +97,34 @@ export async function runWithPrimaryCircuitBreaker(args: CircuitBreakerFlowArgs)
     openReason: "error_threshold" | "cost_threshold" | "half_open_failure";
     recentFailures: number;
     recentFailedCostUsd: number;
+    primaryErrorClass: string;
+    fallbackOutcome: FallbackOutcome;
   }) => {
     await ctx.runAction(internal.discord.notifyError, {
       source: "aiCircuitBreaker",
-      message: `Opened ${provider} circuit breaker (${details.openReason}) after ${details.recentFailures} failed primary attempts and $${details.recentFailedCostUsd.toFixed(2)} of failed spend in the last 60s`,
+      message: [
+        `Opened ${provider} circuit breaker (${details.openReason}) after ${details.recentFailures} failed primary attempts and $${details.recentFailedCostUsd.toFixed(2)} of failed spend in the last 60s`,
+        `Primary error: ${details.primaryErrorClass}`,
+        `Fallback: ${formatFallbackOutcome(details.fallbackOutcome)}`,
+        `Run: ${runId}`,
+        `Thread: ${threadId}`,
+      ].join("\n"),
+      userId,
+    });
+  };
+
+  const notifyFallbackCompleted = async (details: {
+    openReason: "error_threshold" | "cost_threshold" | "half_open_failure";
+    fallbackOutcome: CompletedFallbackOutcome;
+  }) => {
+    await ctx.runAction(internal.discord.notifyError, {
+      source: "aiCircuitBreaker",
+      message: [
+        `Fallback completed for ${provider} circuit breaker (${details.openReason})`,
+        `Fallback: ${formatFallbackOutcome(details.fallbackOutcome)}`,
+        `Run: ${runId}`,
+        `Thread: ${threadId}`,
+      ].join("\n"),
       userId,
     });
   };
@@ -104,6 +135,7 @@ export async function runWithPrimaryCircuitBreaker(args: CircuitBreakerFlowArgs)
   }) => {
     const usage = accumulator.usageDeltaSince(failure.snapshot);
     const model = usage.modelId ?? primaryModelName;
+    const primaryErrorClass = errorClassName(failure.error);
     const totalCostUsd = estimateAttemptCostUsd({
       provider,
       model,
@@ -124,16 +156,19 @@ export async function runWithPrimaryCircuitBreaker(args: CircuitBreakerFlowArgs)
       threadId,
       model,
       totalCostUsd,
-      errorClass: errorClassName(failure.error),
+      errorClass: primaryErrorClass,
     });
-    if (result.opened && result.openReason) {
-      await notifyBreakerOpened({
-        openReason: result.openReason,
-        recentFailures: result.recentFailures,
-        recentFailedCostUsd: result.recentFailedCostUsd,
-      });
+    return { ...result, primaryErrorClass };
+  };
+
+  const runFallbackAttempt = async (): Promise<CompletedFallbackOutcome> => {
+    const final = await runAttempt(fallbackAgent);
+    if (!final.done) {
+      await recordTerminalError(final.error);
+      return { status: "failed", errorClass: errorClassName(final.error) };
     }
-    return result;
+    if (final.success) return { status: "succeeded" };
+    return { status: "failed", errorClass: final.errorClass };
   };
 
   const routeDecision: {
@@ -176,13 +211,18 @@ export async function runWithPrimaryCircuitBreaker(args: CircuitBreakerFlowArgs)
           userId: breakerUserId,
           threadId,
           model: finalUsage.modelId ?? primaryModelName,
-          errorClass: "TerminalPrimaryAttemptFailure",
+          errorClass: firstAttempt.errorClass,
         });
         if (failure.opened && failure.openReason) {
           await notifyBreakerOpened({
             openReason: failure.openReason,
             recentFailures: failure.recentFailures,
             recentFailedCostUsd: failure.recentFailedCostUsd,
+            primaryErrorClass: firstAttempt.errorClass,
+            fallbackOutcome: {
+              status: "not_attempted",
+              reason: "terminal_primary_failure",
+            },
           });
         }
       }
@@ -197,9 +237,15 @@ export async function runWithPrimaryCircuitBreaker(args: CircuitBreakerFlowArgs)
   if (firstFailure.opened) {
     await finalizePending("transient_retry");
     accumulator.markFallback("circuit_open");
-    const final = await runAttempt(fallbackAgent);
-    if (!final.done) {
-      await recordTerminalError(final.error);
+    const fallbackOutcome = await runFallbackAttempt();
+    if (firstFailure.openReason) {
+      await notifyBreakerOpened({
+        openReason: firstFailure.openReason,
+        recentFailures: firstFailure.recentFailures,
+        recentFailedCostUsd: firstFailure.recentFailedCostUsd,
+        primaryErrorClass: firstFailure.primaryErrorClass,
+        fallbackOutcome,
+      });
     }
     return;
   }
@@ -220,10 +266,29 @@ export async function runWithPrimaryCircuitBreaker(args: CircuitBreakerFlowArgs)
   accumulator.markRetry();
   accumulator.markFallback(secondFailure.opened ? "circuit_open" : "transient_exhaustion");
 
-  const final = await runAttempt(fallbackAgent);
-  if (!final.done) {
-    await recordTerminalError(final.error);
+  if (secondFailure.opened && secondFailure.openReason) {
+    await notifyBreakerOpened({
+      openReason: secondFailure.openReason,
+      recentFailures: secondFailure.recentFailures,
+      recentFailedCostUsd: secondFailure.recentFailedCostUsd,
+      primaryErrorClass: secondFailure.primaryErrorClass,
+      fallbackOutcome: { status: "pending" },
+    });
   }
+  const fallbackOutcome = await runFallbackAttempt();
+  if (secondFailure.opened && secondFailure.openReason) {
+    await notifyFallbackCompleted({
+      openReason: secondFailure.openReason,
+      fallbackOutcome,
+    });
+  }
+}
+
+function formatFallbackOutcome(outcome: FallbackOutcome): string {
+  if (outcome.status === "pending") return "pending";
+  if (outcome.status === "succeeded") return "succeeded";
+  if (outcome.status === "failed") return `failed (${outcome.errorClass})`;
+  return `not attempted (${outcome.reason})`;
 }
 
 function errorClassName(error: unknown): string {

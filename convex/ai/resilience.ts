@@ -159,14 +159,14 @@ export async function streamWithRetry(
             const cls = classifyByokError(error) ?? "byok_unknown_error";
             accumulator.setTerminalErrorClass(cls);
             span.recordError(cls);
-            return { done: true, success: false };
+            return { done: true, success: false, errorClass: cls };
           }
           if (isQuotaError(error) || !isTransientError(error)) {
             const cls = errorClassName(error);
             accumulator.setTerminalErrorClass(cls);
             span.recordError(cls);
             await safeReportError(ctx, { ...errorReport, error });
-            return { done: true, success: false };
+            return { done: true, success: false, errorClass: cls };
           }
           return { done: false, error };
         }
