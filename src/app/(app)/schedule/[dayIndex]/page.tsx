@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useEffect } from "react";
+import { Component, type ReactNode, use, useEffect } from "react";
 import Link from "next/link";
 import { useAction } from "convex/react";
 import { useAnalytics } from "@/lib/analytics";
@@ -10,7 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { ErrorAlert } from "@/components/ErrorAlert";
 import { GarminWorkoutDeliveryCard } from "@/features/schedule/GarminWorkoutDeliveryCard";
 import { StatusBadge } from "@/features/schedule/StatusBadge";
-import { ArrowLeft, Clock, Dumbbell, MessageSquare } from "lucide-react";
+import { ArrowLeft, Clock, Dumbbell, MessageSquare, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { api } from "../../../../../convex/_generated/api";
 import type { ScheduleData } from "../../../../../convex/schedule";
@@ -24,6 +24,51 @@ import {
   SESSION_LABELS,
   StatCard,
 } from "./components";
+
+class OptionalGarminBoundary extends Component<{ children: ReactNode }, { hasError: boolean }> {
+  state = { hasError: false };
+
+  static getDerivedStateFromError(): { hasError: boolean } {
+    return { hasError: true };
+  }
+
+  componentDidCatch(error: Error): void {
+    console.error("Optional Garmin delivery card failed", error);
+  }
+
+  retry = () => {
+    this.setState({ hasError: false });
+  };
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="mt-8 rounded-xl border border-border bg-card p-4 text-card-foreground">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm font-semibold text-foreground">Garmin unavailable</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Schedule details are still available.
+              </p>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="gap-2"
+              onClick={this.retry}
+            >
+              <RefreshCw className="size-3.5" aria-hidden="true" />
+              Retry Garmin
+            </Button>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Page
@@ -134,11 +179,13 @@ export default function ScheduleDayPage({ params }: { params: Promise<{ dayIndex
       </div>
 
       {day.workoutPlanId && day.exercises.length > 0 && (
-        <GarminWorkoutDeliveryCard
-          workoutPlanId={day.workoutPlanId}
-          scheduledDate={day.date}
-          isPast={isPast}
-        />
+        <OptionalGarminBoundary key={`${day.workoutPlanId}:${day.date}`}>
+          <GarminWorkoutDeliveryCard
+            workoutPlanId={day.workoutPlanId}
+            scheduledDate={day.date}
+            isPast={isPast}
+          />
+        </OptionalGarminBoundary>
       )}
 
       {/* Full exercise list */}
