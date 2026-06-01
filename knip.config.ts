@@ -8,7 +8,6 @@ const config: KnipConfig = {
     "tw-animate-css",
     "shadcn", // CLI tool for adding components
     "tailwindcss", // used via @tailwindcss/postcss
-    "postcss", // used via postcss.config.mjs (Knip can't trace)
     "cmdk", // used by shadcn command component (ignored via src/components/ui/**)
   ],
 };
