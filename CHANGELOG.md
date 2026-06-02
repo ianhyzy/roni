@@ -2,6 +2,14 @@
 
 All notable changes to this project are documented here. This file is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commits on `main`. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.10.5](https://github.com/JeffOtano/roni/compare/v0.10.4...v0.10.5) (2026-06-02)
+
+
+### Bug Fixes
+
+* add circuit breaker fallback context ([a763c13](https://github.com/JeffOtano/roni/commit/a763c132cb6e8e23f3cd0ff7b1b253ce04f7ffc1)), closes [#416](https://github.com/JeffOtano/roni/issues/416)
+* preserve duration exercises in week card ([#433](https://github.com/JeffOtano/roni/issues/433)) ([1a98f4c](https://github.com/JeffOtano/roni/commit/1a98f4cb8db22b88221f0cfd606f2f534a64cbba))
+
 ## [0.10.4](https://github.com/JeffOtano/roni/compare/v0.10.3...v0.10.4) (2026-06-01)
 
 
