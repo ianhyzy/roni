@@ -306,10 +306,14 @@ errors, tests that don't exercise the real production path, exact-match model
 pricing that bypasses budget guardrails, watchdog/sweep timing windows, error
 boundaries around optional integrations that hide instead of recover/log,
 credential/format validators that reject the real format or drift across their
-duplicated copies). Skim the matching section before touching Tonal fetch helpers,
-AI cost/budget paths, test fixtures, scheduled sweeps, error boundaries around
-optional integrations, or credential/format validators -- and append a new entry
-when review surfaces a fresh recurring gap.
+duplicated copies, resilience/circuit-breaker alerts that flatten the terminal
+error class or fire too late to beat the action cap, null-coalescing mappers that
+clobber good stored data on a full-document overwrite). Skim the matching section
+before touching Tonal fetch helpers, AI cost/budget paths, test fixtures,
+scheduled sweeps, error boundaries around optional integrations,
+credential/format validators, the AI resilience/circuit-breaker alert path, or
+mappers that null-coalesce before a full-document overwrite -- and append a new
+entry when review surfaces a fresh recurring gap.
 
 <!-- convex-ai-start -->
 

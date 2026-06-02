@@ -1,6 +1,6 @@
 # PR Review Learnings
 
-Last reviewed: 2026-06-01
+Last reviewed: 2026-06-02
 
 A running log of recurring, legitimate issues raised in pull-request review that
 agents (and humans) should pre-empt. Each entry records the **problem**, **why
@@ -223,14 +223,90 @@ at a different boundary, which is hard to diagnose.
 - Add a positive test using the literal target format (here, an `AQ.`-prefixed
   key) at each validation layer.
 
+## 7. Preserve error classification and alert ordering across retry/fallback
+
+**Seen in:** #434 (2 review threads, both P2)
+
+**Problem.** A change that added fallback context to the circuit-breaker alert
+introduced two gaps on the resilience path:
+
+- **Flattened terminal class.** When the fallback attempt ended with
+  `runAttempt` returning `{ done: true, success: false }` — the path used in
+  `convex/ai/resilience.ts` for BYOK, quota, and other non-transient provider
+  errors _after_ it has recorded the real class — the breaker alert always
+  reported a generic `TerminalFallbackAttemptFailure` instead of the concrete
+  class. The new "fallback context" was inaccurate exactly when fallback failed
+  for a known reason.
+- **Alert deferred behind a long await.** The breaker-open notification was
+  delayed until after the awaited final fallback attempt. With each attempt
+  budgeted at 180s under Convex's 600s action cap, two primary timeouts plus the
+  fallback can run close to the cap; the action may be killed before reaching the
+  notification, even though `recordPrimaryAttemptFailure` has already opened the
+  breaker — so the alert never fires.
+
+**Why it matters.** An observability/alerting path that (a) collapses a known
+terminal class into a generic sentinel loses the signal operators need to triage
+(quota vs BYOK vs transient), and (b) sits behind a long awaited call the action
+cap can kill silently drops the alert on exactly the slow, retried, already-failing
+turns it exists to surface.
+
+**Preventive checks.**
+
+- Carry the concrete `errorClass` through `AttemptOutcome` /
+  `streamWithRetry` so both primary _and_ fallback terminal outcomes report their
+  real class; never overwrite a recorded class with a generic placeholder.
+- Emit critical alerts (breaker-open) **before** awaiting any operation that
+  could exceed the action cap. Send the breaker-open notification with
+  `Fallback: pending`, then send the fallback outcome separately (or from a
+  best-effort `finally`).
+- Add regression coverage asserting the notification fires _before_ the final
+  fallback await, and that the terminal class is preserved through the half-open
+  path.
+
+## 8. Don't let null→sentinel coalescing clobber good stored data on a full-document replace
+
+**Seen in:** #429 (P2 + a type-accuracy thread)
+
+**Problem.** A profile mapper normalized Tonal's nullable numeric fields
+(`heightInches`, `weightPounds`, `workoutsPerWeek`) to `0` via `?? 0`. That is
+correct for first-time connect validation, but `userProfiles.updateProfileData`
+replaces the **whole** stored `profileData`, so on a refresh/backfill where Tonal
+returns `null` (value currently unknown), a user who already had real
+height/weight/frequency was downgraded to `0`. Those zeros then surfaced verbatim
+in the AI context (`0"/0lbs`, `0x/week`). Separately, `TonalUser` in
+`convex/tonal/types.ts` declared these fields as non-nullable `number` while the
+real payload (and an existing test) used `null`, hiding the nullable reality from
+the type system.
+
+**Why it matters.** "Missing / unknown" is not "zero." Coalescing unknown→sentinel
+and then overwriting the entire record turns a transient gap in an upstream
+payload into permanent data loss, and the sentinel leaks into downstream
+consumers (the coach prompt) as if it were a real measurement.
+
+**Preventive checks.**
+
+- When a mapper feeds a **full-document overwrite**, coalesce a missing/null
+  upstream value to the **existing stored value** first; fall back to a sentinel
+  only when both the payload and the stored record lack it. Pass the existing
+  `profileData` into the mapper (`forceRefreshUserData`, `maybeRefreshProfile`,
+  `profileBackfill` all do this now).
+- Separate "first-time validation needs a concrete value" from "refresh must not
+  clobber" — refresh/backfill paths preserve prior non-null values.
+- Model nullable upstream fields as `T | null` in the API type so the
+  normalization is visible and type-checked; keep the type aligned with the real
+  payload and test fixtures.
+- Add regression coverage that a nullable refresh **preserves** stored
+  measurements (it should fail before the fix with `0` values).
+
 ---
 
 ## How to use this log
 
 - Before opening a PR that touches **Tonal fetch helpers, AI cost/budget paths,
   test fixtures, scheduled sweeps, React error boundaries around optional
-  integrations, or credential/format validators**, skim the matching section
-  above.
+  integrations, credential/format validators, the AI resilience/circuit-breaker
+  alert path, or any mapper that null-coalesces before a full-document
+  overwrite**, skim the matching section above.
 - When a review surfaces a _new_ recurring, legitimate gap (not stylistic, not
   one-off), add an entry here with the PR reference so the next agent inherits
   the lesson.
