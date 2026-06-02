@@ -125,14 +125,25 @@ export function ToolCallIndicator({ toolName, state, output }: ToolCallIndicator
               ),
             ].join(", "),
             durationMinutes: Number(day.estimatedDuration ?? 0),
-            exercises: exercises.map((ex: Record<string, unknown>) => ({
-              name: String(ex.name ?? ""),
-              sets: Number(ex.sets ?? 0),
-              reps: Number(ex.reps ?? 0),
-              targetWeight: typeof ex.targetWeight === "number" ? ex.targetWeight : undefined,
-              lastWeight: typeof ex.lastWeight === "number" ? ex.lastWeight : undefined,
-              note: [ex.suggestedTarget, ex.lastTime].filter(Boolean).join(" | ") || undefined,
-            })),
+            exercises: exercises.map((ex: Record<string, unknown>) => {
+              const reps = typeof ex.reps === "number" ? ex.reps : undefined;
+              const duration =
+                typeof ex.durationSeconds === "number"
+                  ? ex.durationSeconds
+                  : typeof ex.duration === "number"
+                    ? ex.duration
+                    : undefined;
+
+              return {
+                name: String(ex.name ?? ""),
+                sets: Number(ex.sets ?? 0),
+                reps,
+                duration,
+                targetWeight: typeof ex.targetWeight === "number" ? ex.targetWeight : undefined,
+                lastWeight: typeof ex.lastWeight === "number" ? ex.lastWeight : undefined,
+                note: [ex.suggestedTarget, ex.lastTime].filter(Boolean).join(" | ") || undefined,
+              };
+            }),
           };
         }),
         summary: `${String(summary.preferredSplit).toUpperCase()} split - ${days.length} training days`,

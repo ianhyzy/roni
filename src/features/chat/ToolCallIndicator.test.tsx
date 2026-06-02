@@ -2,9 +2,23 @@ import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { ToolCallIndicator } from "./ToolCallIndicator";
 
+type MockWeekPlan = {
+  summary: string;
+  days: { exercises: { name: string; reps?: number; duration?: number }[] }[];
+};
+
 vi.mock("./WeekPlanCard", () => ({
-  WeekPlanCard: ({ plan }: { plan: { summary: string } }) => (
-    <div data-testid="week-plan-card">{plan.summary}</div>
+  WeekPlanCard: ({ plan }: { plan: MockWeekPlan }) => (
+    <div data-testid="week-plan-card">
+      <span>{plan.summary}</span>
+      {plan.days.flatMap((day) =>
+        day.exercises.map((exercise) => (
+          <span key={exercise.name}>
+            {exercise.name} duration:{exercise.duration ?? "none"} reps:{exercise.reps ?? "none"}
+          </span>
+        )),
+      )}
+    </div>
   ),
 }));
 
@@ -97,6 +111,35 @@ describe("ToolCallIndicator", () => {
 
     expect(screen.getByTestId("week-plan-card")).toBeInTheDocument();
     expect(screen.getByText(/PPL split/)).toBeInTheDocument();
+  });
+
+  it("preserves duration-based exercises from program_week output", () => {
+    const output = {
+      success: true,
+      summary: {
+        weekStartDate: "2026-04-14",
+        preferredSplit: "ppl",
+        days: [
+          {
+            dayName: "Monday",
+            sessionType: "Push",
+            estimatedDuration: 45,
+            exercises: [
+              {
+                name: "Plank",
+                muscleGroups: ["Core"],
+                sets: 3,
+                durationSeconds: 45,
+              },
+            ],
+          },
+        ],
+      },
+    };
+
+    render(<ToolCallIndicator toolName="program_week" state="output-available" output={output} />);
+
+    expect(screen.getByText(/Plank duration:45 reps:none/)).toBeInTheDocument();
   });
 
   it("returns null for unknown state", () => {
