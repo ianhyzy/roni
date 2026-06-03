@@ -1,6 +1,6 @@
 # PR Review Learnings
 
-Last reviewed: 2026-06-01
+Last reviewed: 2026-06-03
 
 A running log of recurring, legitimate issues raised in pull-request review that
 agents (and humans) should pre-empt. Each entry records the **problem**, **why
@@ -223,13 +223,104 @@ at a different boundary, which is hard to diagnose.
 - Add a positive test using the literal target format (here, an `AQ.`-prefixed
   key) at each validation layer.
 
+## 7. Refresh/backfill must not overwrite known-good values with placeholders, and API types must model the real (nullable) payload
+
+**Seen in:** #429 (2 review threads, one P2)
+
+**Problem.** A mapper was added to normalize a Tonal sub-account profile, where
+the payload can return `null` for `heightInches`, `weightPounds`, and
+`workoutsPerWeek`. Two distinct gaps:
+
+- **Type drift.** `convex/tonal/types.ts` declared those fields as non-nullable
+  `number`, yet `toUserProfileData` already coerced them with `?? 0` and a test
+  fed them `null`. The `?? 0` was a tell that the upstream type was wrong; the
+  declared type lied about the payload, so callers had no type-level signal that
+  the values could be absent.
+- **Clobbering real data with a placeholder.** On an _existing-user refresh or
+  backfill_, a `null` from Tonal was coerced to `0`, and
+  `userProfiles.updateProfileData` replaces the whole stored `profileData` — so a
+  user who previously had real height/weight/frequency got silently downgraded to
+  `0`. Those zeros then flowed into the AI coaching context (`0"/0lbs`,
+  `0x/week`), corrupting programming inputs. The `?? 0` fallback is correct for
+  _first-time connect validation_ but wrong for a refresh that should preserve
+  prior measurements when the latest payload merely says "unknown."
+
+**Why it matters.** A normalization that maps "unknown" to a concrete sentinel
+(`0`, `""`) on a path that overwrites stored state turns a transient gap in the
+upstream payload into permanent data loss — and here the corrupted values feed
+directly into AI programming decisions. A type that doesn't model `null` hides
+the whole class of bug from the type checker.
+
+**Preventive checks.**
+
+- When the API can return `null`/absent for a field, model it as `T | null` in
+  the response type. Treat a `?? <default>` or `as` coercion in a mapper as a
+  prompt to check whether the source type should be widened to match the real
+  payload.
+- Distinguish **validation-time defaulting** (first connect: a sentinel is fine)
+  from a **refresh/backfill that overwrites stored state**. On the overwrite
+  path, pass the existing stored value into the mapper and fall back to the
+  placeholder only when _both_ the new payload and the stored value are missing —
+  never let "unknown now" erase "known before."
+- Add regression coverage that a nullable refresh **preserves** prior non-null
+  values (assert the stored value survives), not just that the mapper coerces a
+  standalone `null`.
+
+## 8. Carry the concrete classification through outcome/alert types, and emit state-transition notifications before awaiting more long-running work
+
+**Seen in:** #434 (2 review threads, both P2)
+
+**Problem.** A PR added fallback context to the circuit-breaker alert, but the
+alert path had two gaps:
+
+- **Generic sentinel masked the real class.** When the fallback attempt ended in
+  a terminal failure (`{ done: true, success: false }` — used for BYOK, quota,
+  and other non-transient provider errors), the breaker alert always reported a
+  generic `TerminalFallbackAttemptFailure` instead of the concrete error class
+  the attempt had already determined. The "context" was inaccurate exactly when
+  it mattered — on a known-class failure. Fixed by carrying `errorClass` through
+  `AttemptOutcome` so the notification reports the real class for both primary and
+  fallback terminal outcomes.
+- **Critical notification deferred behind a long await.** The breaker-open alert
+  was emitted only _after_ awaiting the final fallback attempt. With
+  `convex/ai/resilience.ts` budgeting 180s/attempt under Convex's 600s action
+  cap, two primary timeouts plus the fallback can run close to the cap, so the
+  action may be killed before reaching the notification — even though the breaker
+  had _already_ opened. Fixed by emitting a minimal breaker-open notification
+  (`Fallback: pending`) before starting the final fallback, then sending the
+  fallback outcome separately.
+
+**Why it matters.** A telemetry/alert path is most valuable on failure; replacing
+the determined classification with a generic sentinel discards the signal
+operators need precisely when an incident is happening. And a notification that
+fires only after more long-running work can be lost to the action cap on exactly
+the slow, multi-retry turns the breaker exists to flag — the state changed but no
+one was told. (This is the notification analogue of §4's sweep-timing trap: both
+fail on the slow/retried path because they assume work completes before the cap.)
+
+**Preventive checks.**
+
+- When enriching an alert/telemetry record with "context," carry the concrete
+  classification (error class, finish reason) through the outcome type end to
+  end. Don't collapse it to a generic constant at the reporting boundary — assert
+  in a test that a known-class terminal failure surfaces that class, not the
+  sentinel.
+- Emit critical state-transition notifications (breaker-open, escalation,
+  alarm) **as soon as the state changes**, before awaiting further long-running
+  attempts. Add the later outcome as a separate, best-effort notification (or from
+  a `finally`), so a subsequent action-cap kill can't swallow the transition.
+- For any notify-after-await on an AI/provider path, sanity-check the worst-case
+  timeline against `CONVEX_ACTION_MAX_MS` (see §4); if the await chain can
+  approach the cap, move the notification ahead of it.
+
 ---
 
 ## How to use this log
 
 - Before opening a PR that touches **Tonal fetch helpers, AI cost/budget paths,
   test fixtures, scheduled sweeps, React error boundaries around optional
-  integrations, or credential/format validators**, skim the matching section
+  integrations, credential/format validators, profile refresh/backfill
+  normalizers, or circuit-breaker/alert paths**, skim the matching section
   above.
 - When a review surfaces a _new_ recurring, legitimate gap (not stylistic, not
   one-off), add an entry here with the PR reference so the next agent inherits
