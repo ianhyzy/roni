@@ -1,6 +1,6 @@
 # PR Review Learnings
 
-Last reviewed: 2026-06-01
+Last reviewed: 2026-06-04
 
 A running log of recurring, legitimate issues raised in pull-request review that
 agents (and humans) should pre-empt. Each entry records the **problem**, **why
@@ -223,14 +223,134 @@ at a different boundary, which is hard to diagnose.
 - Add a positive test using the literal target format (here, an `AQ.`-prefixed
   key) at each validation layer.
 
+## 7. When filtering a payload before an external API boundary, handle empty, recount, and re-anchor structure
+
+**Seen in:** #440 (3 review threads — one P2/Major, two P3)
+
+**Problem.** The Tonal push path gained `buildTonalWorkoutSets`, which strips
+well-known synthetic movements (the internal Rest sentinel) out of the set list
+before crossing the `POST /v6/user-workouts` boundary. The internal block
+validation still _accepts_ the Rest sentinel, so synthetic-only or
+synthetic-leading blocks can reach the filter. Stripping them introduced three
+distinct gaps:
+
+- **Empty payload not rejected.** A rest-only block filtered down to `[]`, but
+  the code still POSTed the empty set list. Tonal then failed with a misleading
+  downstream 400 and `createWorkout` recorded a failed plan, instead of failing
+  fast with a clear local validation error (the estimate path already guarded
+  this; the push path didn't).
+- **Derived count drifted from the payload.** `createWorkout` still reported
+  `setCount` from a _separate_ unfiltered `expandBlocksToSets(blocks)` call, so
+  "3 work sets + 3 rest sentinels" reported 6 sets pushed while only 3 were
+  actually sent — the user/LLM-visible success overstated the result.
+- **Structural marker lost.** If a block _started_ with a synthetic movement,
+  filtering removed the only set marked `blockStart: true`, so the first real set
+  of that block crossed the boundary with `blockStart: false` — the outbound
+  block boundaries no longer matched the internally validated structure.
+
+**Why it matters.** A transform that drops elements just before an external call
+quietly breaks three invariants at once: the call can be made with nothing to do,
+any count computed from the _pre-filter_ data lies about what was sent, and any
+positional/structural marker the filter happened to remove is silently dropped.
+All three surface as confusing remote errors or wrong success metadata rather
+than a clear local failure.
+
+**Preventive checks.**
+
+- After filtering, **guard the empty result** and fail with a clear local error
+  (or handled `{ error }`) _before_ constructing/sending the payload — never let
+  the remote API reject an empty request on your behalf.
+- Compute any **derived count or metadata from the filtered payload**, not from a
+  separate pre-filter calculation, so success messages match what was sent.
+- If the filter can remove an element carrying a **positional/structural marker**
+  (block start, "first item", ordering index), re-derive that marker on the
+  filtered output (e.g. re-mark the first remaining set in each block).
+- Add coverage for the all-synthetic (empty) case and the synthetic-leading case,
+  not just the happy path.
+
+## 8. Don't clobber existing stored values when normalizing nullable upstream fields on a replace-write
+
+**Seen in:** #429 (1 P2 thread, plus a type-honesty Major)
+
+**Problem.** Tonal sub-account profiles can return `null` for `heightInches`,
+`weightPounds`, and `workoutsPerWeek`, but the `profileData` validator requires
+numbers, so `toUserProfileData` normalized `null → 0` to pass validation. That
+default is correct for first-time connect, but `userProfiles.updateProfileData`
+**replaces the whole stored `profileData` object**. On a refresh or backfill, a
+user who previously had real height/weight/frequency was downgraded to `0` when
+the latest Tonal payload merely reported those fields as unknown — and those
+zeros then flowed into the AI context as `0"/0lbs`, `0x/week`. Separately, the
+`TonalUser` type declared the fields as non-nullable `number` while the code
+already handled `null` and tests fed `null`, so the type lied about the payload.
+
+**Why it matters.** A "missing → default" rule that is safe on _create_ becomes
+destructive on a _replace-write_ refresh path: it overwrites previously-known
+good data with placeholders whenever the upstream source happens to omit a value.
+The corruption is silent (validation passes) and propagates into downstream
+consumers that trust the stored values.
+
+**Preventive checks.**
+
+- Distinguish **create vs. refresh/replace** when defaulting nullable upstream
+  fields. On a path that replaces the whole record, pass the existing stored
+  values into the mapper and fall back to a default only when _both_ the new
+  payload and the stored value are missing — never let "unknown upstream" erase
+  "previously known."
+- Keep the **type honest about nullability**: if the runtime normalizes `null`,
+  the source type (`TonalUser`) should be `number | null`, not `number`, so the
+  normalization site is visible and type-checked rather than relying on a silent
+  `?? 0`.
+- Add a regression test that seeds prior measurements, refreshes with a
+  null-bearing payload, and asserts the stored values are **preserved** (not
+  zeroed).
+
+## 9. Keep error classification concrete through resilience wrappers, and notify before long awaits that can hit the action cap
+
+**Seen in:** #434 (2 P2 threads)
+
+**Problem.** The AI circuit-breaker wrapper added fallback context to its Discord
+outage alert, but two gaps undercut it:
+
+- **Terminal class collapsed to a placeholder.** When a fallback attempt ended
+  with `runAttempt` returning `{ done: true, success: false }` — the path used in
+  `convex/ai/resilience.ts` for BYOK, quota, and other non-transient provider
+  errors _after it had already recorded the real class_ — the alert always
+  reported a generic `TerminalFallbackAttemptFailure`. The new context was least
+  accurate exactly when fallback failed for a known reason.
+- **Notification deferred past the action cap.** The breaker-open alert was
+  delayed until after the final fallback finished. With each attempt budgeting
+  180s under Convex's 600s action cap, two primary timeouts plus the fallback can
+  run close enough to the cap that the action is killed before reaching the
+  notification — even though the breaker had already opened.
+
+**Why it matters.** Resilience/observability code is the last thing watching when
+everything else is failing. If it discards the concrete error class it already
+computed, the alert misleads operators precisely during a real outage; if it
+saves the alert for _after_ a long await, the action can die before the alert is
+ever sent, so the outage looks like silence.
+
+**Preventive checks.**
+
+- Carry the **concrete terminal error class** through the retry/fallback wrapper
+  (e.g. in `AttemptOutcome.errorClass`) and report it for both primary and
+  fallback terminal outcomes — don't overwrite an already-known class with a
+  generic placeholder.
+- Emit the **outage/breaker notification before awaiting** a long final fallback
+  (with `Fallback: pending`), then send a follow-up completion notification if the
+  action reaches the fallback result. Assume any single await can be killed by the
+  600s action cap (see learning #4 for the cap-derived timing rule).
+- Add coverage asserting the notification fires _before_ the final fallback
+  attempt, and that terminal failures report their real class.
+
 ---
 
 ## How to use this log
 
 - Before opening a PR that touches **Tonal fetch helpers, AI cost/budget paths,
   test fixtures, scheduled sweeps, React error boundaries around optional
-  integrations, or credential/format validators**, skim the matching section
-  above.
+  integrations, credential/format validators, payload transforms at an external
+  API boundary, nullable-field normalization on replace-writes, or
+  resilience/notification paths**, skim the matching section above.
 - When a review surfaces a _new_ recurring, legitimate gap (not stylistic, not
   one-off), add an entry here with the PR reference so the next agent inherits
   the lesson.
