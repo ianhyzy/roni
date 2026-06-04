@@ -8,6 +8,7 @@ import {
 } from "./mutations";
 import { TonalApiError } from "./client";
 import type { WorkoutSetInput } from "./types";
+import { type BlockInput, buildTonalWorkoutSets, TONAL_REST_MOVEMENT_ID } from "./transforms";
 
 // ---------------------------------------------------------------------------
 // enrichPushErrorMessage
@@ -204,6 +205,55 @@ describe("retryOn5xx", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("buildTonalWorkoutSets", () => {
+  it("omits Rest sentinel sets from searched-movement single-exercise blocks", () => {
+    const blocks: BlockInput[] = [
+      {
+        exercises: [
+          { movementId: "searched-movement", sets: 2, reps: 8 },
+          { movementId: TONAL_REST_MOVEMENT_ID, sets: 2, duration: 90 },
+        ],
+      },
+    ];
+    const catalog = [{ id: "searched-movement", countReps: true, isAlternating: false }];
+
+    const sets = buildTonalWorkoutSets(blocks, catalog);
+
+    expect(sets.map((set) => set.movementId)).toEqual(["searched-movement", "searched-movement"]);
+    expect(sets[0].prescribedReps).toBe(8);
+    expect(sets[1].prescribedReps).toBe(8);
+  });
+
+  it("returns no Tonal sets when every exercise is synthetic", () => {
+    const blocks: BlockInput[] = [
+      { exercises: [{ movementId: TONAL_REST_MOVEMENT_ID, sets: 1, duration: 60 }] },
+    ];
+
+    expect(buildTonalWorkoutSets(blocks, [])).toEqual([]);
+  });
+
+  it("marks the first remaining set as the block start after filtering synthetic sets", () => {
+    const blocks: BlockInput[] = [
+      {
+        exercises: [
+          { movementId: TONAL_REST_MOVEMENT_ID, sets: 1, duration: 60 },
+          { movementId: "searched-movement", sets: 1, reps: 8 },
+        ],
+      },
+    ];
+    const catalog = [{ id: "searched-movement", countReps: true, isAlternating: false }];
+
+    const sets = buildTonalWorkoutSets(blocks, catalog);
+
+    expect(sets).toHaveLength(1);
+    expect(sets[0]).toMatchObject({
+      movementId: "searched-movement",
+      blockStart: true,
+      prescribedReps: 8,
+    });
   });
 });
 

@@ -4,7 +4,8 @@ import { internal } from "../_generated/api";
 import { rateLimiter } from "../rateLimits";
 import type { Id } from "../_generated/dataModel";
 import { TonalApiError, tonalFetch } from "./client";
-import { type BlockInput, expandBlocksToSets } from "./transforms";
+import type { BlockInput } from "./transforms";
+import { buildTonalWorkoutSets } from "./transforms";
 import { validateWorkoutBlocks } from "./validation";
 import type { WorkoutEstimate, WorkoutSetInput } from "./types";
 import { WORKOUT_SOURCE } from "../workoutPlans";
@@ -135,7 +136,9 @@ export const pushWorkoutToTonal = internalAction({
   handler: async (
     ctx,
     { userId, title, blocks },
-  ): Promise<{ id: string; pushDivergence: PushDivergence | null } | { error: string }> => {
+  ): Promise<
+    { id: string; setCount: number; pushDivergence: PushDivergence | null } | { error: string }
+  > => {
     const catalog = await ctx.runQuery(internal.tonal.movementSync.getAllMovements);
     if (catalog.length === 0) {
       throw new Error(
@@ -148,8 +151,13 @@ export const pushWorkoutToTonal = internalAction({
         `Invalid movement IDs. You must use search_exercises to get real IDs from Tonal's catalog. Do not fabricate IDs. Errors: ${validation.errors.join(", ")}`,
       );
     }
-    const sets = expandBlocksToSets(blocks as BlockInput[], catalog);
-    correctDurationRepsMismatch(sets, catalog);
+    const sets = buildTonalWorkoutSets(blocks as BlockInput[], catalog);
+    if (sets.length === 0) {
+      return {
+        error:
+          "pushWorkoutToTonal: no Tonal-compatible sets to push after filtering synthetic movements.",
+      };
+    }
 
     const payload = { title, sets, createdSource: "WorkoutBuilder" };
     console.log(
@@ -197,7 +205,7 @@ export const pushWorkoutToTonal = internalAction({
         console.warn(`Push verification: read-back failed for ${tonalWorkoutId}`, err);
       }
 
-      return { id: tonalWorkoutId, pushDivergence };
+      return { id: tonalWorkoutId, setCount: sets.length, pushDivergence };
     });
   },
 });
@@ -267,7 +275,6 @@ export const createWorkout = internalAction({
     | { success: false; error: string; planId: Id<"workoutPlans"> }
   > => {
     await rateLimiter.limit(ctx, "createTonalWorkout", { key: userId, throws: true });
-    const sets = expandBlocksToSets(blocks as BlockInput[]);
     try {
       const tonalTitle = title;
       const pushResult = await ctx.runAction(internal.tonal.mutations.pushWorkoutToTonal, {
@@ -278,7 +285,7 @@ export const createWorkout = internalAction({
       if ("error" in pushResult) {
         throw new Error(pushResult.error);
       }
-      const { id, pushDivergence } = pushResult;
+      const { id, setCount, pushDivergence } = pushResult;
       const now = Date.now();
       const planId = await ctx.runMutation(internal.workoutPlans.create, {
         userId,
@@ -302,7 +309,7 @@ export const createWorkout = internalAction({
         success: true,
         workoutId: id,
         title,
-        setCount: sets.length,
+        setCount,
         planId,
         pushDivergence,
       };
@@ -362,7 +369,7 @@ export const estimateWorkout = internalAction({
   },
   handler: async (ctx, { userId, blocks }): Promise<WorkoutEstimate> => {
     const catalog = await ctx.runQuery(internal.tonal.movementSync.getAllMovements);
-    const sets = expandBlocksToSets(blocks as BlockInput[], catalog);
+    const sets = buildTonalWorkoutSets(blocks as BlockInput[], catalog);
     // Reject empty payloads up front; Tonal would otherwise return its
     // misleading "cannot unmarshal object into Go value of type content.SetList"
     // 400 for both empty arrays and JSON-object wrappers.

@@ -155,3 +155,18 @@ export function expandBlocksToSets(
     expandBlock(block, blockIdx + 1, blockIdx, movementMap),
   );
 }
+
+export function buildTonalWorkoutSets(
+  blocks: BlockInput[],
+  catalog: MovementCatalogEntry[],
+): WorkoutSetInput[] {
+  const filteredSets = expandBlocksToSets(blocks, catalog).filter(
+    (set) => !isWellKnownMovementId(set.movementId),
+  );
+  const seenBlockNumbers = new Set<number>();
+  return filteredSets.map((set) => {
+    const blockStart = !seenBlockNumbers.has(set.blockNumber);
+    seenBlockNumbers.add(set.blockNumber);
+    return set.blockStart === blockStart ? set : { ...set, blockStart };
+  });
+}
