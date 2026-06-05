@@ -306,9 +306,14 @@ errors, tests that don't exercise the real production path, exact-match model
 pricing that bypasses budget guardrails, watchdog/sweep timing windows, error
 boundaries around optional integrations that hide instead of recover/log,
 credential/format validators that reject the real format or drift across their
-duplicated copies). Skim the matching section before touching Tonal fetch helpers,
-AI cost/budget paths, test fixtures, scheduled sweeps, error boundaries around
-optional integrations, or credential/format validators -- and append a new entry
+duplicated copies, external-API payloads that lose invariants when a list is
+filtered before the push, alerts that drop the real error class or fire after a
+cap-bounded await, and external-payload types/refresh paths that mismodel nullables
+or clobber good data with normalized defaults). Skim the matching section before
+touching Tonal fetch helpers, AI cost/budget paths, test fixtures, scheduled sweeps,
+error boundaries around optional integrations, credential/format validators,
+external-API payload builders, alert/notification emission on retry/fallback paths,
+or external-payload types and profile refresh/merge logic -- and append a new entry
 when review surfaces a fresh recurring gap.
 
 <!-- convex-ai-start -->
