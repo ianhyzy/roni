@@ -1,6 +1,6 @@
 # PR Review Learnings
 
-Last reviewed: 2026-06-01
+Last reviewed: 2026-06-06
 
 A running log of recurring, legitimate issues raised in pull-request review that
 agents (and humans) should pre-empt. Each entry records the **problem**, **why
@@ -223,14 +223,134 @@ at a different boundary, which is hard to diagnose.
 - Add a positive test using the literal target format (here, an `AQ.`-prefixed
   key) at each validation layer.
 
+## 7. When filtering elements out of an outbound payload, reject empties, preserve structural markers, and re-derive counts from the filtered list
+
+**Seen in:** #440 (3 review threads — one P2, two P3)
+
+**Problem.** `buildTonalWorkoutSets` started dropping synthetic "rest" sentinel
+movements from the sets list before POSTing to the Tonal `/v6/user-workouts`
+endpoint. Filtering a payload in place introduced three distinct gaps:
+
+- **Empty result still sent.** A rest-only block filtered down to `[]`, but the
+  push path forwarded the empty set list to Tonal. The estimate path already
+  rejected empties (Tonal returns a misleading 400); the push path didn't, so
+  `createWorkout` recorded a _failed_ plan after a remote round-trip instead of
+  failing fast with a clear local error.
+- **Reported count diverged from what was sent.** `createWorkout` computed
+  `setCount` from a _separate, unfiltered_ `expandBlocksToSets(blocks)` call, so
+  the user/LLM-visible success result overstated how many sets were actually
+  pushed (e.g. "6 sets" reported when 3 work sets + 3 rest sentinels filtered
+  down to 3 posted).
+- **Structural marker lost.** If a block _started_ with a synthetic movement,
+  filtering removed the only set flagged `blockStart: true`, so the first real
+  set of that block went out as `blockStart: false` — the outbound block
+  boundaries no longer matched the internally validated block structure.
+
+**Why it matters.** A filter applied late, just before serialization, silently
+breaks invariants the rest of the system assumed held: non-empty payloads,
+counts that reflect what was sent, and structural flags positioned correctly.
+Each gap surfaces only on the specific shapes that trigger filtering, so normal
+inputs look fine while edge cases produce remote failures, misreported results,
+or corrupt payloads.
+
+**Preventive checks.**
+
+- After filtering, **guard the empty case before serializing/sending** — fail
+  fast with a local error (or a handled `{ error }` matching the function's
+  return contract) rather than letting the remote API reject it.
+- **Derive any reported metadata (counts, summaries) from the same filtered
+  output** that is actually sent, not from a parallel unfiltered computation.
+- **Re-establish structural invariants after filtering** — re-mark the first
+  remaining element in each group (e.g. `blockStart`), or reject synthetic
+  elements in positions that carry such markers.
+- Add coverage for the shapes that trigger filtering: an all-synthetic input
+  (→ empty guard), a mixed input (→ count matches), and a leading-synthetic
+  group (→ marker preserved).
+
+## 8. Carry the concrete failure class through retry/fallback outcomes, and emit alerts before long awaits near the action cap
+
+**Seen in:** #434 (2 review threads, both P2)
+
+**Problem.** PR #434 added richer context to circuit-breaker alerts, but the new
+plumbing had two gaps on the fallback path:
+
+- **Generic class clobbered the real one.** When a fallback attempt ended via
+  `runAttempt` returning `{ done: true, success: false }` (the path used for
+  BYOK/quota/other non-transient provider errors after the real class was already
+  recorded), the alert always reported the generic `TerminalFallbackAttemptFailure`
+  instead of the concrete error class — making the alert least accurate exactly
+  when fallback failed for a known reason. `AttemptOutcome` had to carry
+  `errorClass` so the notification could use the real class.
+- **Alert delayed behind the final await.** The breaker-open notification was
+  deferred until _after_ the fallback attempt finished. With each attempt
+  budgeting 180s under Convex's 600s action cap, two primary timeouts plus the
+  fallback can run close enough to the cap that the action is killed before the
+  notification fires — even though the breaker had already opened. The fix emits
+  a minimal breaker-open alert (`Fallback: pending`) before awaiting fallback,
+  then sends the fallback outcome separately.
+
+**Why it matters.** Observability added for failures must survive the failures it
+describes. An outcome type that overwrites the concrete error class loses the one
+field operators need; an alert scheduled after a long await can be killed by the
+action cap precisely on the slow/retried turns that most need surfacing.
+
+**Preventive checks.**
+
+- When an outcome flows through retry → fallback → aggregation, **thread the
+  concrete error class (and other diagnostic context) through the outcome type**;
+  don't collapse it to a generic sentinel at the last hop.
+- **Emit critical alerts before long awaits**, not after. If a notification
+  follows an operation that can approach `CONVEX_ACTION_MAX_MS`, send a minimal
+  version first and append the result from a best-effort/`finally` path.
+- Add a regression test asserting the alert is emitted **before** the final
+  fallback attempt, and that the reported class matches the terminal error.
+
+## 9. Model the nullable fields the upstream actually returns, and never let a "value unknown" refresh clobber stored data
+
+**Seen in:** #429 (2 review threads — one Major, one P2)
+
+**Problem.** PR #429 normalized Tonal sub-account profile data where Tonal can
+return `null` for numeric fields. Two gaps:
+
+- **Type didn't match the payload.** `TonalUser` declared `heightInches`,
+  `weightPounds`, and `workoutsPerWeek` as non-nullable `number`, even though
+  `toUserProfileData` already coerced `null → 0` (`?? 0`) and a test fed those
+  fields as `null`. The interface had to become `number | null` to model the real
+  payload shape.
+- **Refresh overwrote good data with zeros.** Coercing `null → 0` is fine for
+  first-time connect validation, but `updateProfileData` replaces the whole
+  stored `profileData`, so on a refresh/backfill where Tonal merely reported a
+  value as _unknown_, a user with real height/weight/frequency was downgraded to
+  `0` — and those zeros then flowed into the AI context (`0"/0lbs`, `0x/week`).
+  The mapper had to accept the existing stored measurements and fall back to `0`
+  only when both the payload _and_ the stored profile lacked a value.
+
+**Why it matters.** A type that's narrower than the upstream payload hides
+nullable cases from the compiler, so callers (and tests) don't handle them. And a
+whole-record overwrite that treats "unknown" as "zero" is silent, irreversible
+data loss — degrading downstream AI/coaching outputs without any error.
+
+**Preventive checks.**
+
+- Match external-API type definitions to **what the payload can actually return**
+  (cross-check against a real null sample and any normalizer using `?? default`);
+  a field normalized with `?? 0` is a signal the source type should be nullable.
+- For any refresh/backfill that **replaces a whole stored record**, distinguish
+  "upstream says the value is unknown" from "upstream confirms the value is zero."
+  Preserve prior non-null values when the new payload is null; only fall back to a
+  default when no prior value exists.
+- Add regression coverage asserting stored measurements **survive** a refresh
+  whose payload returns null fields.
+
 ---
 
 ## How to use this log
 
 - Before opening a PR that touches **Tonal fetch helpers, AI cost/budget paths,
   test fixtures, scheduled sweeps, React error boundaries around optional
-  integrations, or credential/format validators**, skim the matching section
-  above.
+  integrations, credential/format validators, outbound-payload filtering/
+  serialization, retry/fallback failure reporting, or external-API type
+  definitions and profile refresh/backfill**, skim the matching section above.
 - When a review surfaces a _new_ recurring, legitimate gap (not stylistic, not
   one-off), add an entry here with the PR reference so the next agent inherits
   the lesson.
