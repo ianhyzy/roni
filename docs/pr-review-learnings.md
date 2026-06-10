@@ -1,6 +1,6 @@
 # PR Review Learnings
 
-Last reviewed: 2026-06-01
+Last reviewed: 2026-06-09
 
 A running log of recurring, legitimate issues raised in pull-request review that
 agents (and humans) should pre-empt. Each entry records the **problem**, **why
@@ -223,14 +223,127 @@ at a different boundary, which is hard to diagnose.
 - Add a positive test using the literal target format (here, an `AQ.`-prefixed
   key) at each validation layer.
 
+## 7. When a transform filters elements out of a payload, keep counts and structural markers consistent — and guard the empty result
+
+**Seen in:** #440 (3 review threads: 1 P2, 2 P3, plus a CodeRabbit P2)
+
+**Problem.** `buildTonalWorkoutSets` started dropping synthetic movements (e.g.
+injected `Rest` sentinels) from the Tonal payload, but the rest of the push path
+wasn't updated to match the filtered list:
+
+- **Empty result wasn't guarded.** A block containing only synthetic movements
+  filtered down to `[]`, yet `pushWorkoutToTonal` still POSTed the empty `sets`
+  to `/v6/user-workouts`. Tonal returned a misleading 400 and `createWorkout`
+  recorded a failed plan — instead of failing fast locally with a clear error
+  (the estimate path already rejected empty payloads; the push path didn't).
+- **Count came from the unfiltered source.** `createWorkout` reported `setCount`
+  from a separate unfiltered `expandBlocksToSets(blocks)` calculation, so a
+  3-work-set + 3-rest-sentinel block reported 6 sets pushed while only 3 reached
+  Tonal — the user/LLM-visible success message overstated the result.
+- **A structural marker was lost with the element it sat on.** When a block began
+  with a synthetic movement, filtering removed the only set marked
+  `blockStart: true`, so the first _real_ set went out as `blockStart: false` and
+  the Tonal payload's block boundaries no longer matched the validated block
+  structure.
+
+**Why it matters.** A filter step that drops elements quietly desynchronizes
+everything derived from the original list — counts, boundary markers, and the
+"is there anything left?" precondition. The failures surface as opaque remote
+errors or wrong user-facing numbers, far from the filter that caused them.
+
+**Preventive checks.**
+
+- After filtering, **guard the empty result** and fail fast locally with a
+  descriptive error _before_ constructing/sending the remote payload — don't let
+  an external API translate "nothing to send" into a confusing 4xx.
+- Derive **counts and summaries from the post-filter list**, never from a
+  parallel unfiltered calculation of the same data.
+- **Re-establish structural anchors** (block starts, "first"/"last" flags,
+  ordinal indices) on the filtered list when the element that carried them can be
+  removed — or reject inputs that would place a marker on a droppable element.
+- Add coverage for the **all-dropped** case and the **leading-element-dropped**
+  case, not just the happy middle.
+
+## 8. Preserve the concrete error class through fallback layers, and emit time-sensitive alerts before long awaits
+
+**Seen in:** #434 (2 review threads, both P2)
+
+**Problem.** Adding fallback context to the circuit-breaker alert introduced two
+gaps:
+
+- **The terminal error class was flattened.** When a fallback attempt ended with
+  `{ done: true, success: false }` for a _known_ non-transient class (BYOK,
+  quota, etc.), the alert reported a generic `TerminalFallbackAttemptFailure`
+  instead of the real class `resilience.ts` had already identified — losing the
+  diagnosis exactly when fallback fails for a knowable reason.
+- **A notification was awaited behind a long operation.** The breaker-open alert
+  was delayed until after the final fallback attempt finished. With each attempt
+  budgeting 180s under Convex's 600s action cap, two primary timeouts plus the
+  fallback could run close enough to the cap that the action is killed before the
+  notification is ever sent — even though the breaker had already opened.
+
+**Why it matters.** Observability degrades precisely on the worst failures: the
+alert that should explain a terminal failure either misreports the cause or never
+fires because the action died first.
+
+**Preventive checks.**
+
+- Carry the **concrete error class** through your `AttemptOutcome`/result type and
+  use it for _both_ primary and fallback terminal notifications — don't substitute
+  a generic sentinel when the real class is already known.
+- Emit **minimal state-change alerts (breaker-open, etc.) before** awaiting a long
+  final operation; record the operation's outcome in a _separate_ follow-up or a
+  best-effort `finally`, so an action killed at the cap still surfaces the state
+  change. (See also §4 — budget all timing against `CONVEX_ACTION_MAX_MS`.)
+- Add a regression test asserting the alert is sent **before** the final fallback
+  await, and that a known terminal class propagates into the alert payload.
+
+## 9. Type external fields as nullable to match the real payload, and don't let connect-time normalization clobber stored values on refresh
+
+**Seen in:** #429 (1 P2 review thread + 1 CodeRabbit Major)
+
+**Problem.** Normalizing Tonal sub-account profile data surfaced two issues:
+
+- **The type lied about the payload.** `TonalUser` declared `heightInches`,
+  `weightPounds`, and `workoutsPerWeek` as non-nullable `number`, but the mapper
+  already did `?? 0` and a test fed `null` for these fields — Tonal really does
+  return `null`. The interface said the null case couldn't happen while the code
+  handled it, hiding the null-handling contract from every consumer.
+- **Connect-time normalization ran destructively on refresh.** The `?? 0`
+  fallback is necessary for first-time-connect validation, but it also ran on
+  refresh/backfill — and `updateProfileData` replaces the whole stored
+  `profileData`. So a user with real height/weight/frequency could be **downgraded
+  to `0`** when a later Tonal payload merely said those values were unknown, and
+  the zeros then leaked into AI context (`0"/0lbs`, `0x/week`).
+
+**Why it matters.** A type that doesn't model the real nullable shape lets
+null-handling bugs through silently. And a normalization default that's safe at
+first-connect becomes _data corruption_ on refresh — "value unknown right now"
+must never overwrite a previously known value.
+
+**Preventive checks.**
+
+- Type external/API fields as `number | null` (etc.) to **match what the payload
+  actually sends**; cross-check the mapper's `?? ` fallbacks and any test that
+  passes `null`. If you're defaulting a value, the source type is probably
+  nullable.
+- Distinguish **first-time-connect normalization from refresh/backfill**. On
+  refresh, fall back to the **existing stored value** before any hardcoded default,
+  and never replace a known value with a default derived from a "value unknown"
+  payload.
+- Add a regression test asserting refresh **preserves stored measurements** when
+  the latest payload returns `null` for those fields.
+
 ---
 
 ## How to use this log
 
 - Before opening a PR that touches **Tonal fetch helpers, AI cost/budget paths,
   test fixtures, scheduled sweeps, React error boundaries around optional
-  integrations, or credential/format validators**, skim the matching section
-  above.
+  integrations, credential/format validators, payload transforms that
+  filter/drop elements, retry/fallback error reporting, or external-payload
+  normalization (nullable typing, refresh vs. first-connect defaults)**, skim the
+  matching section above.
 - When a review surfaces a _new_ recurring, legitimate gap (not stylistic, not
   one-off), add an entry here with the PR reference so the next agent inherits
   the lesson.
