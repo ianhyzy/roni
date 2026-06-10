@@ -2,6 +2,19 @@
 
 All notable changes to this project are documented here. This file is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commits on `main`. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.10.6](https://github.com/JeffOtano/roni/compare/v0.10.5...v0.10.6) (2026-06-10)
+
+
+### Bug Fixes
+
+* omit synthetic rest from Tonal payloads ([#440](https://github.com/JeffOtano/roni/issues/440)) ([9198583](https://github.com/JeffOtano/roni/commit/9198583c6fda74cb4e65115b245cb99aac659abd))
+* **tonal:** clamp non-positive reps/duration before Tonal push ([#447](https://github.com/JeffOtano/roni/issues/447)) ([55348c1](https://github.com/JeffOtano/roni/commit/55348c1b14d1269963897a6c347c032326b8298e))
+
+
+### Documentation
+
+* capture PR review learnings 7-9 (payload filtering, fallback error-class, nullable refresh) ([#459](https://github.com/JeffOtano/roni/issues/459)) ([1d4d2da](https://github.com/JeffOtano/roni/commit/1d4d2da080b407e877e364f7a23cbb6043e49936))
+
 ## [0.10.5](https://github.com/JeffOtano/roni/compare/v0.10.4...v0.10.5) (2026-06-02)
 
 
