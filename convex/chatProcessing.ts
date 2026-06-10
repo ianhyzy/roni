@@ -91,8 +91,13 @@ export function selectCoachTierRoute<TAgent>(
 
 function getPrimaryTierForIntent(intent: CoachRouteIntent): ModelTier {
   switch (intent) {
+    // Trivial prompts route to the chat tier, NOT the flash-lite router tier.
+    // Short, low-keyword requests (e.g. "make me a workout") are frequently
+    // actionable, and the router model does not reliably drive
+    // search_exercises -> create_workout, so it silently produced no workout.
+    // Keep them tool-capable on the chat tier; genuinely trivial chit-chat just
+    // costs slightly more. (complex still escalates to the programming tier.)
     case "trivial":
-      return "router";
     case "default":
       return "chat";
     case "complex":

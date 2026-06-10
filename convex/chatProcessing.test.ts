@@ -38,7 +38,10 @@ describe("selectCoachTierRoute", () => {
     summarize: "summarize-model",
   };
 
-  it("uses the router model as the first attempt for trivial prompts", () => {
+  it("routes trivial prompts to the tool-capable chat tier, not the flash-lite router", () => {
+    // Regression: trivial prompts used to start on the router (flash-lite) tier,
+    // which would not reliably drive search_exercises -> create_workout, so short
+    // workout requests like "make me a workout" silently produced no workout.
     const route = selectCoachTierRoute(
       {
         tierAgents,
@@ -48,12 +51,10 @@ describe("selectCoachTierRoute", () => {
       "trivial",
     );
 
-    expect(route.primary).toBe(tierAgents.router);
-    expect(route.fallback).toBe(tierAgents.chat);
-    expect(route.primaryModelName).toBe("router-model");
-    expect(route.fallbackModelName).toBe("chat-model");
-    expect(route.primaryTier).toBe("router");
-    expect(route.fallbackTier).toBe("chat");
+    expect(route.primary).toBe(tierAgents.chat);
+    expect(route.primaryModelName).toBe("chat-model");
+    expect(route.primaryTier).toBe("chat");
+    expect(route.primaryTier).not.toBe("router");
   });
 
   it("uses the programming model first for complex prompts", () => {
@@ -125,11 +126,11 @@ describe("selectCoachTierRoute", () => {
       "trivial",
     );
 
-    expect(route.primary).toBe(tierAgents.router);
-    expect(route.fallback).toBe(tierAgents.router);
+    expect(route.primary).toBe(tierAgents.chat);
+    expect(route.fallback).toBe(tierAgents.chat);
     expect(route.primaryModelName).toBe("openrouter/auto");
     expect(route.fallbackModelName).toBeNull();
-    expect(route.primaryTier).toBe("router");
-    expect(route.fallbackTier).toBe("router");
+    expect(route.primaryTier).toBe("chat");
+    expect(route.fallbackTier).toBe("chat");
   });
 });
