@@ -9,7 +9,7 @@ import type {
   StrengthScoreHistoryEntry,
 } from "../tonal/types";
 import type { EnrichedWorkoutDetail } from "../workoutDetail";
-import { getWellKnownMovement, isWellKnownMovementId } from "../tonal/transforms";
+import { resolveWorkoutBlocks } from "./createWorkoutBlocks";
 import { requireUserId, withToolTracking } from "./helpers";
 
 export const KNOWN_TRAINING_TYPES = [
@@ -229,7 +229,7 @@ export const getTrainingFrequencyTool = createTool({
 
 export const createWorkoutTool = createTool({
   description:
-    "Create one standalone custom workout on Tonal outside the weekly plan. Use when the user asks for a single one-off workout to push directly to Tonal. Do not use for weekly programming, draft week edits, or multiple scheduled sessions; use program_week, rebuild_day, or the draft modification tools for those. Inputs require a title and blocks of searched movementIds with reps for rep-based movements or duration seconds for duration-based movements; returns push success details or a validation error.",
+    "Create one standalone custom workout on Tonal outside the weekly plan. Use when the user asks for a single one-off workout to push directly to Tonal. Do not use for weekly programming, draft week edits, or multiple scheduled sessions; use program_week, rebuild_day, or the draft modification tools for those. Inputs require a title and blocks of exercises; give each exercise its `name` from search_exercises (the server resolves the real Tonal ID, repairing a missing or wrong movementId) plus reps for rep-based movements or duration seconds for duration-based movements; returns push success details, or — if a name cannot be resolved — the candidate movements to choose from.",
   inputSchema: z.object({
     title: z
       .string()
@@ -242,7 +242,18 @@ export const createWorkoutTool = createTool({
           exercises: z
             .array(
               z.object({
-                movementId: z.string().describe("UUID from search_exercises"),
+                name: z
+                  .string()
+                  .optional()
+                  .describe(
+                    'Exercise name from search_exercises, e.g. "Alternating Bench Press". Always provide this for real exercises — the server resolves it to the real Tonal catalog ID, so a missing or guessed movementId is repaired automatically. Optional only for the synthetic Rest sentinel, which is identified by movementId.',
+                  ),
+                movementId: z
+                  .string()
+                  .optional()
+                  .describe(
+                    "Tonal catalog UUID from search_exercises (or the Rest sentinel). Optional for real exercises — the server resolves by name when it is missing or invalid. Never fabricate one.",
+                  ),
                 sets: z.number().int().min(1).max(10).default(3),
                 // Keep reps/duration permissive: non-positive values are normalized to
                 // safe defaults in buildSet before the Tonal push (#447). Rejecting here
@@ -269,6 +280,7 @@ export const createWorkoutTool = createTool({
           {
             exercises: [
               {
+                name: "Bench Press",
                 movementId: "movement-id-from-search-exercises-1",
                 sets: 3,
                 reps: 10,
@@ -277,6 +289,7 @@ export const createWorkoutTool = createTool({
                 warmUp: false,
               },
               {
+                name: "Plank",
                 movementId: "duration-movement-id-from-search",
                 sets: 3,
                 duration: 30,
@@ -309,49 +322,22 @@ export const createWorkoutTool = createTool({
     > => {
       const userId = requireUserId(ctx);
 
-      // Pre-validate movement IDs against the movements table
-      const allMovementIds = input.blocks.flatMap((b) => b.exercises.map((e) => e.movementId));
-      const validatedMovements: Movement[] = await ctx.runQuery(
-        internal.tonal.movementSync.getByTonalIds,
-        {
-          tonalIds: allMovementIds,
-        },
+      // Resolve each exercise to a real Tonal catalog ID. The coach frequently
+      // supplies a fabricated or stale UUID instead of calling search_exercises; fall
+      // back to the exercise name and repair the ID rather than hard-stopping the push.
+      const catalog: Movement[] = await ctx.runQuery(
+        internal.tonal.movementSync.getAllMovements,
+        {},
       );
-      const validIds = new Set(validatedMovements.map((m) => m.id));
-      // Well-known synthetic IDs (e.g. Rest) are valid payload values that are
-      // absent from the synced catalog — never flag them as fabricated.
-      const invalidIds = allMovementIds.filter(
-        (id) => !validIds.has(id) && !isWellKnownMovementId(id),
-      );
-      if (invalidIds.length > 0) {
-        const pctInvalid = invalidIds.length / allMovementIds.length;
-        const isLikelyHallucination = pctInvalid > 0.3 || invalidIds.length >= 3;
-        return {
-          success: false,
-          error: isLikelyHallucination
-            ? `STOP: ${invalidIds.length} of ${allMovementIds.length} movement IDs are invalid. You are fabricating IDs. You MUST call search_exercises for EACH exercise to get real UUIDs from Tonal's catalog. If you are building a weekly plan, use program_week instead of create_workout.`
-            : `Invalid movementIds: ${invalidIds.join(", ")}. Call search_exercises to get valid IDs. Do not guess or reuse IDs from previous conversations.`,
-        };
+      const resolved = resolveWorkoutBlocks(input.blocks, catalog);
+      if (!resolved.ok) {
+        return { success: false, error: resolved.error };
       }
-
-      // Auto-correct duration vs reps based on movement.countReps
-      const movementMap = new Map(validatedMovements.map((m) => [m.id, m]));
-      const correctedBlocks = input.blocks.map((block) => ({
-        exercises: block.exercises.map((ex) => {
-          const movement = movementMap.get(ex.movementId) ?? getWellKnownMovement(ex.movementId);
-          if (movement && !movement.countReps) {
-            // Duration-based movement: use duration, ignore reps
-            return { ...ex, duration: ex.duration ?? 30, reps: undefined };
-          }
-          // Rep-based movement: use reps, ignore duration
-          return { ...ex, reps: ex.reps ?? 10, duration: undefined };
-        }),
-      }));
 
       const pushed = await ctx.runAction(internal.tonal.mutations.createWorkout, {
         userId,
         title: input.title,
-        blocks: correctedBlocks,
+        blocks: resolved.blocks,
       });
 
       if (!pushed.success) return pushed;

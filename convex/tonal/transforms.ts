@@ -64,8 +64,8 @@ interface BuildSetOpts {
   movementMap?: Map<string, MovementCatalogEntry>;
 }
 
-const DEFAULT_DURATION_SECONDS = 30;
-const DEFAULT_REPS = 10;
+export const DEFAULT_DURATION_SECONDS = 30;
+export const DEFAULT_REPS = 10;
 
 /**
  * Tonal rejects an explicit 0 or negative prescribedReps/prescribedDuration with
