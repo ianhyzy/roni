@@ -1,6 +1,6 @@
 # PR Review Learnings
 
-Last reviewed: 2026-06-09
+Last reviewed: 2026-06-10
 
 A running log of recurring, legitimate issues raised in pull-request review that
 agents (and humans) should pre-empt. Each entry records the **problem**, **why
@@ -334,6 +334,64 @@ must never overwrite a previously known value.
 - Add a regression test asserting refresh **preserves stored measurements** when
   the latest payload returns `null` for those fields.
 
+## 10. Resolve LLM/user-supplied references to a catalog with a strict precedence ladder, and don't let a required field block catalog-exempt sentinels
+
+**Seen in:** #465 (4 review threads, all P2)
+
+**Problem.** `create_workout` made `name` required so the resolver could repair
+missing or fabricated movement IDs (`convex/tonal/movementResolve.ts`,
+`convex/ai/tools.ts`). But the resolution path had four ways to push the _wrong_
+Tonal movement, or block a valid one, from an LLM-supplied `{ name, movementId }`
+reference:
+
+- **A valid-but-stale ID won over the correct name.** When both fields were
+  supplied, the resolver trusted the ID immediately and never checked `name`.
+  An LLM that copied a real ID from a different exercise while giving the correct
+  new name would silently push the wrong movement — defeating the exact reason
+  `name` was made required.
+- **A broad single-word fuzzy match was auto-substituted.** A lone
+  `matchesNameSearchStrict` hit (matches if any 3+ char word appears in a movement
+  name) was pushed silently, so `Decline Push-up` resolved to
+  `Standing Decline Chest Press` and went onto the user's Tonal workout.
+- **An exact full-name match was reported `ambiguous`** when the same string also
+  equaled a _different_ movement's `shortName` alias, blocking a valid tool call
+  that copied `name` straight from `search_exercises`.
+- **A schema-required field rejected a catalog-exempt sentinel.** The required
+  `name` made Zod reject an id-only `Rest` sentinel call _before_
+  `resolveMovement`'s `isWellKnownMovementId` path could run, so single-exercise
+  workouts including the documented Rest sentinel failed unless the model invented
+  a `name`.
+
+**Why it matters.** When an LLM/user-supplied reference is resolved to a canonical
+catalog entity that is then pushed to an external system, both match _precedence_
+and match _strictness_ are correctness-critical: a wrong resolution becomes a wrong
+exercise on the user's machine, and an over-strict one blocks legitimate calls.
+And a required field enforced at the schema layer fires before the resolver's
+special-cases (well-known/synthetic IDs), so it can reject inputs the resolver was
+specifically built to accept.
+
+**Preventive checks.**
+
+- Define an explicit **precedence ladder** for identity resolution and make the
+  most-trustworthy signal win: here, exact full `name` → valid/well-known
+  `movementId` → exact `shortName` alias → (fuzzy only as **candidates**, never
+  auto-substituted). Treat the human-readable name as the source of truth over a
+  possibly-stale supplied ID.
+- **Never auto-substitute a fuzzy/partial match.** Return partial-word matches as
+  `ambiguous` candidates for the model/user to confirm; only exact matches resolve
+  silently.
+- When the same string can match **multiple fields** (full name vs. alias), check
+  the canonical field first and only fall back to aliases when it yields no match —
+  don't merge both into an `ambiguous` result.
+- Keep **schema/input-layer required fields from pre-empting resolver special
+  cases.** If the resolver legitimately accepts an id-only catalog-exempt sentinel
+  (Rest, well-known synthetic IDs), make the companion field optional at the schema
+  boundary so the call reaches the resolver. Cross-check that the not-found error
+  message still degrades gracefully (fall back to the ID) when the optional field
+  is absent.
+- Add positive tests for each ladder rung: stale-id-loses-to-name,
+  fuzzy-stays-candidate, full-name-beats-shortName-alias, and the id-only sentinel.
+
 ---
 
 ## How to use this log
@@ -341,9 +399,11 @@ must never overwrite a previously known value.
 - Before opening a PR that touches **Tonal fetch helpers, AI cost/budget paths,
   test fixtures, scheduled sweeps, React error boundaries around optional
   integrations, credential/format validators, payload transforms that
-  filter/drop elements, retry/fallback error reporting, or external-payload
-  normalization (nullable typing, refresh vs. first-connect defaults)**, skim the
-  matching section above.
+  filter/drop elements, retry/fallback error reporting, external-payload
+  normalization (nullable typing, refresh vs. first-connect defaults), or
+  identity resolution of LLM/user-supplied references against a catalog
+  (match precedence/strictness, schema-required fields vs. resolver special
+  cases)**, skim the matching section above.
 - When a review surfaces a _new_ recurring, legitimate gap (not stylistic, not
   one-off), add an entry here with the PR reference so the next agent inherits
   the lesson.
