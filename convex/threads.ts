@@ -1,4 +1,4 @@
-import { internalQuery, query } from "./_generated/server";
+import { internalAction, internalQuery, query } from "./_generated/server";
 import { components, internal } from "./_generated/api";
 import { v } from "convex/values";
 import { getEffectiveUserId } from "./lib/auth";
@@ -91,5 +91,69 @@ export const listConversationHistory = query({
       threadId: targetThread._id,
       hasMore: olderThreads.length > 1 || !result.isDone,
     };
+  },
+});
+
+/**
+ * Internal: one page of user IDs, for batch admin sweeps over all users.
+ */
+export const listUserIdsPage = internalQuery({
+  args: { cursor: v.union(v.string(), v.null()) },
+  handler: async (ctx, { cursor }) => {
+    const result = await ctx.db.query("users").paginate({ cursor, numItems: 200 });
+    return {
+      userIds: result.page.map((u) => u._id as string),
+      cursor: result.continueCursor,
+      isDone: result.isDone,
+    };
+  },
+});
+
+/**
+ * One-off admin sweep: archive each user's current (most-recent active) chat
+ * thread so their next message starts a fresh thread via createThreadWithMessage
+ * (the stale/none path). Internal-only; run from the Convex dashboard or CLI:
+ *   npx convex run --prod threads:rollAllActiveThreads '{"dryRun":true}'  # count only
+ *   npx convex run --prod threads:rollAllActiveThreads                    # execute
+ * Messages are not deleted — status flips to "archived" (reversible) — but the
+ * rolled conversation drops out of the user's view; they start fresh.
+ */
+export const rollAllActiveThreads = internalAction({
+  args: { dryRun: v.optional(v.boolean()) },
+  handler: async (
+    ctx,
+    { dryRun = false },
+  ): Promise<{ usersScanned: number; threadsRolled: number; dryRun: boolean }> => {
+    let usersScanned = 0;
+    let threadsRolled = 0;
+    let cursor: string | null = null;
+
+    for (;;) {
+      const page: { userIds: string[]; cursor: string; isDone: boolean } = await ctx.runQuery(
+        internal.threads.listUserIdsPage,
+        { cursor },
+      );
+      for (const userId of page.userIds) {
+        usersScanned++;
+        const threads = await ctx.runQuery(components.agent.threads.listThreadsByUserId, {
+          userId,
+          paginationOpts: { cursor: null, numItems: 1 },
+          order: "desc",
+        });
+        const current = threads.page[0];
+        if (!current || current.status !== "active") continue;
+        if (!dryRun) {
+          await ctx.runMutation(components.agent.threads.updateThread, {
+            threadId: current._id,
+            patch: { status: "archived" },
+          });
+        }
+        threadsRolled++;
+      }
+      if (page.isDone) break;
+      cursor = page.cursor;
+    }
+
+    return { usersScanned, threadsRolled, dryRun };
   },
 });
