@@ -149,6 +149,45 @@ describe("expandBlocksToSets defaults and fields", () => {
     expect(sets[0].prescribedReps).toBe(10);
   });
 
+  // Regression for #447: Tonal rejects an explicit 0 or negative prescribed value
+  // with HTTP 400 ("prescribed reps or duration zero (not nil) or negative"). A nil
+  // value is fine, so non-positive inputs must be treated as unspecified, not preserved.
+  it("clamps zero reps to the default for rep-based exercises", () => {
+    const blocks: BlockInput[] = [{ exercises: [{ movementId: "move-1", sets: 1, reps: 0 }] }];
+    const sets = expandBlocksToSets(blocks);
+    expect(sets[0].prescribedReps).toBe(10);
+  });
+
+  it("clamps negative reps to the default for rep-based exercises", () => {
+    const blocks: BlockInput[] = [{ exercises: [{ movementId: "move-1", sets: 1, reps: -5 }] }];
+    const sets = expandBlocksToSets(blocks);
+    expect(sets[0].prescribedReps).toBe(10);
+  });
+
+  it("clamps zero duration to the default for duration-based exercises", () => {
+    const blocks: BlockInput[] = [{ exercises: [{ movementId: "plank", sets: 1, duration: 0 }] }];
+    const catalog = [{ id: "plank", countReps: false, isAlternating: false }];
+    const sets = expandBlocksToSets(blocks, catalog);
+    expect(sets[0].prescribedDuration).toBe(30);
+    expect(sets[0].prescribedReps).toBeUndefined();
+  });
+
+  it("clamps negative duration to the default for duration-based exercises", () => {
+    const blocks: BlockInput[] = [{ exercises: [{ movementId: "plank", sets: 1, duration: -30 }] }];
+    const catalog = [{ id: "plank", countReps: false, isAlternating: false }];
+    const sets = expandBlocksToSets(blocks, catalog);
+    expect(sets[0].prescribedDuration).toBe(30);
+  });
+
+  it("does not route a rep-based move into a negative-duration set", () => {
+    const blocks: BlockInput[] = [
+      { exercises: [{ movementId: "move-1", sets: 1, reps: 8, duration: -20 }] },
+    ];
+    const sets = expandBlocksToSets(blocks);
+    expect(sets[0].prescribedDuration).toBeUndefined();
+    expect(sets[0].prescribedReps).toBe(8);
+  });
+
   it("includes all required Tonal fields (burnout, chains, flex, dropSet, description)", () => {
     const blocks: BlockInput[] = [{ exercises: [{ movementId: "move-1", sets: 1, reps: 8 }] }];
     const sets = expandBlocksToSets(blocks);

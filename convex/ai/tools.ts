@@ -244,6 +244,9 @@ export const createWorkoutTool = createTool({
               z.object({
                 movementId: z.string().describe("UUID from search_exercises"),
                 sets: z.number().int().min(1).max(10).default(3),
+                // Keep reps/duration permissive: non-positive values are normalized to
+                // safe defaults in buildSet before the Tonal push (#447). Rejecting here
+                // would skip that repair on the one-off create_workout path and still fail.
                 reps: z.number().int().optional(),
                 duration: z.number().int().optional(),
                 spotter: z.boolean().default(false),

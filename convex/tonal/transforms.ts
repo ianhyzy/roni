@@ -65,6 +65,17 @@ interface BuildSetOpts {
 }
 
 const DEFAULT_DURATION_SECONDS = 30;
+const DEFAULT_REPS = 10;
+
+/**
+ * Tonal rejects an explicit 0 or negative prescribedReps/prescribedDuration with
+ * HTTP 400 ("prescribed reps or duration zero (not nil) or negative"); a nil value
+ * is accepted. `value ?? fallback` would preserve 0, so non-positive or non-finite
+ * inputs are treated as unspecified and fall back to the default. (#447)
+ */
+function positiveOr(value: number | undefined, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : fallback;
+}
 
 function buildSet({
   ex,
@@ -96,12 +107,15 @@ function buildSet({
   // Auto-correct based on movement catalog if available
   const movement = movementMap?.get(ex.movementId);
   const isDurationBased = movement ? !movement.countReps : false;
+  // Only a positive duration counts as caller-provided; a 0/negative value must not
+  // route a rep-based movement into an invalid duration set.
+  const hasExplicitDuration = typeof ex.duration === "number" && ex.duration > 0;
 
-  if (isDurationBased || ex.duration) {
-    set.prescribedDuration = ex.duration ?? DEFAULT_DURATION_SECONDS;
+  if (isDurationBased || hasExplicitDuration) {
+    set.prescribedDuration = positiveOr(ex.duration, DEFAULT_DURATION_SECONDS);
     set.prescribedResistanceLevel = 5;
   } else {
-    const baseReps = ex.reps ?? 10;
+    const baseReps = positiveOr(ex.reps, DEFAULT_REPS);
     // Tonal counts total reps for alternating exercises (5 per side = 10 total).
     // AI prescribes per-side reps, so double for alternating movements.
     const isAlternating = movement?.isAlternating ?? false;
