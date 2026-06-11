@@ -4,6 +4,7 @@ import {
   buildMovementSearchFields,
   matchesNameSearch,
   matchesNameSearchStrict,
+  scoreNameMatch,
 } from "./movementSearch";
 
 const rdl = {
@@ -178,6 +179,72 @@ describe("matchesNameSearchStrict", () => {
         "Hip Thrust",
       ),
     ).toBe(false);
+  });
+});
+
+describe("scoreNameMatch", () => {
+  const m = (name: string, shortName = name) => ({ name, shortName });
+
+  it("returns 0 for an empty query", () => {
+    expect(scoreNameMatch(m("Bench Press"), "")).toBe(0);
+  });
+
+  it("scores an exact full-name match higher than a contained-phrase match", () => {
+    const exact = scoreNameMatch(m("Bench Press"), "Bench Press");
+    const contained = scoreNameMatch(m("Alternating Bench Press"), "Bench Press");
+    expect(exact).toBeGreaterThan(contained);
+  });
+
+  it("scores a contained phrase higher than a single-word overlap", () => {
+    const contained = scoreNameMatch(m("Alternating Bench Press"), "Bench Press");
+    const oneWord = scoreNameMatch(m("Triceps Bench Dip"), "Bench Press");
+    expect(contained).toBeGreaterThan(oneWord);
+  });
+
+  it("ranks the exact movement first even when long incidental names also match", () => {
+    // Regression: the real "Bench Press" must outrank "Triceps Bench Dip".
+    const exact = scoreNameMatch(m("Bench Press"), "Bench Press");
+    const incidental = scoreNameMatch(m("Triceps Bench Dip"), "Bench Press");
+    expect(exact).toBeGreaterThan(incidental);
+  });
+
+  it("scores all query words present (any order) above a single-word overlap", () => {
+    const allWords = scoreNameMatch(m("Barbell Front Squat"), "Barbell Squat");
+    const oneWord = scoreNameMatch(m("Iso Split Squat Chop"), "Barbell Squat");
+    expect(allWords).toBeGreaterThan(oneWord);
+  });
+
+  it("breaks single-word-overlap ties toward the shorter, more canonical name", () => {
+    const shortName = scoreNameMatch(m("Goblet Squat"), "Barbell Squat");
+    const longName = scoreNameMatch(m("Iso Split Squat Chop"), "Barbell Squat");
+    expect(shortName).toBeGreaterThan(longName);
+  });
+
+  it("returns 0 when only the description would match (name-only ranking)", () => {
+    const chop = {
+      name: "Single Leg Chop",
+      shortName: "SL Chop",
+      descriptionHow: "Brace glutes and bridge core to maintain stability",
+      descriptionWhy: "",
+    };
+    expect(scoreNameMatch(chop, "Glute Bridge")).toBe(0);
+  });
+
+  it("returns 0 for an unrelated movement", () => {
+    expect(scoreNameMatch(m("Lateral Raise"), "Bench Press")).toBe(0);
+  });
+
+  it("scores an alias-resolved name above zero (RDL → Romanian Deadlift)", () => {
+    expect(scoreNameMatch(m("Romanian Deadlift"), "RDL")).toBeGreaterThan(0);
+  });
+
+  it("scores an exact shortName match strongly", () => {
+    const exactShort = scoreNameMatch(
+      { name: "Triceps Extension", shortName: "Triceps Ext" },
+      "Triceps Ext",
+    );
+    const incidental = scoreNameMatch(m("Triceps Bench Dip"), "Triceps Ext");
+    expect(exactShort).toBeGreaterThan(incidental);
   });
 });
 

@@ -91,6 +91,27 @@ describe("searchMovements", () => {
     expect(results.map((movement) => movement.id)).toEqual(["move-rdl"]);
   });
 
+  test("ranks the exact-name movement first even when incidental names also match", async () => {
+    const t = convexTest(schema, modules);
+
+    await t.run(async (ctx) => {
+      await ctx.db.insert("movements", makeDoc({ id: "move-dip", name: "Triceps Bench Dip" }));
+      await ctx.db.insert(
+        "movements",
+        makeDoc({ id: "move-alt", name: "Alternating Bench Press" }),
+      );
+      await ctx.db.insert("movements", makeDoc({ id: "move-bench", name: "Bench Press" }));
+    });
+    await runBackfillToCompletion(t);
+
+    const results = await t.query(internal.tonal.movementSearchQueries.searchMovements, {
+      name: "Bench Press",
+      limit: 30,
+    });
+
+    expect(results[0]?.id).toBe("move-bench");
+  });
+
   test("uses indexed candidates and exact-filters the remaining predicates", async () => {
     const t = convexTest(schema, modules);
 

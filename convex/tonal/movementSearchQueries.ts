@@ -11,6 +11,7 @@ import {
   buildMovementSearchFields,
   matchesNameSearch,
   matchesNameSearchStrict,
+  scoreNameMatch,
 } from "./movementSearch";
 import { mapDocToMovement } from "./movementMapping";
 import type { Movement } from "./types";
@@ -18,6 +19,12 @@ import type { Movement } from "./types";
 const DEFAULT_SEARCH_LIMIT = 30;
 const MAX_SEARCH_LIMIT = 100;
 const BACKFILL_BATCH_LIMIT = 200;
+/**
+ * For name searches, over-fetch this many filter-passing candidates before
+ * re-ranking by name relevance, so the canonical match surfaces even when the
+ * full-text index ranks it below long incidental names. Trimmed to `limit`.
+ */
+const NAME_CANDIDATE_POOL = 100;
 const SEARCH_STATE_KEY = "movement_search_fields";
 const SEARCH_FIELDS_VERSION = 1;
 
@@ -51,14 +58,17 @@ export const searchMovements = internalQuery({
       return docs.map(mapDocToMovement);
     }
 
+    // Over-fetch for name searches so the relevance re-rank has candidates to work with.
+    const poolSize = filters.name ? Math.max(limit, NAME_CANDIDATE_POOL) : limit;
+
     if (!(await searchFieldsAreReady(ctx))) {
       // Existing catalogs may lack the indexed fields; preserve search results until backfill marks them ready.
-      const fallbackMatches = await loadFallbackMatches(ctx, filters, limit, matchMode);
-      return fallbackMatches.map(mapDocToMovement);
+      const fallbackMatches = await loadFallbackMatches(ctx, filters, poolSize, matchMode);
+      return rankByName(fallbackMatches, filters.name, limit).map(mapDocToMovement);
     }
 
-    const exactResults = await loadIndexedMatches(ctx, filters, indexKind, limit, matchMode);
-    return exactResults.map(mapDocToMovement);
+    const candidates = await loadIndexedMatches(ctx, filters, indexKind, poolSize, matchMode);
+    return rankByName(candidates, filters.name, limit).map(mapDocToMovement);
   },
 });
 
@@ -182,6 +192,21 @@ async function loadIndexedMatches(
   }
 
   return [];
+}
+
+/**
+ * Re-rank name-search candidates so the most relevant name comes first. The
+ * full-text index orders by raw term frequency, which buries canonical short
+ * names ("Bench Press") under long incidental matches ("Triceps Bench Dip").
+ * Stable by original index for equal scores. No-op when there is no name filter.
+ */
+function rankByName(docs: MovementDoc[], name: string | undefined, limit: number): MovementDoc[] {
+  if (!name) return docs.slice(0, limit);
+  return docs
+    .map((doc, index) => ({ doc, index, score: scoreNameMatch(doc, name) }))
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .slice(0, limit)
+    .map((entry) => entry.doc);
 }
 
 async function loadFallbackMatches(

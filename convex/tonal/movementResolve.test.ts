@@ -91,6 +91,25 @@ describe("resolveMovement", () => {
     }
   });
 
+  it("orders ambiguous candidates by name relevance, most relevant first", () => {
+    // "Barbell Squat" has no exact Tonal match; the closest suggestions the model
+    // sees must be squat movements ranked by relevance, not incidental obliques.
+    const squatCatalog: ResolvableMovement[] = [
+      mv("id-iso-chop", "Iso Split Squat Chop"),
+      mv("id-iso-lift", "Iso Split Squat Lift"),
+      mv("id-front", "Barbell Front Squat"),
+      mv("id-goblet", "Goblet Squat"),
+    ];
+
+    const out = resolveMovement({ name: "Barbell Squat" }, squatCatalog);
+
+    expect(out.status).toBe("ambiguous");
+    if (out.status === "ambiguous") {
+      // Both query words present → the strongest candidate ranks first.
+      expect(out.candidates[0]).toEqual({ movementId: "id-front", name: "Barbell Front Squat" });
+    }
+  });
+
   it("returns not-found when neither id nor name resolves", () => {
     const out = resolveMovement(
       { movementId: "fabricated-uuid", name: "Nonexistent Movement XYZ" },

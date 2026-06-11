@@ -1,4 +1,4 @@
-import { matchesNameSearchStrict, type SearchableMovement } from "./movementSearch";
+import { matchesNameSearchStrict, scoreNameMatch, type SearchableMovement } from "./movementSearch";
 import { isWellKnownMovementId } from "./transforms";
 
 /** A catalog row reduced to what name/id resolution needs. `Movement` is assignable. */
@@ -70,10 +70,12 @@ export function resolveMovement(ref: MovementRef, catalog: ResolvableMovement[])
   if (shortExact.length > 1)
     return { status: "ambiguous", ref, candidates: toCandidates(shortExact) };
 
-  // Fuzzy: never auto-substitute a lone match. Surface candidates instead.
+  // Fuzzy: never auto-substitute a lone match. Surface candidates instead,
+  // most relevant first so the model's "closest" suggestions are usable.
   const matches = catalog.filter((m) => matchesNameSearchStrict(m, name));
   if (matches.length === 0) return { status: "not-found", ref };
-  return { status: "ambiguous", ref, candidates: toCandidates(matches) };
+  const ranked = [...matches].sort((a, b) => scoreNameMatch(b, name) - scoreNameMatch(a, name));
+  return { status: "ambiguous", ref, candidates: toCandidates(ranked) };
 }
 
 function toCandidates(movements: ResolvableMovement[]): MovementCandidate[] {

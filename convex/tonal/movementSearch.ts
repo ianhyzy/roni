@@ -193,6 +193,86 @@ export function matchesNameSearchStrict(movement: SearchableMovement, query: str
   return false;
 }
 
+/** Name-match relevance tiers, strongest to weakest. Kept well-separated so the
+ *  sub-tier tie-break below never bridges two tiers. */
+const SCORE_EXACT = 100;
+const SCORE_PREFIX = 80;
+const SCORE_CONTAINED_PHRASE = 70;
+const SCORE_ALL_WORDS = 50;
+const SCORE_PARTIAL_BASE = 30;
+const SCORE_PARTIAL_SPAN = 15;
+const SCORE_SUBSTRING_FALLBACK = 10;
+/** Tie-break: shave a sliver per name word so shorter, more canonical names edge
+ *  out longer ones within the same tier (capped so it stays sub-tier). */
+const TIEBREAK_MAX_WORDS = 10;
+const TIEBREAK_WORD_PENALTY = 0.1;
+
+/**
+ * Score how well a movement's name matches a query, for ranking search results
+ * and resolution candidates. The boolean matchers above decide *if* a movement
+ * matches; this decides *how well*, so the canonical exercise ("Bench Press")
+ * ranks above long incidental matches ("Triceps Bench Dip"). Name and shortName
+ * only — descriptions never affect ranking. Higher is better; 0 means no name
+ * match. Ties favor shorter, more canonical names.
+ */
+export function scoreNameMatch(movement: SearchableMovement, query: string): number {
+  const q = normalizeSearchText(query);
+  if (!q) return 0;
+
+  const name = normalizeSearchText(movement.name);
+  const short = normalizeSearchText(movement.shortName);
+  const phraseQueries = fullQueryPhrases(q);
+  const queryWords = q.split(" ").filter((w) => w.length > 0);
+
+  let best = 0;
+  for (const field of [name, short]) {
+    if (field) best = Math.max(best, scoreField(field, phraseQueries, queryWords));
+  }
+  if (best <= 0) return 0;
+
+  // Tie-break within a tier toward shorter, more canonical names.
+  const nameWordCount = name.split(" ").filter((w) => w.length > 0).length;
+  return best - Math.min(nameWordCount, TIEBREAK_MAX_WORDS) * TIEBREAK_WORD_PENALTY;
+}
+
+/** Tiered name-match score for a single field (name or shortName). */
+function scoreField(field: string, phraseQueries: string[], queryWords: string[]): number {
+  for (const pq of phraseQueries) if (field === pq) return SCORE_EXACT;
+  for (const pq of phraseQueries) if (field.startsWith(`${pq} `)) return SCORE_PREFIX;
+  const padded = ` ${field} `;
+  for (const pq of phraseQueries) if (padded.includes(` ${pq} `)) return SCORE_CONTAINED_PHRASE;
+
+  const fieldWords = new Set(field.split(" "));
+  const matched = queryWords.filter(
+    (w) => fieldWords.has(w) || aliasWordMatches(w, fieldWords),
+  ).length;
+  if (queryWords.length > 0 && matched === queryWords.length) return SCORE_ALL_WORDS;
+  if (matched > 0) return SCORE_PARTIAL_BASE + SCORE_PARTIAL_SPAN * (matched / queryWords.length);
+
+  // Substring fallback keeps results the boolean matcher accepted above 0.
+  if (queryWords.some((w) => w.length >= 3 && field.includes(w))) return SCORE_SUBSTRING_FALLBACK;
+  return 0;
+}
+
+/** The query plus any whole-query alias phrases, for exact/prefix/phrase scoring. */
+function fullQueryPhrases(q: string): string[] {
+  const phrases = new Set<string>([q]);
+  const aliases = ALIAS_LOOKUP.get(q);
+  if (aliases) for (const a of aliases) phrases.add(normalizeSearchText(a));
+  return [...phrases];
+}
+
+/** True if a query word resolves, via the alias map, to word(s) present in the field. */
+function aliasWordMatches(word: string, fieldWords: Set<string>): boolean {
+  const aliases = ALIAS_LOOKUP.get(word);
+  if (!aliases) return false;
+  return aliases.some((alias) =>
+    normalizeSearchText(alias)
+      .split(" ")
+      .every((part) => fieldWords.has(part)),
+  );
+}
+
 function addSearchTerm(terms: Set<string>, value: string) {
   const normalized = normalizeSearchText(value);
   if (normalized) terms.add(normalized);
