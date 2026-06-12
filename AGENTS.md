@@ -310,11 +310,14 @@ duplicated copies, payload transforms that filter elements without re-deriving
 counts/markers or guarding the empty result, retry/fallback paths that flatten
 the concrete error class or await alerts past the action cap, external-payload
 normalization that mistypes nullable fields or clobbers stored values on
-refresh). Skim the matching section before touching Tonal fetch helpers,
-AI cost/budget paths, test fixtures, scheduled sweeps, error boundaries around
-optional integrations, credential/format validators, payload filter/transform
-steps, or retry/fallback and normalization paths -- and append a new entry
-when review surfaces a fresh recurring gap.
+refresh, LLM-driven entity resolution that auto-substitutes a fuzzy match or
+trusts a stale ID over an exact name, and model-tier routing changes that ignore
+the derived fallback tier or the first tool call). Skim the matching section
+before touching Tonal fetch helpers, AI cost/budget paths, model-tier routing,
+LLM name/ID resolvers that write to Tonal, test fixtures, scheduled sweeps, error
+boundaries around optional integrations, credential/format validators, payload
+filter/transform steps, or retry/fallback and normalization paths -- and append
+a new entry when review surfaces a fresh recurring gap.
 
 <!-- convex-ai-start -->
 

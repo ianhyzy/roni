@@ -1,6 +1,6 @@
 # PR Review Learnings
 
-Last reviewed: 2026-06-09
+Last reviewed: 2026-06-12
 
 A running log of recurring, legitimate issues raised in pull-request review that
 agents (and humans) should pre-empt. Each entry records the **problem**, **why
@@ -334,12 +334,125 @@ must never overwrite a previously known value.
 - Add a regression test asserting refresh **preserves stored measurements** when
   the latest payload returns `null` for those fields.
 
+## 10. When the LLM resolves an entity by name/ID before pushing it to an external system, prefer exact matches and never auto-substitute a broad fuzzy hit
+
+**Seen in:** #465 (4 review threads, all P2)
+
+**Problem.** `create_workout` was changed to require a movement `name` (so the
+coach could repair missing or fabricated `movementId`s) and `resolveMovement`
+gained a fuzzy fallback. Four distinct gaps let the resolver push the _wrong_
+Tonal movement — or reject a valid call — without surfacing it:
+
+- **A supplied ID won over the requested name.** When both `name` and
+  `movementId` were present, a valid-but-stale ID resolved immediately and the
+  name was never checked, so an LLM that reused a real ID from a different
+  exercise (while giving the correct new name) silently pushed the wrong
+  movement.
+- **A broad fuzzy match was auto-substituted.** The non-catalog path reused
+  `matchesNameSearchStrict` (matches if any 3+ char word appears in a movement
+  name) and silently pushed the sole match — so `Decline Push-up` resolved to
+  `Standing Decline Chest Press` and went straight onto the user's workout.
+- **A `shortName` alias tied with an exact full name.** When the requested name
+  exactly matched one movement's full `name` _and_ another movement's
+  `shortName`, the resolver merged both rows and returned `ambiguous`, blocking a
+  valid tool call that had copied the `name` straight from `search_exercises`.
+- **A required schema field rejected a documented sentinel.** Making `name`
+  required in the Zod tool schema meant the catalog-exempt `Rest` sentinel
+  (supplied by `movementId` only, and which can't come from `search_exercises`)
+  was rejected by Zod _before_ `resolveMovement`'s `isWellKnownMovementId` path
+  could run.
+
+**Why it matters.** These resolvers sit between a non-deterministic LLM and a
+destructive external write (a workout pushed to the user's Tonal). "Resolve to
+the closest thing and proceed" turns a near-miss into a wrong exercise on a real
+account; "tighten the schema" can lock out the exact legitimate inputs the
+resolver was built to accept. Both failures are silent at the call site.
+
+**Preventive checks.**
+
+- **Validate the name before trusting a supplied ID.** Check for an exact
+  full-name match _first_; only fall back to a supplied/well-known ID when no
+  exact name match exists, so a stale or copied ID can't override the correct
+  name.
+- **Never auto-substitute a broad/partial-word fuzzy match.** Limit automatic
+  resolution to exact full-name and exact `shortName` matches (plus a
+  valid/well-known ID); return any fuzzy/partial hit as a **candidate** for the
+  model to confirm, not a silent substitution.
+- **Stage exact matching: full `name` first, `shortName` aliases only as a
+  fallback.** Don't merge the two domains into one `ambiguous` result when the
+  full-name match is itself unambiguous.
+- **Don't let a tightened schema field block a documented sentinel.** When a
+  resolver has a legitimate ID-only path (well-known/catalog-exempt values like
+  `Rest`), keep the corresponding schema field optional (or special-case the
+  sentinel) so validation doesn't reject the input before the resolver runs.
+- Add coverage for each trap: stale-ID-vs-exact-name, broad-fuzzy-not-
+  substituted, full-name-beats-shortName-alias, and the ID-only sentinel path.
+
+## 11. Changing which model tier a turn starts on ripples into the derived fallback tier and the first tool call — audit both, not just the happy path
+
+**Seen in:** #469 (4 review threads, all P2), related to #368 (§3)
+
+**Problem.** A fix to route short "just give me a workout" turns onto the
+tool-capable `chat` tier (instead of the flash-lite `router` tier) kept tripping
+secondary routing hazards because tier selection has non-obvious couplings:
+
+- **The fallback tier is _derived_ from the primary.** `selectCoachTierRoute`
+  computes the fallback with `getFallbackTier(primaryTier)`, and
+  `getFallbackTier("chat")` is the `router` tier. So even after the primary path
+  moved to a tool-capable tier, a transient failure or open circuit ran the
+  fallback on flash-lite — re-introducing the exact no-workout behavior the PR
+  was closing.
+- **"Just make the fallback tool-capable" broke a different guarantee.** Changing
+  `getFallbackTier("chat")` to `programming` made the house-key Gemini default
+  fall back to the _same_ model (`chat` and `programming` both resolve to
+  `gemini-2.5-flash`), dropping the distinct `flash-lite` model-level fallback
+  that protected against a flash outage / circuit trip. Tool-capability and
+  distinct-model fallback can't both hold on Gemini without a model-policy change.
+- **Removing a routing gate dropped a routing class.** Deleting the whole
+  classifier gate (to fix the trivial-request bug) also dropped
+  `complex→programming` routing, so BYOK Claude/OpenAI users' explicit "program a
+  week" requests started on the `chat` tier (Sonnet / GPT-mini).
+- **Retrospective escalation doesn't cover the first tool call.** The
+  `prepareStep` escalation in `convex/ai/coach.ts` only switches to the
+  programming tier _after_ a prior step has already used a programming tool, so
+  the first planning tool call still ran on the weaker tier.
+
+**Why it matters.** Tier routing looks like a single dial but is really three
+coupled decisions — primary tier, _derived_ fallback tier, and per-step
+escalation. A change aimed at one quietly weakens another: the requests a tier
+is reserved for (planning) get downgraded, or the protection a fallback provides
+(distinct model on outage) silently disappears, exactly on the failure paths
+that are hardest to observe. The surgical fix here re-routed only the offending
+`trivial` branch and left both the classifier and the fallback tier untouched.
+
+**Preventive checks.**
+
+- When you change which tier a turn _starts_ on, trace the **derived fallback
+  tier** (`getFallbackTier`) for that route and confirm the transient/circuit-open
+  path still lands somewhere acceptable — the fallback isn't pinned independently.
+- Prefer the **smallest re-route** (one branch) over deleting a classifier gate;
+  removing the gate also removes every other routing class it carried (e.g.
+  `complex→programming` for BYOK planning).
+- Remember that **retrospective `prepareStep` escalation is too late for the
+  first tool call** — if a request needs the programming tier, it must _start_
+  there, not escalate after the first programming tool already ran on a weaker
+  model.
+- Don't "fix" a fallback by making it reuse the primary model: on a provider
+  where two tiers resolve to the same model, that silently drops the distinct
+  model-level fallback. Treat tool-capability vs. distinct-model fallback as a
+  deliberate, provider-specific tradeoff (see also §3).
+- Add a regression assertion on the invariant you care about (e.g. the default
+  route's `fallbackTier` is never `router`, or that explicit plan requests start
+  on the programming tier).
+
 ---
 
 ## How to use this log
 
 - Before opening a PR that touches **Tonal fetch helpers, AI cost/budget paths,
-  test fixtures, scheduled sweeps, React error boundaries around optional
+  model-tier routing (primary/fallback/per-step escalation), LLM-driven entity
+  resolution that writes to an external system (movement name/ID matching), test
+  fixtures, scheduled sweeps, React error boundaries around optional
   integrations, credential/format validators, payload transforms that
   filter/drop elements, retry/fallback error reporting, or external-payload
   normalization (nullable typing, refresh vs. first-connect defaults)**, skim the
