@@ -310,11 +310,15 @@ duplicated copies, payload transforms that filter elements without re-deriving
 counts/markers or guarding the empty result, retry/fallback paths that flatten
 the concrete error class or await alerts past the action cap, external-payload
 normalization that mistypes nullable fields or clobbers stored values on
-refresh). Skim the matching section before touching Tonal fetch helpers,
-AI cost/budget paths, test fixtures, scheduled sweeps, error boundaries around
-optional integrations, credential/format validators, payload filter/transform
-steps, or retry/fallback and normalization paths -- and append a new entry
-when review surfaces a fresh recurring gap.
+refresh, movement/name resolution that pushes the wrong exercise by trusting a
+stale ID or auto-substituting a fuzzy match, AI tier-routing changes that
+re-introduce the bug on the same-turn fallback path or collapse a distinct-model
+fallback on a shared-model provider). Skim the matching section before touching
+Tonal fetch helpers, AI cost/budget paths, test fixtures, scheduled sweeps,
+error boundaries around optional integrations, credential/format validators,
+payload filter/transform steps, retry/fallback and normalization paths,
+movement/name resolution, or AI tier-routing/fallback selection -- and append a
+new entry when review surfaces a fresh recurring gap.
 
 <!-- convex-ai-start -->
 

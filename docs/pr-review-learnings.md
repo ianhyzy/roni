@@ -1,6 +1,6 @@
 # PR Review Learnings
 
-Last reviewed: 2026-06-09
+Last reviewed: 2026-06-13
 
 A running log of recurring, legitimate issues raised in pull-request review that
 agents (and humans) should pre-empt. Each entry records the **problem**, **why
@@ -334,6 +334,116 @@ must never overwrite a previously known value.
 - Add a regression test asserting refresh **preserves stored measurements** when
   the latest payload returns `null` for those fields.
 
+## 10. Resolving a movement by name must not silently push the wrong exercise — trust exact matches only, treat fuzzy as candidates
+
+**Seen in:** #465 (4 review threads, all P2)
+
+**Problem.** Making `name` required on `create_workout` so the resolver could
+repair missing/wrong movement IDs introduced four ways to push the _wrong_
+Tonal movement (or block a valid call):
+
+- **A supplied ID won over the name.** When both `name` and `movementId` were
+  present, a valid-but-stale ID resolved immediately and the name was never
+  checked — so an LLM that reused a real ID from a _different_ exercise while
+  giving the correct new name silently pushed the wrong movement, defeating the
+  very reason `name` was made required.
+- **A broad single-word fuzzy match auto-resolved.** Non-catalog names reused
+  `matchesNameSearchStrict` (matches if any 3+ char word appears in a movement
+  name) and silently pushed the sole match — e.g. `Decline Push-up` resolved to
+  `Standing Decline Chest Press`, a different exercise, onto the user's workout.
+- **A shortName alias outranked an exact full name.** When a name equaled one
+  movement's full `name` _and_ another movement's `shortName`, both rows were
+  combined and returned `ambiguous`, blocking a valid tool call that had simply
+  copied the `name` from `search_exercises`.
+- **A required schema field rejected a catalog-exempt sentinel.** The synthetic
+  `Rest` movement is supplied by `movementId` only and cannot come from
+  `search_exercises`, but the now-required `name` made Zod reject the tool call
+  before `resolveMovement`'s `isWellKnownMovementId` path could run.
+
+**Why it matters.** A resolver that picks the wrong row writes a wrong exercise
+to the user's real Tonal account — a silent correctness failure with no error.
+Conversely, an over-strict schema or an alias collision blocks legitimate calls
+the change was meant to enable. Both directions degrade the exact path the PR
+set out to repair.
+
+**Preventive checks.**
+
+- **Verify the name even when an ID is supplied.** Resolve/confirm an exact
+  full-name match _before_ trusting a supplied `movementId`, or reject ID/name
+  mismatches — a valid ID is not proof it matches the requested name.
+- **Auto-resolve only on exact identity** (full `name`, then `shortName`, then a
+  valid/well-known ID). Return any fuzzy/partial-word match as an `ambiguous`
+  **candidate** for the model to confirm — never auto-substitute a lone fuzzy
+  hit.
+- **Stage exact matching: full name first, alias second.** Check full `name`
+  across the catalog and resolve unambiguously before falling back to
+  `shortName` aliases, so a full-name match isn't drowned out by an alias
+  collision.
+- **Keep catalog-exempt sentinels (`Rest`, well-known IDs) loose at the schema
+  layer.** Make the repaired field optional (or special-case the sentinel) so a
+  `movementId`-only call isn't rejected before the resolver's well-known-ID path
+  runs; ensure the not-found error message falls back to the ID when no name is
+  present.
+- Add coverage for each trap: stale-ID-vs-correct-name, broad-fuzzy-no-substitute,
+  full-name-over-alias, and the `movementId`-only sentinel.
+
+## 11. A primary-tier routing change also changes the same-turn fallback path — and on shared-model providers the two can collapse
+
+**Seen in:** #469 (4 review threads, all P2)
+
+**Problem.** A fix to route short/"trivial" chat turns to the tool-capable
+`chat` tier (so `search_exercises → create_workout` reliably completes) kept
+tripping over the fallback path, because `streamWithRetry` runs the route's
+_fallback_ agent **in the same user turn** on transient failures or when the
+provider circuit is open:
+
+- **The fallback re-introduced the bug.** `selectCoachTierRoute` still derived
+  the fallback via `getFallbackTier(primaryTier)`, and `getFallbackTier("chat")`
+  is the flash-lite **router** tier. So if the chat attempt timed out or the
+  breaker was open, the short workout request fell back to the same flash-lite
+  tier the fix was trying to avoid — the no-workout behavior returned on exactly
+  the failure path.
+- **Fixing the fallback collapsed the distinct-model fallback.** Changing
+  `getFallbackTier("chat")` to `programming` backfired on the default Gemini
+  (house-key) policy, where `chat` and `programming` _both_ resolve to
+  `gemini-2.5-flash`: the retry/fallback now re-ran the same model, dropping the
+  distinct `flash-lite` fallback that protected against a flash outage / circuit
+  trip. On Gemini there is no model that is both distinct from flash _and_
+  reliable at tool-calling, so tool-capable-fallback and distinct-model-fallback
+  can't both hold without a model-policy change.
+- **Removing the whole gate dropped unrelated routing.** Deleting the classifier
+  outright also dropped `complex → programming` routing, so BYOK Claude/OpenAI
+  users' explicit "program a week" requests started on the chat tier (Sonnet /
+  GPT-mini) and only escalated _retrospectively_ after a tool call — weakening
+  the planning path the programming tier is reserved for.
+
+**Why it matters.** Tier routing has two coupled outputs (primary + fallback)
+and the fallback runs within the same turn, so a one-line primary change can be
+silently undone on the failure path, or can collapse a deliberate distinct-model
+fallback on providers where two tiers share a model. The final fix was
+**surgical**: keep the classifier and `complex → programming`, reroute only the
+`trivial → router` branch to the `chat` tier, and leave the fallback tier
+untouched — accepting the rare circuit-open fallback to flash-lite as a
+documented tradeoff rather than changing the Gemini model policy.
+
+**Preventive checks.**
+
+- When you change which tier a route's **primary** uses, trace what
+  `getFallbackTier(primary)` now resolves to and confirm the **same-turn
+  fallback** (transient/circuit-open path) doesn't re-introduce the behavior you
+  just fixed.
+- Before changing a fallback tier, check the active **model policy**: if two
+  tiers resolve to the same model for a provider (e.g. Gemini default
+  `chat == programming == flash`), moving the fallback there silently drops the
+  distinct-model fallback. Tool-capability and distinct-model fallback may be
+  mutually exclusive on that provider — surface the tradeoff, don't assume both.
+- Prefer the **smallest branch-level fix** over deleting a whole classifier/gate:
+  removing the gate can drop adjacent routing (here `complex → programming`) that
+  had nothing to do with the bug.
+- Add a regression assertion pinning the invariant you care about (e.g. the
+  default route's `fallbackTier` is never `router`, or `trivial` resolves to the
+  tool-capable tier), and document any accepted residual fallback tradeoff inline.
+
 ---
 
 ## How to use this log
@@ -341,9 +451,11 @@ must never overwrite a previously known value.
 - Before opening a PR that touches **Tonal fetch helpers, AI cost/budget paths,
   test fixtures, scheduled sweeps, React error boundaries around optional
   integrations, credential/format validators, payload transforms that
-  filter/drop elements, retry/fallback error reporting, or external-payload
-  normalization (nullable typing, refresh vs. first-connect defaults)**, skim the
-  matching section above.
+  filter/drop elements, retry/fallback error reporting, external-payload
+  normalization (nullable typing, refresh vs. first-connect defaults),
+  movement/name resolution that writes to a user's Tonal account, or AI
+  tier-routing changes that touch the fallback tier or a shared-model
+  provider policy**, skim the matching section above.
 - When a review surfaces a _new_ recurring, legitimate gap (not stylistic, not
   one-off), add an entry here with the PR reference so the next agent inherits
   the lesson.
