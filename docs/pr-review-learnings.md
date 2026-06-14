@@ -1,6 +1,6 @@
 # PR Review Learnings
 
-Last reviewed: 2026-06-09
+Last reviewed: 2026-06-14
 
 A running log of recurring, legitimate issues raised in pull-request review that
 agents (and humans) should pre-empt. Each entry records the **problem**, **why
@@ -334,6 +334,104 @@ must never overwrite a previously known value.
 - Add a regression test asserting refresh **preserves stored measurements** when
   the latest payload returns `null` for those fields.
 
+## 10. Resolving an LLM-supplied name/ID to a catalog entity: trust only exact matches, verify supplied IDs, and don't let a newly-required field reject documented sentinels
+
+**Seen in:** #465 (4 review threads, all P2)
+
+**Problem.** `create_workout` was changed to make movement `name` required and
+resolve movements by name (to repair fabricated/stale `movementId`s the LLM
+sometimes invents). The resolver and its tool schema had four gaps, each of which
+could silently push the **wrong** exercise to a user's real Tonal workout:
+
+- **A supplied ID won over the requested name.** When both `name` and
+  `movementId` were present, a valid-but-stale ID resolved immediately and the
+  name was never checked — so an LLM that copied a real ID from a _different_
+  exercise while supplying the correct new name pushed the wrong movement.
+- **A broad fuzzy match was auto-substituted.** Non-catalog names fell through to
+  `matchesNameSearchStrict`, which matches on any 3+ character word, and the sole
+  match was pushed silently. `Decline Push-up` resolved to
+  `Standing Decline Chest Press` and went straight onto the workout.
+- **Short-name aliases shadowed exact full names.** When a `name` exactly equalled
+  one movement's full `name` _and_ another movement's `shortName`, the resolver
+  combined both rows and returned `ambiguous`, blocking a tool call that had
+  copied the exact full name from `search_exercises`.
+- **A newly-required field rejected a documented sentinel.** Making `name`
+  required in the Zod tool schema rejected the catalog-exempt `Rest` sentinel
+  (supplied by `movementId` only, never from `search_exercises`) _before_
+  `resolveMovement`'s `isWellKnownMovementId` path could run.
+
+**Why it matters.** When the input comes from an LLM, "resolution" is a trust
+boundary: the model fabricates IDs, copies the wrong field, and produces
+near-miss names. A resolver that trusts a supplied ID without verifying the name,
+or auto-substitutes a loose fuzzy match, converts a model mistake into a silent
+wrong-exercise push the user never sees coming. And a field made required to fix
+one case can reject a _legitimate, documented_ input shape (the sentinel) at the
+schema layer before the resolver's special-case logic ever runs.
+
+**Preventive checks.**
+
+- When both an ID and a human-readable name are supplied, **verify the exact name
+  first** (or reject ID/name mismatches) — don't let a valid-but-stale ID win over
+  the requested name.
+- **Only auto-resolve on exact matches** (full `name`, then `shortName` alias, or
+  a known/valid sentinel ID). Return fuzzy/partial-word matches as `ambiguous`
+  candidates for the model to confirm; never silently substitute a single loose
+  match.
+- **Stage exact matching deterministically:** check full names before shortName
+  aliases, so an exact full-name hit resolves unambiguously instead of colliding
+  with another row's alias.
+- When you make a tool-schema field **required** to fix one path, re-check every
+  _documented_ input that legitimately omits it (catalog-exempt sentinels,
+  ID-only references). Keep the field optional and enforce presence in the
+  resolver where the special cases live, rather than hard-stopping at Zod. (See
+  also §6 on validators rejecting the real format and §7 on the `Rest` sentinel.)
+- Add coverage for each trap: stale-ID-vs-correct-name, broad-fuzzy-no-substitute,
+  full-name-over-alias, and the sentinel/ID-only path.
+
+## 11. When removing a classifier/routing gate to fix one branch, scope the change to that branch
+
+**Seen in:** #469 (review threads; the catalyst for a smaller fix)
+
+**Problem.** A routing bug (short workout requests landed on the flash-lite
+router tier and couldn't reliably drive `search_exercises → create_workout`) was
+first fixed by deleting the whole prompt classifier gate so every chat turn
+started on the `chat` tier. Review caught that the gate also carried the
+`complex → programming` routing: removing it meant BYOK Claude/OpenAI users'
+explicit "program a week" / "build a plan" requests now started on the chat tier
+(Sonnet / GPT-mini) and only escalated _retrospectively_ after a programming tool
+had already run on the weaker tier. A parallel attempt to fix the fallback path
+by changing `getFallbackTier("chat")` from `router` to `programming` re-collapsed
+Gemini's distinct flash-lite fallback onto the same model
+(`chat == programming == gemini-2.5-flash`), dropping the model-level fallback
+that protected against a flash outage. The final fix was surgical: keep the
+classifier and `complex → programming`, reroute **only** the `trivial` branch to
+the chat tier, and leave the fallback tier untouched.
+
+**Why it matters.** A classifier/gate is usually one decision point feeding
+several routing outcomes. Deleting it to repair one branch silently changes every
+other branch it fed — and the regression (a weaker model on planning turns) is
+invisible in tests that only check the branch you meant to fix. The fallback
+thread is a reminder of §3/§8: a "tool-capable fallback" change can re-collapse a
+deliberately _distinct_ fallback model onto the primary, so confirm the fallback
+tier still resolves to a different model on every provider before changing it.
+
+**Preventive checks.**
+
+- Prefer the **smallest change that fixes the broken branch.** Before deleting a
+  classifier/gate/routing helper, enumerate every routing outcome it produces and
+  confirm none of the _other_ branches change behavior.
+- When a routing decision differs by provider/policy (house-key Gemini vs. BYOK
+  Claude/OpenAI), check the impact **per provider** — a change that's a no-op on
+  one policy (`chat == programming` on Gemini) can be a regression on another
+  (distinct tiers on BYOK).
+- Don't rely on **retrospective escalation** (`prepareStep` switching tiers after
+  a tool already ran) to cover a routing tier the first tool call needs — the
+  first planning call still runs on the weaker tier.
+- Before changing a fallback tier, confirm it still resolves to a **distinct
+  model** from the primary on every provider; on Gemini, `chat` and `programming`
+  both map to `gemini-2.5-flash`, so "fall back to programming" is not a real
+  fallback. Add a regression assertion on the resolved fallback tier/model.
+
 ---
 
 ## How to use this log
@@ -341,9 +439,10 @@ must never overwrite a previously known value.
 - Before opening a PR that touches **Tonal fetch helpers, AI cost/budget paths,
   test fixtures, scheduled sweeps, React error boundaries around optional
   integrations, credential/format validators, payload transforms that
-  filter/drop elements, retry/fallback error reporting, or external-payload
-  normalization (nullable typing, refresh vs. first-connect defaults)**, skim the
-  matching section above.
+  filter/drop elements, retry/fallback error reporting, external-payload
+  normalization (nullable typing, refresh vs. first-connect defaults),
+  LLM-supplied name/ID resolution against a catalog, or classifier/routing-tier
+  changes**, skim the matching section above.
 - When a review surfaces a _new_ recurring, legitimate gap (not stylistic, not
   one-off), add an entry here with the PR reference so the next agent inherits
   the lesson.
