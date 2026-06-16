@@ -1,6 +1,6 @@
 # PR Review Learnings
 
-Last reviewed: 2026-06-09
+Last reviewed: 2026-06-16
 
 A running log of recurring, legitimate issues raised in pull-request review that
 agents (and humans) should pre-empt. Each entry records the **problem**, **why
@@ -334,6 +334,122 @@ must never overwrite a previously known value.
 - Add a regression test asserting refresh **preserves stored measurements** when
   the latest payload returns `null` for those fields.
 
+## 10. Resolving an LLM-supplied name/ID to a catalog entry that drives an external write must prefer the exact name, never auto-substitute a fuzzy match, and not let new schema requirements block exempt sentinels
+
+**Seen in:** #465 (4 review threads, all P2)
+
+**Problem.** `create_workout` was changed to require a `name` for each movement
+and resolve it against the Tonal catalog (repairing missing/wrong
+`movementId`s). The resolver (`convex/tonal/movementResolve.ts`) had four gaps,
+each of which could silently push the **wrong** exercise to the user's Tonal
+workout — or block a valid call:
+
+- **A supplied ID won over the requested name.** When both `name` and
+  `movementId` were present, a valid-but-stale ID resolved immediately and the
+  name was never checked. An LLM that reuses a real ID from another exercise
+  while giving the correct new name would silently push the wrong movement.
+- **A broad fuzzy match was auto-substituted.** Non-catalog names fell through to
+  `matchesNameSearchStrict`, which matches if any 3+ character word appears in a
+  movement name, then pushed the sole match. `Decline Push-up` could resolve to
+  `Standing Decline Chest Press` and be pushed silently.
+- **shortName aliases shadowed exact full names.** When the requested `name`
+  exactly equalled one movement's full `name` but also another movement's
+  `shortName`, the resolver merged both rows and returned `ambiguous`, blocking a
+  call whose full-name match was actually unambiguous.
+- **A newly-required field rejected an exempt sentinel.** Making `name` required
+  in the tool's Zod schema rejected the synthetic `Rest` sentinel (supplied by
+  `movementId` only, catalog-exempt, can't come from `search_exercises`) before
+  `resolveMovement`'s well-known-ID path could run.
+
+**Why it matters.** Resolution sits between a fallible LLM and an external
+side-effect (a real workout pushed to the user's machine). "Resolve to something
+plausible" is the wrong default: a stale ID, a partial-word collision, or an
+alias shadow becomes a wrong exercise the user actually trains on, with no error
+surfaced. And tightening an input schema to enable a new path can simultaneously
+break an existing exempt path if you don't account for sentinels.
+
+**Preventive checks.**
+
+- **Verify the exact name before trusting a supplied ID.** When both name and ID
+  arrive, resolve/confirm the exact full-name match first; only trust the ID when
+  no name is given (or the name confirms it). Reject ID/name mismatches rather
+  than letting the ID win.
+- **Only auto-resolve on exact matches.** Restrict silent auto-substitution to
+  exact full-name (then exact shortName) matches plus known/well-known IDs. Return
+  any fuzzy/partial-word match as an `ambiguous` **candidate** for the model to
+  confirm — never push it.
+- **Order the match tiers explicitly:** exact full `name` → exact `shortName`
+  alias → valid/well-known ID. Check full names first so an alias collision can't
+  turn an unambiguous full-name match into `ambiguous`.
+- **When you make a field required to enable a new path, enumerate the inputs that
+  legitimately lack it** (synthetic/sentinel/catalog-exempt values like `Rest`)
+  and keep the schema (and the resolver's not-found message) from rejecting them —
+  make the field optional and special-case the exempt IDs.
+- Add coverage for each: stale-id-vs-correct-name, broad-fuzzy-not-substituted,
+  full-name-over-shortName, and the sentinel/not-found path.
+
+## 11. A model-tier routing change has a primary path and a fallback path — reason about both, and reroute the one buggy branch instead of removing the whole gate
+
+**Seen in:** #469 (4 review threads, all P2)
+
+**Problem.** A bug where short workout requests routed to the flash-lite
+`router` tier (which doesn't reliably drive `search_exercises → create_workout`)
+prompted a fix that removed the whole pre-routing classifier gate so chat turns
+always started on the `chat` tier. Two separate regressions fell out, plus a
+fallback-path trap:
+
+- **Removing the gate dropped an unrelated branch.** The same classifier also
+  routed `complex` prompts ("program a week", "build a plan") to the
+  `programming` tier. Deleting it meant BYOK Claude/OpenAI users' explicit
+  planning requests now started on the cheaper `chat` tier (Sonnet / GPT-mini)
+  and only escalated _retrospectively_ in `prepareStep` after a programming tool
+  had already run — weakening exactly the requests the programming tier is
+  reserved for.
+- **The fallback tier was a separate decision the primary fix didn't touch.**
+  `selectCoachTierRoute` derives the fallback with `getFallbackTier(primaryTier)`,
+  and `getFallbackTier("chat")` is the `router` (flash-lite) tier. On
+  circuit-open / transient-timeout paths, `streamWithRetry` runs the **fallback**
+  agent for the same turn — so a short workout request whose primary `chat`
+  attempt failed would still be handled by flash-lite, reintroducing the exact
+  no-workout behavior the change was meant to fix.
+- **...but changing the fallback tier broke a different provider.** Trying to fix
+  that by making `getFallbackTier("chat")` return `programming` made the default
+  house-key Gemini policy (where `chat` and `programming` both resolve to
+  `gemini-2.5-flash`) re-run the _same_ model on fallback, dropping the distinct
+  `flash-lite` fallback that protected against a flash outage / circuit trip.
+  Tool-capability and distinct-fallback-model can't both hold on Gemini without a
+  model-policy change.
+
+The accepted resolution was **surgical**: keep the classifier, keep
+`complex → programming`, and reroute only the `trivial` branch to the `chat`
+tier — leaving the fallback tier untouched.
+
+**Why it matters.** Tier routing is two decisions, not one — the primary tier and
+the fallback tier the retry/circuit path uses — and they interact with per-provider
+model policy. A change that improves the primary path can silently degrade the
+fallback path (or vice versa), and ripping out a multi-branch classifier to fix
+one branch takes the other branches' behavior with it. The damage lands on the
+exact slow/failed/planning turns the tiers exist to protect.
+
+**Preventive checks.**
+
+- **Prefer the surgical reroute.** When one branch of a classifier/router is
+  wrong, change that branch — don't delete the whole gate. Enumerate every branch
+  the gate controls (`trivial`, `complex`, …) and confirm each still routes as
+  before.
+- **Trace both the primary and the fallback tier for the changed route.** Check
+  what `getFallbackTier(primaryTier)` resolves to and remember the fallback agent
+  runs the _same turn_ on circuit-open/timeout — a primary-only fix can leave the
+  failure path on the tier you were escaping.
+- **Resolve tiers per active provider/model policy before concluding.** A fallback
+  that looks distinct in the abstract (`chat` vs `programming`) can collapse to the
+  same model under a provider's policy (Gemini flash == flash), erasing the
+  fallback's value. Decide consciously between a tool-capable fallback and a
+  distinct-model fallback when a provider can't offer both.
+- Add a regression assertion for the invariant you're protecting (e.g. the default
+  route's `fallbackTier` is never `router`, or `complex` still maps to
+  `programming`) so the routing can't silently regress.
+
 ---
 
 ## How to use this log
@@ -341,8 +457,10 @@ must never overwrite a previously known value.
 - Before opening a PR that touches **Tonal fetch helpers, AI cost/budget paths,
   test fixtures, scheduled sweeps, React error boundaries around optional
   integrations, credential/format validators, payload transforms that
-  filter/drop elements, retry/fallback error reporting, or external-payload
-  normalization (nullable typing, refresh vs. first-connect defaults)**, skim the
+  filter/drop elements, retry/fallback error reporting, external-payload
+  normalization (nullable typing, refresh vs. first-connect defaults),
+  name/ID-to-catalog resolution that drives an external write, or model-tier
+  routing (primary vs. fallback tier, per-provider model policy)**, skim the
   matching section above.
 - When a review surfaces a _new_ recurring, legitimate gap (not stylistic, not
   one-off), add an entry here with the PR reference so the next agent inherits
