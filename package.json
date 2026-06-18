@@ -124,6 +124,14 @@
     "vitest": "^4.1.4"
   },
   "overrides": {
-    "protobufjs": "7.5.8"
+    "convex": {
+      "ws": "8.21.0"
+    },
+    "hono": "4.12.26",
+    "protobufjs": "7.6.4",
+    "undici": "7.28.0",
+    "webpack-bundle-analyzer": {
+      "ws": "7.5.11"
+    }
   }
 }
