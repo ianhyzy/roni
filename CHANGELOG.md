@@ -2,6 +2,21 @@
 
 All notable changes to this project are documented here. This file is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commits on `main`. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.11.0](https://github.com/JeffOtano/roni/compare/v0.10.6...v0.11.0) (2026-06-18)
+
+
+### Features
+
+* **chat:** rollAllActiveThreads admin sweep to reset stuck threads ([#470](https://github.com/JeffOtano/roni/issues/470)) ([748a689](https://github.com/JeffOtano/roni/commit/748a689d700ec993589ea8db99419de95a2f7692))
+
+
+### Bug Fixes
+
+* **ai:** always route chat turns to the tool-capable chat tier ([#469](https://github.com/JeffOtano/roni/issues/469)) ([d8595ab](https://github.com/JeffOtano/roni/commit/d8595ab522d2b6316715f32cb46e42d533d07c95))
+* **ai:** resolve create_workout movements by name instead of hard-stopping on fabricated IDs ([#465](https://github.com/JeffOtano/roni/issues/465)) ([f8c7c98](https://github.com/JeffOtano/roni/commit/f8c7c988aff54c9e7d76086a2a84be54cff074b2))
+* clear high severity audit findings ([34c228e](https://github.com/JeffOtano/roni/commit/34c228e578e1ba1ef5424cb95f6db1479bb19f86))
+* **tonal:** rank movement search by exact-name relevance ([#472](https://github.com/JeffOtano/roni/issues/472)) ([56162c5](https://github.com/JeffOtano/roni/commit/56162c560c464a5798f254bb4525e75ab6c0222d))
+
 ## [0.10.6](https://github.com/JeffOtano/roni/compare/v0.10.5...v0.10.6) (2026-06-10)
 
 
