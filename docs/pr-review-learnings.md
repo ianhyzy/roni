@@ -1,6 +1,6 @@
 # PR Review Learnings
 
-Last reviewed: 2026-06-09
+Last reviewed: 2026-06-21
 
 A running log of recurring, legitimate issues raised in pull-request review that
 agents (and humans) should pre-empt. Each entry records the **problem**, **why
@@ -334,6 +334,48 @@ must never overwrite a previously known value.
 - Add a regression test asserting refresh **preserves stored measurements** when
   the latest payload returns `null` for those fields.
 
+## 10. Don't let a strict boundary validator reject the exact values your downstream normalization exists to repair
+
+**Seen in:** #460 (P2)
+
+**Problem.** The fix for production Tonal-push failures (#447 — Tonal rejects an
+explicit `0`/negative reps or duration with a 400 that fails the _whole_ push)
+added a `positiveOr` clamp in `buildSet`/`buildTonalWorkoutSets` to repair
+non-positive values before the push **and** tightened the `createWorkoutTool`
+input schema with `.positive()` on `reps`/`duration`. But the tool input schema
+is validated _before_ `execute` runs, so on the standalone `create_workout` path
+the `.positive()` rule rejected the malformed AI output before it could ever
+reach the new clamp. The other push paths (retry, week-plan) normalized fine, but
+the one-off tool call still failed on the exact `#447` input the PR was meant to
+fix. The resolution was to keep the schema **permissive** (`int().optional()`)
+and let the `positiveOr` normalization repair non-positive reps/duration before
+the Tonal push, so every entry path is covered uniformly.
+
+**Why it matters.** When you add normalization/clamping to _repair_ bad input,
+adding a strict validator at the boundary that _rejects_ that same input is
+self-defeating: the repair never runs on the path that validates first, and the
+original failure persists on exactly one entry point while looking fixed
+everywhere else. Two mechanisms meant to solve the same problem end up fighting,
+and the gap is path-dependent and easy to miss.
+
+**Preventive checks.**
+
+- When a downstream layer normalizes/clamps a malformed value (`positiveOr`,
+  `?? default`, sanitizers), decide **one** place to handle it. If the strategy is
+  "repair, don't reject," keep the boundary schema **permissive** so the value
+  reaches the repair; if the strategy is "reject," do it at the boundary and drop
+  the redundant clamp. Don't do both for the same field.
+- Enumerate **every entry path** into the shared push/normalize helper (one-off
+  tool call, retry, week-plan, backfill) and confirm the malformed value is
+  handled identically on each — a fix verified only on the retry/week-plan path
+  can still fail the direct path.
+- When a clamp is added to repair _already-stored_ bad data on retry, make sure a
+  newly-added input guard doesn't block that same repair from running on fresh
+  calls.
+- Add coverage that drives the **boundary-validated path** (not just the internal
+  helper) with the malformed value, asserting it is normalized and pushed rather
+  than rejected.
+
 ---
 
 ## How to use this log
@@ -341,9 +383,10 @@ must never overwrite a previously known value.
 - Before opening a PR that touches **Tonal fetch helpers, AI cost/budget paths,
   test fixtures, scheduled sweeps, React error boundaries around optional
   integrations, credential/format validators, payload transforms that
-  filter/drop elements, retry/fallback error reporting, or external-payload
-  normalization (nullable typing, refresh vs. first-connect defaults)**, skim the
-  matching section above.
+  filter/drop elements, retry/fallback error reporting, external-payload
+  normalization (nullable typing, refresh vs. first-connect defaults), or
+  boundary validators that sit in front of a downstream clamp/normalizer**, skim
+  the matching section above.
 - When a review surfaces a _new_ recurring, legitimate gap (not stylistic, not
   one-off), add an entry here with the PR reference so the next agent inherits
   the lesson.
