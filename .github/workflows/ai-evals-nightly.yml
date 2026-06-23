@@ -80,7 +80,7 @@ jobs:
             echo "::notice::Skipping cost-incurring Phoenix/Gemini evals: $reason."
           fi
 
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         if: steps.preflight.outputs.should_run == 'true'
 
       - uses: actions/setup-node@v6
