@@ -1,6 +1,6 @@
 # PR Review Learnings
 
-Last reviewed: 2026-06-09
+Last reviewed: 2026-06-15
 
 A running log of recurring, legitimate issues raised in pull-request review that
 agents (and humans) should pre-empt. Each entry records the **problem**, **why
@@ -334,6 +334,148 @@ must never overwrite a previously known value.
 - Add a regression test asserting refresh **preserves stored measurements** when
   the latest payload returns `null` for those fields.
 
+## 10. When resolving an AI-supplied name/ID to a catalog entry, prefer the exact match, return candidates for fuzzy ones, and never silently substitute
+
+**Seen in:** #465 (4 P2 review threads)
+
+**Problem.** `resolveMovement` was made the gatekeeper that turns the coach's
+`create_workout` movement references (`name` + optional `movementId`) into real
+Tonal catalog rows. Four ways it resolved to the _wrong_ entry — silently
+pushing the wrong exercise onto the user's Tonal workout, the exact failure the
+change was meant to prevent:
+
+- **A supplied ID won over the name.** When both `name` and `movementId` were
+  present, a valid-but-stale/copied ID resolved immediately and the requested
+  name was never checked — so an LLM reusing a real ID from a different exercise
+  pushed the wrong movement even with the correct name.
+- **A broad fuzzy match was auto-substituted.** Non-catalog names reused
+  `matchesNameSearchStrict` (matches if any 3+ char word appears), then silently
+  pushed the sole match — e.g. `Decline Push-up` resolved to
+  `Standing Decline Chest Press`.
+- **Exact full name lost to another row's `shortName` alias.** When a name
+  exactly matched one movement's full `name` _and_ another's `shortName`, both
+  were combined and returned `ambiguous`, blocking a valid call instead of
+  resolving the unambiguous full-name match.
+- **A required `name` field rejected catalog-exempt sentinels** (see §11).
+
+**Why it matters.** A resolution layer that auto-resolves on weak evidence
+converts a "help the model" feature into silent data corruption — the wrong
+exercise reaches Tonal with no error. And one that's _too_ strict (returns
+`ambiguous` on an unambiguous match) blocks valid tool calls.
+
+**Preventive checks.**
+
+- **Order match precedence explicitly and check exact before trusting an ID:**
+  exact full `name` → exact `shortName` alias → valid/well-known ID, and verify
+  an exact name match _before_ accepting a supplied ID so a stale/copied ID can't
+  win over the correct name. Reject ID/name mismatches rather than letting the ID
+  win — resolution sits between a fallible LLM and an external write, so "resolve
+  to something plausible" is the wrong default.
+- **Only auto-resolve on exact matches.** Return any fuzzy/partial-word match as
+  an `ambiguous` candidate for the model to confirm — never silently substitute a
+  lone fuzzy hit.
+- Add coverage for each trap: stale-ID-vs-correct-name, broad-single-word-fuzzy,
+  and full-name-vs-other-row's-shortName.
+
+## 11. Keep AI tool-input (Zod) schemas permissive when downstream logic normalizes or resolves the value
+
+**Seen in:** #460 (1 P2), #465 (1 P2)
+
+**Problem.** Tool-input validation ran _before_ `execute`, so a strict Zod schema
+rejected malformed-but-repairable AI output before the repair code could run:
+
+- #460 — `create_workout` reps/duration were tightened to `.positive()` to fix
+  `reps: 0`/negative AI output (#447). But that rejected the bad input at the
+  schema boundary, so the standalone `create_workout` path never reached the new
+  `positiveOr` clamp in `buildTonalWorkoutSets` and still failed on the exact
+  #447 input — even though the retry/week-plan paths normalized fine.
+- #465 — making `name` _required_ in the `create_workout` schema meant the
+  documented `Rest` sentinel (catalog-exempt, supplied by `movementId` only, can't
+  come from `search_exercises`) was rejected by Zod before `resolveMovement`'s
+  `isWellKnownMovementId` path could handle it, unless the model invented a `name`.
+
+**Why it matters.** When a downstream step exists specifically to repair or
+resolve imperfect model output (clamp, normalize, resolve-by-id), a strict schema
+upstream silently defeats it on exactly the inputs it was built for — and the bug
+only shows on the one path that lacks a parallel pre-normalization step.
+
+**Preventive checks.**
+
+- If you add a clamp/normalize/resolve step, make the **tool-input schema
+  permissive** for that field (`int().optional()`, optional `name`, etc.) and let
+  the downstream step own correctness — validate-then-repair, not reject-at-schema.
+- When tightening a tool schema, list **every execution path** that field flows
+  through; confirm none rely on the old permissive shape to reach a repair step.
+- Add coverage that drives the **real tool/execute path** with the malformed input
+  (e.g. `reps: 0`, Rest-by-id-only), not just the already-normalized callers.
+
+## 12. Model-tier routing is two decisions (primary tier + fallback tier): reroute the one buggy branch instead of gutting the gate, and re-check tier→model mappings per provider
+
+**Seen in:** #469 (4 review threads)
+
+**Problem.** Short workout requests were landing on the flash-lite `router`
+tier, which doesn't reliably drive `search_exercises → create_workout`. The
+first cut deleted the whole routing classifier so chat turns always started on
+the `chat` tier — which dropped behaviors the gate also provided and rippled into
+the retry/fallback path:
+
+- **Lost complex→programming routing.** The classifier also routed `complex`
+  prompts ("program a week" / "build a plan") to the `programming` tier. Removing
+  it meant BYOK Claude/OpenAI planning requests started on the cheaper `chat` tier
+  (Sonnet / GPT-mini) and only escalated _retrospectively_ in `prepareStep` after
+  a programming tool had run — weakening the path the programming tier (Opus /
+  GPT-5.4) is reserved for.
+- **The fallback tier is a separate decision.** `selectCoachTierRoute` derives the
+  fallback via `getFallbackTier(primaryTier)`, and `getFallbackTier("chat")` is the
+  `router`/flash-lite tier. The fallback agent runs the _same turn_ on
+  circuit-open/timeout, so changing the primary tier silently changes which model
+  handles the failure path too.
+- **Per-provider model policy constrains the fallback.** On the default Gemini
+  house key, `chat` and `programming` both resolve to `gemini-2.5-flash`, so
+  bumping the chat fallback to `programming` would re-run the _same_ model on
+  fallback — dropping the distinct `flash-lite` fallback that protects against a
+  flash outage / circuit trip. On Gemini a fallback cannot be both distinct from
+  flash _and_ reliable at tool-calling.
+
+**The accepted resolution was surgical and deliberately kept the router
+fallback.** PR #469 reverted the fallback-tier change and rerouted only the
+`trivial` branch to the `chat` tier, leaving `complex → programming` and
+`getFallbackTier("chat") = "router"` intact. The short-request fix relies on the
+**primary** now being the tool-capable `chat` tier; only the rare
+circuit-open/timeout path falls through to flash-lite, and the maintainer
+**accepted that residual** to preserve Gemini's distinct-model fallback. Current
+main codifies this: `convex/ai/providers.test.ts` asserts
+`getFallbackTier("chat") === "router"`, and `convex/chatProcessing.test.ts`
+asserts the trivial route's `fallbackTier` stays `router`.
+
+**Why it matters.** A multi-branch classifier encodes several decisions at once;
+deleting it to fix one branch takes the others with it. And the fallback tier is a
+_second_ decision that interacts with per-provider model policy — so the "obvious"
+fix (force the fallback onto a tool-capable tier) can regress a different provider.
+The lesson is to weigh both tiers and **record the tradeoff**, not to mandate a
+non-router fallback.
+
+**Preventive checks.**
+
+- **Prefer the surgical reroute.** When one branch of a classifier/router is wrong,
+  change that branch (here: `trivial → chat`) and leave the others
+  (`complex → programming`) and the fallback tier untouched — don't delete the
+  whole gate.
+- **Trace both the primary and the fallback tier**, and remember the fallback agent
+  runs the _same turn_ on circuit-open/timeout. Resolve each against the **active
+  provider's model policy** before concluding a fallback is "safe" — it can
+  collapse to the same model under one provider even when it looks distinct in the
+  abstract.
+- **Record the tradeoff instead of mandating one side.** When a provider can't
+  offer a fallback that is both distinct-from-primary and tool-capable, that's a
+  conscious choice, not a bug: #469 kept the distinct flash-lite/`router` fallback
+  because the primary path is already tool-capable. Do **not** add an invariant
+  that the fallback is never `router` — current tests intentionally assert the
+  opposite.
+- Assert the invariants the decision actually protects (e.g. `complex` still maps
+  to `programming`; the `trivial` route's primary is `chat`), so the surgical fix
+  can't silently regress.
+
 ---
 
 ## How to use this log
@@ -341,8 +483,11 @@ must never overwrite a previously known value.
 - Before opening a PR that touches **Tonal fetch helpers, AI cost/budget paths,
   test fixtures, scheduled sweeps, React error boundaries around optional
   integrations, credential/format validators, payload transforms that
-  filter/drop elements, retry/fallback error reporting, or external-payload
-  normalization (nullable typing, refresh vs. first-connect defaults)**, skim the
+  filter/drop elements, retry/fallback error reporting, external-payload
+  normalization (nullable typing, refresh vs. first-connect defaults),
+  name/ID-to-catalog resolution for AI tool calls, AI tool-input (Zod) schemas
+  that sit upstream of a normalize/clamp/resolve step, or model-tier routing and
+  classifier/gate changes (including per-provider tier→model mappings)**, skim the
   matching section above.
 - When a review surfaces a _new_ recurring, legitimate gap (not stylistic, not
   one-off), add an entry here with the PR reference so the next agent inherits
