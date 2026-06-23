@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here. This file is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commits on `main`. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.11.2](https://github.com/JeffOtano/roni/compare/v0.11.1...v0.11.2) (2026-06-23)
+
+
+### Documentation
+
+* log movement-resolution, tool-schema, and routing-gate review learnings ([#485](https://github.com/JeffOtano/roni/issues/485)) ([2d0207b](https://github.com/JeffOtano/roni/commit/2d0207b75a03568460a50fcad3f6e4045df3706c))
+
 ## [0.11.1](https://github.com/JeffOtano/roni/compare/v0.11.0...v0.11.1) (2026-06-23)
 
 
