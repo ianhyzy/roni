@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here. This file is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commits on `main`. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.11.1](https://github.com/JeffOtano/roni/compare/v0.11.0...v0.11.1) (2026-06-23)
+
+
+### Bug Fixes
+
+* resolve rebuild-day exercise names ([#493](https://github.com/JeffOtano/roni/issues/493)) ([5b1c1a3](https://github.com/JeffOtano/roni/commit/5b1c1a36a461f23ecd1ad009b7e706fd0caad3c9))
+
 ## [0.11.0](https://github.com/JeffOtano/roni/compare/v0.10.6...v0.11.0) (2026-06-18)
 
 
