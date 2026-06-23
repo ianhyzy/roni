@@ -13,66 +13,102 @@ for (const [key, value] of Object.entries(rawModules)) {
   modules[key.startsWith("./") ? "../coach/" + key.slice(2) : key] = value;
 }
 
+const FIXTURE_NOW = 1_775_772_000_000;
+
+type ProgrammedRestDay = {
+  sessionType: "rest";
+  status: "programmed";
+};
+
+type ProgrammedRecoveryDay = {
+  sessionType: "recovery";
+  status: "programmed";
+};
+
+function programmedRestDay(): ProgrammedRestDay {
+  return {
+    sessionType: "rest",
+    status: "programmed",
+  };
+}
+
+function programmedRecoveryDay(): ProgrammedRecoveryDay {
+  return {
+    sessionType: "recovery",
+    status: "programmed",
+  };
+}
+
+function movementDoc(
+  tonalId: string,
+  overrides: { name?: string; muscleGroups?: string[]; countReps?: boolean } = {},
+) {
+  const name = overrides.name ?? tonalId;
+  return {
+    tonalId,
+    name,
+    shortName: name,
+    muscleGroups: overrides.muscleGroups ?? ["Back"],
+    countReps: overrides.countReps ?? true,
+    skillLevel: 1,
+    onMachine: false,
+    inFreeLift: false,
+    isTwoSided: false,
+    isBilateral: true,
+    isAlternating: false,
+    publishState: "published",
+    sortOrder: 0,
+    descriptionHow: "",
+    descriptionWhy: "",
+    nameSearchText: name.toLowerCase(),
+    muscleGroupsSearchText: (overrides.muscleGroups ?? ["Back"]).join(" ").toLowerCase(),
+    trainingTypesSearchText: "strength",
+    lastSyncedAt: FIXTURE_NOW,
+  };
+}
+
+async function createActiveWeek(
+  t: ReturnType<typeof convexTest>,
+  sessionType: "full_body" | "legs" = "full_body",
+) {
+  const userId = await t.run((ctx) => ctx.db.insert("users", { email: "u@t" }));
+  const oldPlanId = await t.run((ctx) =>
+    ctx.db.insert("workoutPlans", {
+      userId,
+      title: "Old",
+      blocks: [{ exercises: [{ movementId: "mov-old", sets: 3, reps: 10 }] }],
+      status: "draft",
+      createdAt: FIXTURE_NOW,
+    }),
+  );
+  const weekPlanId = await t.run((ctx) =>
+    ctx.db.insert("weekPlans", {
+      userId,
+      weekStartDate: "2026-04-27",
+      preferredSplit: "full_body",
+      targetDays: 1,
+      days: [
+        { sessionType, status: "programmed", workoutPlanId: oldPlanId },
+        ...Array.from({ length: 6 }, programmedRestDay),
+      ],
+      createdAt: FIXTURE_NOW,
+      updatedAt: FIXTURE_NOW,
+    }),
+  );
+  return { userId, oldPlanId, weekPlanId };
+}
+
 describe("rebuildDay", () => {
   it("replaces a day's workoutPlan with a new draft built from explicit blocks", async () => {
     const t = convexTest(schema, modules);
 
-    const userId = await t.run((ctx) => ctx.db.insert("users", { email: "u@t" }));
     await t.run(async (ctx) => {
       for (const id of ["mov-warmup", "mov-main"]) {
-        await ctx.db.insert("movements", {
-          tonalId: id,
-          name: id,
-          shortName: id,
-          muscleGroups: ["Back"],
-          countReps: id === "mov-main",
-          skillLevel: 1,
-          onMachine: false,
-          inFreeLift: false,
-          isTwoSided: false,
-          isBilateral: true,
-          isAlternating: false,
-          publishState: "published",
-          sortOrder: 0,
-          descriptionHow: "",
-          descriptionWhy: "",
-          nameSearchText: id,
-          muscleGroupsSearchText: "back",
-          trainingTypesSearchText: "strength",
-          lastSyncedAt: Date.now(),
-        });
+        await ctx.db.insert("movements", movementDoc(id, { countReps: id === "mov-main" }));
       }
     });
 
-    const oldPlanId = await t.run((ctx) =>
-      ctx.db.insert("workoutPlans", {
-        userId,
-        title: "Old",
-        blocks: [{ exercises: [{ movementId: "mov-old", sets: 3, reps: 10 }] }],
-        status: "draft",
-        createdAt: Date.now(),
-      }),
-    );
-
-    const weekPlanId = await t.run((ctx) =>
-      ctx.db.insert("weekPlans", {
-        userId,
-        weekStartDate: "2026-04-27",
-        preferredSplit: "full_body",
-        targetDays: 1,
-        days: [
-          { sessionType: "full_body", status: "programmed", workoutPlanId: oldPlanId },
-          { sessionType: "rest", status: "programmed" },
-          { sessionType: "rest", status: "programmed" },
-          { sessionType: "rest", status: "programmed" },
-          { sessionType: "rest", status: "programmed" },
-          { sessionType: "rest", status: "programmed" },
-          { sessionType: "rest", status: "programmed" },
-        ],
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      }),
-    );
+    const { userId, oldPlanId, weekPlanId } = await createActiveWeek(t);
 
     const result = await t.action(internal.coach.rebuildDay.rebuildDay, {
       userId,
@@ -98,59 +134,77 @@ describe("rebuildDay", () => {
     expect(newPlan!.status).toBe("draft");
   });
 
+  it("repairs fabricated movement IDs from exact exercise names", async () => {
+    const t = convexTest(schema, modules);
+    await t.run(async (ctx) => {
+      await ctx.db.insert("movements", movementDoc("mov-leg-press", { name: "Leg Press" }));
+    });
+    const { userId, weekPlanId } = await createActiveWeek(t, "legs");
+    const result = await t.action(internal.coach.rebuildDay.rebuildDay, {
+      userId,
+      weekPlanId,
+      dayIndex: 0,
+      blocks: [
+        { exercises: [{ movementId: "fabricated-leg-id", name: "Leg Press", sets: 3, reps: 10 }] },
+      ],
+    });
+    expect(result.ok).toBe(true);
+    const wp = await t.run((ctx) => ctx.db.get(weekPlanId));
+    const newPlan = await t.run((ctx) => ctx.db.get(wp!.days[0].workoutPlanId!));
+    expect(newPlan!.blocks[0].exercises[0]).toMatchObject({
+      movementId: "mov-leg-press",
+      reps: 10,
+    });
+    expect(newPlan!.blocks[0].exercises[0]).not.toHaveProperty("name");
+  });
+
+  it("returns guidance when exercise names cannot be resolved", async () => {
+    const t = convexTest(schema, modules);
+    const { userId, weekPlanId } = await createActiveWeek(t);
+
+    const result = await t.action(internal.coach.rebuildDay.rebuildDay, {
+      userId,
+      weekPlanId,
+      dayIndex: 0,
+      blocks: [{ exercises: [{ movementId: "fabricated-id", name: "Missing Movement", sets: 3 }] }],
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("Expected rebuildDay to fail");
+    expect(result.error).toContain("Could not resolve 1 of 1");
+    expect(result.error).toContain("call search_exercises");
+  });
+
+  it("rejects malformed direct action block inputs", async () => {
+    const t = convexTest(schema, modules);
+    const { userId, weekPlanId } = await createActiveWeek(t);
+    const cases = [
+      { blocks: [], error: "blocks must contain" },
+      { blocks: [{ exercises: [] }], error: "exercises must contain" },
+      { blocks: [{ exercises: [{ movementId: "mov-x", sets: 0 }] }], error: "sets must be" },
+    ];
+
+    for (const testCase of cases) {
+      const result = await t.action(internal.coach.rebuildDay.rebuildDay, {
+        userId,
+        weekPlanId,
+        dayIndex: 0,
+        blocks: testCase.blocks,
+      });
+
+      expect(result.ok).toBe(false);
+      if (result.ok) throw new Error("Expected rebuildDay to fail");
+      expect(result.error).toContain(testCase.error);
+    }
+  });
+
   it("does not delete the old workoutPlan until the new plan is linked", async () => {
     // Arrange
     const t = convexTest(schema, modules);
-    const userId = await t.run((ctx) => ctx.db.insert("users", { email: "u@t" }));
     await t.run(async (ctx) => {
-      await ctx.db.insert("movements", {
-        tonalId: "mov-x",
-        name: "mov-x",
-        shortName: "mov-x",
-        muscleGroups: ["Back"],
-        countReps: true,
-        skillLevel: 1,
-        onMachine: false,
-        inFreeLift: false,
-        isTwoSided: false,
-        isBilateral: true,
-        isAlternating: false,
-        publishState: "published",
-        sortOrder: 0,
-        descriptionHow: "",
-        descriptionWhy: "",
-        nameSearchText: "mov-x",
-        muscleGroupsSearchText: "back",
-        trainingTypesSearchText: "strength",
-        lastSyncedAt: Date.now(),
-      });
+      await ctx.db.insert("movements", movementDoc("mov-x"));
     });
-    const oldPlanId = await t.run((ctx) =>
-      ctx.db.insert("workoutPlans", {
-        userId,
-        title: "Old",
-        blocks: [{ exercises: [{ movementId: "mov-old", sets: 3, reps: 10 }] }],
-        status: "draft",
-        createdAt: Date.now(),
-      }),
-    );
-    const weekPlanId = await t.run((ctx) =>
-      ctx.db.insert("weekPlans", {
-        userId,
-        weekStartDate: "2026-04-27",
-        preferredSplit: "full_body",
-        targetDays: 1,
-        days: [
-          { sessionType: "full_body", status: "programmed", workoutPlanId: oldPlanId },
-          ...Array.from({ length: 6 }, () => ({
-            sessionType: "rest" as const,
-            status: "programmed" as const,
-          })),
-        ],
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      }),
-    );
+    const { userId, oldPlanId, weekPlanId } = await createActiveWeek(t);
 
     // Act
     const result = await t.action(internal.coach.rebuildDay.rebuildDay, {
@@ -177,12 +231,9 @@ describe("rebuildDay", () => {
         weekStartDate: "2026-04-27",
         preferredSplit: "full_body",
         targetDays: 0,
-        days: Array.from({ length: 7 }, () => ({
-          sessionType: "rest" as const,
-          status: "programmed" as const,
-        })),
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
+        days: Array.from({ length: 7 }, programmedRestDay),
+        createdAt: FIXTURE_NOW,
+        updatedAt: FIXTURE_NOW,
       }),
     );
 
@@ -194,7 +245,8 @@ describe("rebuildDay", () => {
     });
 
     expect(result.ok).toBe(false);
-    expect((result as { ok: false; error: string }).error).toMatch(/rest|recovery/i);
+    if (result.ok) throw new Error("Expected rebuildDay to fail");
+    expect(result.error).toMatch(/rest|recovery/i);
   });
 
   it("returns error for recovery day without throwing", async () => {
@@ -206,12 +258,9 @@ describe("rebuildDay", () => {
         weekStartDate: "2026-04-27",
         preferredSplit: "full_body",
         targetDays: 0,
-        days: Array.from({ length: 7 }, () => ({
-          sessionType: "recovery" as const,
-          status: "programmed" as const,
-        })),
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
+        days: Array.from({ length: 7 }, programmedRecoveryDay),
+        createdAt: FIXTURE_NOW,
+        updatedAt: FIXTURE_NOW,
       }),
     );
 
@@ -223,6 +272,7 @@ describe("rebuildDay", () => {
     });
 
     expect(result.ok).toBe(false);
-    expect((result as { ok: false; error: string }).error).toMatch(/rest|recovery/i);
+    if (result.ok) throw new Error("Expected rebuildDay to fail");
+    expect(result.error).toMatch(/rest|recovery/i);
   });
 });

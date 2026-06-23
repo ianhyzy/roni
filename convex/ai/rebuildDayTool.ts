@@ -16,7 +16,7 @@ import { requireUserId, withToolTracking } from "./helpers";
 
 export const rebuildDayTool = createTool({
   description:
-    "Rebuild one day's workout inside the current weekly plan with full block authoring. Use when the user wants a structural rewrite that swap_exercise, add_exercise, set_warmup_block, or adjust_session_duration cannot express, such as a custom warmup plus multiple main blocks and a finisher. Do not use for standalone custom workouts, full-week programming, simple single-exercise edits, or direct pushes to Tonal. Inputs require dayIndex, optional title, and blocks whose movementIds came from search_exercises with reps for rep-based movements or duration seconds for duration-based movements; returns a draft rebuild message that still requires approve_week_plan to push.",
+    "Rebuild one day's workout inside the current weekly plan with full block authoring. Use when the user wants a structural rewrite that swap_exercise, add_exercise, set_warmup_block, or adjust_session_duration cannot express, such as a custom warmup plus multiple main blocks and a finisher. Do not use for standalone custom workouts, full-week programming, simple single-exercise edits, or direct pushes to Tonal. Inputs require dayIndex, optional title, and blocks whose exercises include the exact `name` from search_exercises; movementId is optional/repairable for real exercises. Include reps for rep-based movements or duration seconds for duration-based movements. Returns a draft rebuild message that still requires approve_week_plan to push.",
   inputSchema: z.object({
     dayIndex: z.number().int().min(0).max(6).describe("Day of the week: 0=Monday..6=Sunday"),
     title: z
@@ -31,7 +31,18 @@ export const rebuildDayTool = createTool({
           exercises: z
             .array(
               z.object({
-                movementId: z.string().describe("UUID from search_exercises"),
+                name: z
+                  .string()
+                  .optional()
+                  .describe(
+                    'Exact exercise name from search_exercises, e.g. "Alternating Bench Press". Always provide this for real exercises so the server can repair a missing or wrong movementId.',
+                  ),
+                movementId: z
+                  .string()
+                  .optional()
+                  .describe(
+                    "UUID from search_exercises or the Rest sentinel. Optional for real exercises when exact name is provided; never fabricate one.",
+                  ),
                 sets: z.number().int().min(1).max(10).default(3),
                 reps: z.number().int().optional(),
                 duration: z.number().int().optional(),
