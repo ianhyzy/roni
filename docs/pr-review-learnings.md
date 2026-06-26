@@ -1,6 +1,6 @@
 # PR Review Learnings
 
-Last reviewed: 2026-06-15
+Last reviewed: 2026-06-23
 
 A running log of recurring, legitimate issues raised in pull-request review that
 agents (and humans) should pre-empt. Each entry records the **problem**, **why
@@ -365,12 +365,16 @@ exercise reaches Tonal with no error. And one that's _too_ strict (returns
 
 **Preventive checks.**
 
-- **Order match precedence explicitly and check exact before trusting an ID:**
-  exact full `name` → exact `shortName` alias → valid/well-known ID, and verify
-  an exact name match _before_ accepting a supplied ID so a stale/copied ID can't
-  win over the correct name. Reject ID/name mismatches rather than letting the ID
-  win — resolution sits between a fallible LLM and an external write, so "resolve
-  to something plausible" is the wrong default.
+- **Order match precedence explicitly, and verify the exact full name before
+  trusting a supplied ID:** exact full `name` → valid/well-known ID → exact
+  `shortName` alias (the order `resolveMovement` actually implements). Check the
+  exact _full-name_ match _before_ accepting a supplied `movementId` so a
+  stale/copied ID can't win over the correct name — but keep the ID ahead of the
+  `shortName` alias, because a generic alias that collides with another row would
+  otherwise redirect a valid-ID request to the wrong exercise. Reject ID/name
+  mismatches rather than letting the ID win — resolution sits between a fallible
+  LLM and an external write, so "resolve to something plausible" is the wrong
+  default.
 - **Only auto-resolve on exact matches.** Return any fuzzy/partial-word match as
   an `ambiguous` candidate for the model to confirm — never silently substitute a
   lone fuzzy hit.
@@ -476,6 +480,47 @@ non-router fallback.
   to `programming`; the `trivial` route's primary is `chat`), so the surgical fix
   can't silently regress.
 
+## 13. An internal action reachable without its tool schema must validate its own input
+
+**Seen in:** #493 (1 CodeRabbit Major)
+
+**Problem.** `rebuildDay` was exposed as an `internalAction` that other backend
+paths (the week-plan rebuild flow, the scheduler, tests) call **directly**,
+without passing through the `rebuild_day` tool's Zod schema. Its internal
+validator accepted empty `blocks`/`exercises` arrays and unconstrained numeric
+`sets`/`reps`/`duration` (non-integer, non-positive). So a malformed payload from
+a direct caller could create a draft plan and leak invalid exercise data into
+persistence — the tool schema's range/integer constraints never ran. The fix
+added `validateRebuildDayBlocks`, which runs at the action boundary (before
+catalog resolution and draft creation) and returns a structured
+`{ ok: false, error }` instead of throwing.
+
+**Why it matters.** §11 deliberately keeps a _tool-input_ schema permissive
+because a downstream normalize/clamp/resolve step owns correctness — but that
+reasoning only holds for callers that actually cross the tool boundary. An
+`internalAction` (or anything reachable from the scheduler, another action, or a
+test) bypasses the tool's Zod schema entirely, so "the schema already validated
+this" is false for the direct path. Validation has to live at whichever boundary
+**every** caller crosses, or the unguarded path silently persists garbage.
+
+**Preventive checks.**
+
+- For any `internalAction`/handler reachable **without** the tool Zod schema
+  (week-plan paths, crons, action→action calls), validate array bounds and
+  numeric domains (integer / positive / range) at the action boundary _before_
+  persisting or calling an external API — don't assume the tool schema ran.
+- Mirror the tool schema's real constraints in the internal validator (or factor
+  one shared validator) so a direct call can't accept what the tool path rejects.
+- Reconcile with §11: keep the field permissive **only where a downstream repair
+  step exists on that same path**. If the direct/internal path has no clamp (as
+  here), validate the domain at the boundary; if it does share the clamp, stay
+  permissive and let the clamp run. The deciding question is "does this exact
+  caller reach the repair step?", not "is there a repair step somewhere."
+- Return a structured `{ ok: false, error }` for invalid internal input rather
+  than throwing, matching the action-return-object convention.
+- Add coverage that drives the internal action **directly** with malformed input
+  (empty blocks, `sets: 0`, non-integer reps), not just the tool-path callers.
+
 ---
 
 ## How to use this log
@@ -486,9 +531,10 @@ non-router fallback.
   filter/drop elements, retry/fallback error reporting, external-payload
   normalization (nullable typing, refresh vs. first-connect defaults),
   name/ID-to-catalog resolution for AI tool calls, AI tool-input (Zod) schemas
-  that sit upstream of a normalize/clamp/resolve step, or model-tier routing and
-  classifier/gate changes (including per-provider tier→model mappings)**, skim the
-  matching section above.
+  that sit upstream of a normalize/clamp/resolve step, internal actions reachable
+  without their tool schema (week-plan/cron/action→action callers), or model-tier
+  routing and classifier/gate changes (including per-provider tier→model
+  mappings)**, skim the matching section above.
 - When a review surfaces a _new_ recurring, legitimate gap (not stylistic, not
   one-off), add an entry here with the PR reference so the next agent inherits
   the lesson.
