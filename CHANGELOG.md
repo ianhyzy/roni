@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here. This file is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commits on `main`. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.11.3](https://github.com/JeffOtano/roni/compare/v0.11.2...v0.11.3) (2026-06-26)
+
+
+### Documentation
+
+* correct movement-resolver precedence and log internal-action validation learning ([#508](https://github.com/JeffOtano/roni/issues/508)) ([048d4bf](https://github.com/JeffOtano/roni/commit/048d4bf98ab230d2b813c5fafe61f82a3dd5ea60))
+
 ## [0.11.2](https://github.com/JeffOtano/roni/compare/v0.11.1...v0.11.2) (2026-06-23)
 
 
