@@ -9,8 +9,7 @@ const REGISTRATION_URL = "https://apis.garmin.com/wellness-api/rest/user/registr
 const GARMIN_REGISTRATION_FETCH_TIMEOUT_MS = 5_000;
 
 export type DisconnectGarminResult =
-  | { success: true; warning?: string }
-  | { success: false; error: string };
+  { success: true; warning?: string } | { success: false; error: string };
 
 export const disconnectMyGarmin = action({
   args: {},

@@ -32,8 +32,7 @@ interface ResolvedBlock {
 }
 
 export type ResolveWorkoutBlocksResult =
-  | { ok: true; blocks: ResolvedBlock[] }
-  | { ok: false; error: string };
+  { ok: true; blocks: ResolvedBlock[] } | { ok: false; error: string };
 
 /**
  * Resolve every exercise in the coach's create_workout blocks to a real Tonal

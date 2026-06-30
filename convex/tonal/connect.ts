@@ -8,8 +8,7 @@ import { toUserProfileData } from "./profileData";
 import type { TonalUser } from "./types";
 
 export type ConnectTonalResult =
-  | { success: true; tonalUserId: string }
-  | { success: false; error: "invalid_credentials" };
+  { success: true; tonalUserId: string } | { success: false; error: "invalid_credentials" };
 
 export const connectTonal = internalAction({
   args: {

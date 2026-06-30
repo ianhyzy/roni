@@ -16,13 +16,7 @@ export interface AiRunRow {
   retryCount: number;
   fallbackReason?: "transient_exhaustion" | "primary_error" | "circuit_open";
   finishReason?:
-    | "stop"
-    | "tool-calls"
-    | "length"
-    | "content-filter"
-    | "error"
-    | "other"
-    | "unknown";
+    "stop" | "tool-calls" | "length" | "content-filter" | "error" | "other" | "unknown";
   terminalErrorClass?: string;
   modelId?: string;
   provider?: string;

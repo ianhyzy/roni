@@ -71,8 +71,7 @@ interface RebuildDayInputBlock {
 }
 
 type ResolveRebuildDayBlocksResult =
-  | { ok: true; blocks: BlockInput[] }
-  | { ok: false; error: string };
+  { ok: true; blocks: BlockInput[] } | { ok: false; error: string };
 
 export const rebuildDay = internalAction({
   args: {

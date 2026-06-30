@@ -17,8 +17,7 @@ export type ProviderKeyResult = {
 };
 
 export type ProviderKeyInfo =
-  | { hasKey: false }
-  | { hasKey: true; maskedLast4: string; addedAt: number };
+  { hasKey: false } | { hasKey: true; maskedLast4: string; addedAt: number };
 
 export type ProviderSettings = {
   selectedProvider: ProviderId;

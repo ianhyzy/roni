@@ -4,10 +4,7 @@ import { getProviderConfig, type ProviderId } from "./providers";
 const SETTINGS_LINK = "[Settings](/settings)";
 
 export type ByokErrorCode =
-  | "byok_key_invalid"
-  | "byok_quota_exceeded"
-  | "byok_safety_blocked"
-  | "byok_unknown_error";
+  "byok_key_invalid" | "byok_quota_exceeded" | "byok_safety_blocked" | "byok_unknown_error";
 
 export function buildByokErrorMessage(code: ByokErrorCode, provider: ProviderId): string {
   const config = getProviderConfig(provider);

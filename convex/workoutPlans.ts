@@ -11,8 +11,7 @@ import { workflow } from "./workflows";
 
 type RetryPushResult = { success: true; started: true } | { success: false; error: string };
 type RetryPushWorkflowResult =
-  | { status: "pushed"; workoutId: string }
-  | { status: "failed"; error: string };
+  { status: "pushed"; workoutId: string } | { status: "failed"; error: string };
 type RetryPushCompletion = { status: "pushed" } | { status: "failed"; reason: string };
 
 /** Current source tag written to new workout plans. */

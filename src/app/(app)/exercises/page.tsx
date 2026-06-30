@@ -161,9 +161,7 @@ function ExerciseCard({ movement }: { movement: CatalogEntry }) {
 // ---------------------------------------------------------------------------
 
 type FetchState =
-  | { status: "loading" }
-  | { status: "success"; data: CatalogEntry[] }
-  | { status: "error" };
+  { status: "loading" } | { status: "success"; data: CatalogEntry[] } | { status: "error" };
 
 export default function ExercisesPage() {
   usePageView("exercises_viewed");

@@ -31,10 +31,7 @@ export type LibrarySessionType =
 export type LibraryLevel = "beginner" | "intermediate" | "advanced";
 export type LibraryDuration = 20 | 30 | 45 | 60;
 export type LibraryEquipmentConfig =
-  | "handles_only"
-  | "handles_bar"
-  | "full_accessories"
-  | "bodyweight_only";
+  "handles_only" | "handles_bar" | "full_accessories" | "bodyweight_only";
 
 export interface RepSetScheme {
   sets: number;

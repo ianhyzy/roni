@@ -126,12 +126,7 @@ export function isTransientError(error: unknown): boolean {
 // ---------------------------------------------------------------------------
 
 export type TransientErrorKind =
-  | "provider_overload"
-  | "rate_limit"
-  | "context_limit"
-  | "timeout"
-  | "network"
-  | "server_error";
+  "provider_overload" | "rate_limit" | "context_limit" | "timeout" | "network" | "server_error";
 
 function extractStatus(error: unknown): number | undefined {
   if (APICallError.isInstance(error)) return error.statusCode;

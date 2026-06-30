@@ -87,8 +87,7 @@ export async function parsePermissionsResponse(
 }
 
 export type StartGarminOAuthResult =
-  | { success: true; authorizeUrl: string }
-  | { success: false; error: string };
+  { success: true; authorizeUrl: string } | { success: false; error: string };
 
 export const startGarminOAuth = action({
   args: {},
@@ -161,8 +160,7 @@ export const startGarminOAuth = action({
 });
 
 export type CompleteGarminOAuthResult =
-  | { success: true; garminUserId: string }
-  | { success: false; error: string };
+  { success: true; garminUserId: string } | { success: false; error: string };
 
 export const completeGarminOAuth = action({
   args: {
