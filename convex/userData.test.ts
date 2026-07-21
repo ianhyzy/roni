@@ -17,8 +17,12 @@ function getLocalUserScopedTables() {
   for (const line of lines) {
     const tableMatch = line.match(/^  ([a-zA-Z][a-zA-Z0-9]*): defineTable\(/);
     if (tableMatch) {
-      currentTable = tableMatch[1];
-      tableBlocks.set(currentTable, [line]);
+      const tableName = tableMatch[1];
+      if (!tableName) {
+        continue;
+      }
+      currentTable = tableName;
+      tableBlocks.set(tableName, [line]);
       continue;
     }
 
