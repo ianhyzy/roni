@@ -1,6 +1,6 @@
 # PR Review Learnings
 
-Last reviewed: 2026-06-23
+Last reviewed: 2026-07-23
 
 A running log of recurring, legitimate issues raised in pull-request review that
 agents (and humans) should pre-empt. Each entry records the **problem**, **why
@@ -521,6 +521,52 @@ this" is false for the direct path. Validation has to live at whichever boundary
 - Add coverage that drives the internal action **directly** with malformed input
   (empty blocks, `sets: 0`, non-integer reps), not just the tool-path callers.
 
+## 14. Scope Node type declarations to Node/test files — a global `types: ["node"]` in the Convex tsconfig hides Node-only API misuse in default-runtime files
+
+**Seen in:** #557 (1 P2 review thread, unresolved)
+
+**Problem.** `convex/tsconfig.json` added `"types": ["node"]` at the project
+level to make a typecheck error go away ("restore convex deploy typecheck"). But
+that tsconfig typechecks **every** Convex module, not just `"use node"` action
+files. Declaring the Node types globally tells the compiler that Node globals
+(`Buffer`, `process`, etc.) exist in _all_ Convex files — including the ones that
+run in Convex's default V8/browser-like runtime, where those globals are **not**
+available ([Convex runtimes](https://docs.convex.dev/functions/runtimes)). So a
+default-runtime module can reference a Node-only API and typecheck clean, then
+fail at runtime. A live instance already exists: `convex/tonal/proxyCacheLimits.ts`
+calls `Buffer.byteLength` and is imported by `convex/tonal/proxy.ts`, which has
+**no** `"use node"` directive. At runtime `Buffer` is undefined there, the
+`try/catch` in `estimateCacheValueBytes` treats the throw as
+`Number.POSITIVE_INFINITY`, `isCacheValueWithinLimit` returns `false`, and
+`cachedFetch` silently skips every cache write — disabling stale-while-revalidate
+and increasing external Tonal calls, with no type error to catch it.
+
+**Why it matters.** The Convex deploy typecheck is the guardrail that stops
+runtime-incompatible code from shipping. Widening the ambient type environment to
+silence one error also removes the compiler's ability to flag Node-only API usage
+in the majority of files that can't use it — trading a visible build failure for
+a latent, silent runtime failure that only manifests as degraded behavior (here,
+a cache that never writes). "Make the typecheck pass" must not mean "make the
+typecheck stop checking."
+
+**Preventive checks.**
+
+- **Scope Node types to the files that actually run under Node.** Don't add
+  `"types": ["node"]` to the root `convex/tsconfig.json`. Prefer a narrower config
+  (or a `/// <reference types="node" />` in the specific `"use node"` module /
+  test file) so default-runtime files still error on `Buffer`/`process`/etc.
+- **When a typecheck error appears, fix the offending code, not the type
+  environment.** If a default-runtime file needs byte length, use a Web API
+  (`new TextEncoder().encode(str).length`) instead of `Buffer.byteLength`; only
+  reach for a Node global inside a `"use node"` module.
+- Before importing a helper into a default-runtime Convex file, confirm the helper
+  (and its transitive imports) uses only APIs available in Convex's default
+  runtime — a `"use node"`-only API reached from a non-node module fails at
+  runtime regardless of what the types say.
+- When silencing a build/typecheck error, ask "what was this check protecting?"
+  A config change that makes an error disappear across the whole project usually
+  disables a real guardrail; narrow the change to the one file that needs it.
+
 ---
 
 ## How to use this log
@@ -532,9 +578,10 @@ this" is false for the direct path. Validation has to live at whichever boundary
   normalization (nullable typing, refresh vs. first-connect defaults),
   name/ID-to-catalog resolution for AI tool calls, AI tool-input (Zod) schemas
   that sit upstream of a normalize/clamp/resolve step, internal actions reachable
-  without their tool schema (week-plan/cron/action→action callers), or model-tier
+  without their tool schema (week-plan/cron/action→action callers), model-tier
   routing and classifier/gate changes (including per-provider tier→model
-  mappings)**, skim the matching section above.
+  mappings), or the Convex `tsconfig`/ambient type environment (scoping Node
+  types, silencing a deploy typecheck error)**, skim the matching section above.
 - When a review surfaces a _new_ recurring, legitimate gap (not stylistic, not
   one-off), add an entry here with the PR reference so the next agent inherits
   the lesson.
