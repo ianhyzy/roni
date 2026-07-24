@@ -1,6 +1,6 @@
 # PR Review Learnings
 
-Last reviewed: 2026-06-23
+Last reviewed: 2026-07-24
 
 A running log of recurring, legitimate issues raised in pull-request review that
 agents (and humans) should pre-empt. Each entry records the **problem**, **why
@@ -521,6 +521,47 @@ this" is false for the direct path. Validation has to live at whichever boundary
 - Add coverage that drives the internal action **directly** with malformed input
   (empty blocks, `sets: 0`, non-integer reps), not just the tool-path callers.
 
+## 14. Don't widen the Convex typecheck config with Node globals that the default runtime doesn't provide
+
+**Seen in:** #557 (1 P2 review thread)
+
+**Problem.** To restore the Convex deploy typecheck, the PR added
+`"types": ["node"]` to `convex/tsconfig.json`. But that one config typechecks
+**every** Convex module, not just `"use node"` action files — so it now tells the
+compiler that Node globals (`Buffer`, `process`, `setImmediate`, …) exist in the
+default (V8) runtime too. That masks a real gap: `convex/tonal/proxyCacheLimits.ts`
+calls `Buffer.byteLength` in `estimateCacheValueBytes` but has no `"use node"`
+directive, and it's imported by `convex/tonal/proxy.ts` (also default-runtime).
+The global Node types make this typecheck clean while it fails at runtime.
+
+**Why it matters.** In Convex's [default runtime](https://docs.convex.dev/functions/runtimes)
+`Buffer` is undefined, so `Buffer.byteLength` throws. `estimateCacheValueBytes`
+catches it and returns `Infinity`, which makes `isCacheValueWithinLimit` false, so
+`cachedFetch` silently skips the cache write on fresh Tonal fetches — disabling
+stale-while-revalidate and increasing external Tonal calls. The typecheck is the
+guardrail that should catch "Node-only API in a V8-runtime module," and a
+project-wide `types: ["node"]` blinds it to exactly that class of bug. Widening a
+config to unblock a build can suppress errors on a runtime the config also covers.
+
+**Preventive checks.**
+
+- **Scope Node types to the files that actually run under Node** (`"use node"`
+  modules + `*.test.ts`), not the whole Convex project. If a single
+  `convex/tsconfig.json` must stay wide to satisfy Convex's deploy typecheck,
+  prefer a Web-standard API over a Node global in default-runtime modules — e.g.
+  `new TextEncoder().encode(JSON.stringify(value)).length` or `new Blob([...]).size`
+  instead of `Buffer.byteLength`.
+- When you widen a typecheck/lint config to fix one error, confirm the widening
+  doesn't also **suppress errors on a different runtime** the same config governs.
+  Ask "which files does this config cover, and do they all run where these globals
+  exist?"
+- Grep for Node globals (`Buffer`, `process`, `setImmediate`, `__dirname`) in
+  modules **without** a `"use node"` directive; each is a latent runtime failure
+  that a Node-typed config will happily typecheck.
+- Add coverage that exercises the affected default-runtime helper (here,
+  `estimateCacheValueBytes` / `isCacheValueWithinLimit`) so a byte-size regression
+  surfaces in tests, not as a silent cache miss in prod.
+
 ---
 
 ## How to use this log
@@ -532,9 +573,10 @@ this" is false for the direct path. Validation has to live at whichever boundary
   normalization (nullable typing, refresh vs. first-connect defaults),
   name/ID-to-catalog resolution for AI tool calls, AI tool-input (Zod) schemas
   that sit upstream of a normalize/clamp/resolve step, internal actions reachable
-  without their tool schema (week-plan/cron/action→action callers), or model-tier
+  without their tool schema (week-plan/cron/action→action callers), model-tier
   routing and classifier/gate changes (including per-provider tier→model
-  mappings)**, skim the matching section above.
+  mappings), or typecheck/lint config widenings that could hide Node-vs-V8
+  runtime mismatches in Convex modules**, skim the matching section above.
 - When a review surfaces a _new_ recurring, legitimate gap (not stylistic, not
   one-off), add an entry here with the PR reference so the next agent inherits
   the lesson.
