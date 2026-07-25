@@ -314,14 +314,17 @@ refresh, name/ID-to-catalog resolvers that auto-substitute fuzzy matches or
 trust a stale ID over an exact name, AI tool-input schemas that reject
 malformed-but-repairable model output before a downstream normalize/clamp/resolve
 step, classifier/routing-gate removals that drop the gate's other behaviors
-or break per-provider tier->model fallbacks, and internal actions reachable
-without their tool schema that skip validating their own input). Skim the
+or break per-provider tier->model fallbacks, internal actions reachable
+without their tool schema that skip validating their own input, and Node
+globals (Buffer/process) reaching Convex default-runtime files -- often
+masked by a project-wide `types: ["node"]` in `convex/tsconfig.json`). Skim the
 matching section before touching Tonal fetch helpers, AI cost/budget paths, test
 fixtures, scheduled sweeps, error boundaries around optional integrations,
 credential/format validators, payload filter/transform steps, retry/fallback and
 normalization paths, AI tool-call name/ID resolution, tool-input (Zod) schemas,
-internal actions callable without the tool schema, or model-tier routing -- and
-append a new entry when review surfaces a fresh recurring gap.
+internal actions callable without the tool schema, model-tier routing, or Convex
+runtime-API boundaries (Node globals in default-runtime files, tsconfig type
+globals) -- and append a new entry when review surfaces a fresh recurring gap.
 
 <!-- convex-ai-start -->
 

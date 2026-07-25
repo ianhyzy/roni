@@ -1,6 +1,6 @@
 # PR Review Learnings
 
-Last reviewed: 2026-06-23
+Last reviewed: 2026-07-25
 
 A running log of recurring, legitimate issues raised in pull-request review that
 agents (and humans) should pre-empt. Each entry records the **problem**, **why
@@ -521,6 +521,53 @@ this" is false for the direct path. Validation has to live at whichever boundary
 - Add coverage that drives the internal action **directly** with malformed input
   (empty blocks, `sets: 0`, non-integer reps), not just the tool-path callers.
 
+## 14. Don't rely on Node globals in Convex default-runtime files — and don't let a project-wide `types: ["node"]` hide it
+
+**Seen in:** #557 (1 P2 review thread)
+
+**Problem.** PR #557 fixed a `convex deploy` typecheck failure by adding
+`"types": ["node"]` to `convex/tsconfig.json`. But that tsconfig typechecks
+**every** Convex module, including default-runtime (non-`"use node"`) files —
+so it now globally asserts Node APIs exist even where they don't. The concrete
+victim: `estimateCacheValueBytes` in `convex/tonal/proxyCacheLimits.ts` calls
+`Buffer.byteLength(...)`, and it's imported by `convex/tonal/proxy.ts` — an
+`internalAction` with **no** `"use node"` directive, so it runs in Convex's
+browser-like V8 runtime where `Buffer` is undefined. The function's `try/catch`
+swallows the resulting `ReferenceError` and returns `Number.POSITIVE_INFINITY`,
+so `isCacheValueWithinLimit` always returns `false`, `cachedFetch` skips every
+cache write, and the Tonal proxy's stale-while-revalidate caching is silently
+disabled — every read falls through to the external Tonal API.
+
+**Why it matters.** A project-wide `types: ["node"]` makes the typechecker
+assert Node globals everywhere, so it stops flagging Node-only usage in
+V8-runtime files — the one guard that would have caught this. The failure is
+invisible at compile time and surfaces only as degraded caching and extra
+external calls at runtime, far from the tsconfig line that enabled it. It also
+compounds §1: a broad `catch` that converts a missing-global `ReferenceError`
+into a benign fallback (`Infinity`) turns "this API doesn't exist in this
+runtime" into a permanent, silent degradation instead of a loud failure.
+
+**Preventive checks.**
+
+- **Keep Node type globals scoped.** Don't add project-wide `"types": ["node"]`
+  to `convex/tsconfig.json`; it makes the deploy typecheck assert Node APIs in
+  default-runtime files too. If a Node type is genuinely needed, scope it to the
+  `"use node"` / test files that need it (a dedicated tsconfig or a triple-slash
+  reference), so the typecheck still catches Node globals leaking into V8 code.
+- **Use Web APIs in default-runtime code.** Replace `Buffer.byteLength(s, "utf8")`
+  with `new TextEncoder().encode(s).length` (or `new Blob([s]).size`) — both work
+  in the Convex V8 runtime. Reserve `Buffer`/`process`/`fs` for `"use node"`
+  modules.
+- **Check the transitive import chain, not just the file.** Before importing a
+  helper into a non-`"use node"` action/query/mutation, confirm none of its
+  transitive dependencies reach for Node globals — the whole chain runs in V8,
+  and `convex/tonal/proxy.ts` → `proxyCacheLimits.ts` is exactly how the Node
+  dependency slipped into the default runtime.
+- **Don't let `try/catch` mask a missing-global.** A catch that returns a benign
+  fallback (`Infinity`, `[]`, `null`) on a `ReferenceError` hides "this runtime
+  lacks the API." If a fallback is intentional, narrow it to the errors you
+  actually expect (serialization failures), not every throw.
+
 ---
 
 ## How to use this log
@@ -532,9 +579,10 @@ this" is false for the direct path. Validation has to live at whichever boundary
   normalization (nullable typing, refresh vs. first-connect defaults),
   name/ID-to-catalog resolution for AI tool calls, AI tool-input (Zod) schemas
   that sit upstream of a normalize/clamp/resolve step, internal actions reachable
-  without their tool schema (week-plan/cron/action→action callers), or model-tier
+  without their tool schema (week-plan/cron/action→action callers), model-tier
   routing and classifier/gate changes (including per-provider tier→model
-  mappings)**, skim the matching section above.
+  mappings), or Convex runtime-API boundaries (Node globals in default-runtime
+  files, `convex/tsconfig.json` type globals)**, skim the matching section above.
 - When a review surfaces a _new_ recurring, legitimate gap (not stylistic, not
   one-off), add an entry here with the PR reference so the next agent inherits
   the lesson.
