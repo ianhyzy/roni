@@ -1,6 +1,6 @@
 # PR Review Learnings
 
-Last reviewed: 2026-06-23
+Last reviewed: 2026-07-26
 
 A running log of recurring, legitimate issues raised in pull-request review that
 agents (and humans) should pre-empt. Each entry records the **problem**, **why
@@ -521,6 +521,50 @@ this" is false for the direct path. Validation has to live at whichever boundary
 - Add coverage that drives the internal action **directly** with malformed input
   (empty blocks, `sets: 0`, non-integer reps), not just the tool-path callers.
 
+## 14. Don't silence a typecheck by widening the Convex config — keep Node-only globals out of default-runtime files
+
+**Seen in:** #557 (1 P2 review thread)
+
+**Problem.** A `convex deploy` typecheck failure was resolved by adding
+`"types": ["node"]` globally to `convex/tsconfig.json`. But that config
+typechecks **default-runtime** files too, not just `"use node"` modules.
+`estimateCacheValueBytes` in `convex/tonal/proxyCacheLimits.ts` calls
+`Buffer.byteLength(...)`, and it is imported by `convex/tonal/proxy.ts` — an
+`internalAction` with **no `"use node"` directive**, so it runs in Convex's
+default (V8, browser-like) runtime where `Buffer` is not a global. Adding Node
+types made the compiler stop complaining, but that warning was the _only_ signal
+that `Buffer` is undefined at runtime on that path.
+
+**Why it matters.** At runtime the missing global throws, `estimateCacheValueBytes`
+catches it and returns `Number.POSITIVE_INFINITY`, so `isCacheValueWithinLimit`
+returns `false` and `cachedFetch` **skips every cache write** on fresh Tonal
+fetches — silently disabling stale-while-revalidate and increasing external Tonal
+calls. A green typecheck now hides a live runtime regression. Node-specific APIs
+(`Buffer`, `process`, `fs`, …) are only available inside `"use node"` action
+modules; the default runtime exposes Web-standard globals instead
+([Convex runtimes](https://docs.convex.dev/functions/runtimes)).
+
+**Preventive checks.**
+
+- Don't widen the whole `convex/tsconfig.json` to make one file compile. Scope
+  Node types to Node/test files, or replace the Node API with a **Web-standard**
+  equivalent (e.g. `new TextEncoder().encode(str).length` instead of
+  `Buffer.byteLength(str, "utf8")`) so the default-runtime path stays runtime-safe
+  _and_ the typecheck still catches stray Node globals.
+- Before using `Buffer`/`process`/`fs`/other Node globals in a `convex/` file,
+  confirm that file — **and every non-`"use node"` file that imports it** — is
+  meant to run under `"use node"`. A default-runtime file (query/mutation, or an
+  `internalAction`/`action` without the directive) reaching for a Node API is the
+  smell. See AGENTS.md: `otel.ts`/`resilience.ts` are `"use node"` precisely
+  because of this constraint.
+- Treat a `catch` that maps failure to a sentinel (`Infinity`, `[]`, `null`) as an
+  **observability blind spot** (see also §1): a runtime `ReferenceError` produces
+  the same sentinel as a legitimately-too-large payload, so the caching bug looks
+  identical to normal operation. Narrow the catch or log the unexpected class.
+- Add coverage that exercises the size estimate on the **default-runtime path**
+  (or asserts the encoder-based byte count) so a Node-only dependency can't
+  silently disable caching again.
+
 ---
 
 ## How to use this log
@@ -532,9 +576,10 @@ this" is false for the direct path. Validation has to live at whichever boundary
   normalization (nullable typing, refresh vs. first-connect defaults),
   name/ID-to-catalog resolution for AI tool calls, AI tool-input (Zod) schemas
   that sit upstream of a normalize/clamp/resolve step, internal actions reachable
-  without their tool schema (week-plan/cron/action→action callers), or model-tier
+  without their tool schema (week-plan/cron/action→action callers), model-tier
   routing and classifier/gate changes (including per-provider tier→model
-  mappings)**, skim the matching section above.
+  mappings), or Convex runtime boundaries (Node globals in default-runtime
+  files, `convex/tsconfig.json` type widening)**, skim the matching section above.
 - When a review surfaces a _new_ recurring, legitimate gap (not stylistic, not
   one-off), add an entry here with the PR reference so the next agent inherits
   the lesson.
