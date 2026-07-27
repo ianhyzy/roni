@@ -1,6 +1,6 @@
 # PR Review Learnings
 
-Last reviewed: 2026-06-23
+Last reviewed: 2026-07-27
 
 A running log of recurring, legitimate issues raised in pull-request review that
 agents (and humans) should pre-empt. Each entry records the **problem**, **why
@@ -521,6 +521,52 @@ this" is false for the direct path. Validation has to live at whichever boundary
 - Add coverage that drives the internal action **directly** with malformed input
   (empty blocks, `sets: 0`, non-integer reps), not just the tool-path callers.
 
+## 14. Don't widen the Convex tsconfig to Node types globally — it hides runtime failures in default-runtime files
+
+**Seen in:** #557 (1 P2 review thread, still open)
+
+**Problem.** To restore a green `convex deploy` typecheck, #557 added
+`"types": ["node"]` to `convex/tsconfig.json`. That config governs the **whole**
+Convex project, including default-runtime (V8, browser-like) modules that do
+_not_ carry a `"use node"` directive. `convex/tonal/proxyCacheLimits.ts:15`
+(`estimateCacheValueBytes`) calls the Node global `Buffer.byteLength`, and it is
+imported by `convex/tonal/proxy.ts` — which has **no** `"use node"`, so it runs
+in Convex's default runtime where `Buffer` is undefined. Before the global Node
+types, this was a compile error that `convex deploy` would catch; afterwards the
+typecheck passes and the failure only appears at runtime.
+
+**Why it matters.** The runtime failure is silent and load-bearing.
+`estimateCacheValueBytes` wraps the call in `try { … } catch { return
+Number.POSITIVE_INFINITY }`, so a missing `Buffer` isn't an error the operator
+sees — it makes `isCacheValueWithinLimit` return `false` for every value. That
+tells `cachedFetch` the payload is too big to cache, so it **skips the cache
+write** on fresh Tonal fetches, disabling stale-while-revalidate and driving
+extra external Tonal calls. A typecheck-only fix (widening `types`) traded a
+visible, blocking build error for an invisible, always-on cache-disabling bug —
+and the guardrail that would have caught it (deploy typecheck) is exactly what
+was widened away. (This maps to the same failure family as §2/§9: a change that
+makes types _accept more_ can mask a real contract the runtime still enforces.)
+
+**Preventive checks.**
+
+- Keep Node-only globals (`Buffer`, `process`, `fs`, `crypto` node APIs) behind
+  a `"use node"` module boundary. If a helper needs `Buffer.byteLength`, either
+  put it in a `"use node"` action module or replace it with a Web API available
+  in Convex's default runtime (e.g. `new TextEncoder().encode(s).length` for
+  UTF-8 byte length).
+- **Don't fix a deploy-typecheck failure by globally widening `convex/tsconfig.json`
+  `types`/`lib`.** That silences the one check that distinguishes default-runtime
+  from `"use node"` code. Scope Node types to the Node/test files that need them
+  (a separate tsconfig or per-file setup), or remove the Node dependency from the
+  default-runtime path.
+- When a `catch` returns a "safe" sentinel (`Infinity`, `[]`, `null`), confirm the
+  sentinel can't come from an environment/reference error rather than the intended
+  domain case — here `Infinity` was meant for unserializable payloads, but a
+  missing-`Buffer` ReferenceError takes the same branch and disables caching.
+- Before merging a change that only touches build/tsconfig to "make the typecheck
+  pass," ask what the check was catching. A green build that used to be red often
+  means the error moved to runtime, not that it was resolved.
+
 ---
 
 ## How to use this log
@@ -532,9 +578,11 @@ this" is false for the direct path. Validation has to live at whichever boundary
   normalization (nullable typing, refresh vs. first-connect defaults),
   name/ID-to-catalog resolution for AI tool calls, AI tool-input (Zod) schemas
   that sit upstream of a normalize/clamp/resolve step, internal actions reachable
-  without their tool schema (week-plan/cron/action→action callers), or model-tier
+  without their tool schema (week-plan/cron/action→action callers), model-tier
   routing and classifier/gate changes (including per-provider tier→model
-  mappings)**, skim the matching section above.
+  mappings), or Convex tsconfig/runtime-boundary changes (Node globals in
+  default-runtime files, widening `types`/`lib` to pass the deploy typecheck)**,
+  skim the matching section above.
 - When a review surfaces a _new_ recurring, legitimate gap (not stylistic, not
   one-off), add an entry here with the PR reference so the next agent inherits
   the lesson.
