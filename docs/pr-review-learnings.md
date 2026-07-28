@@ -1,6 +1,6 @@
 # PR Review Learnings
 
-Last reviewed: 2026-06-23
+Last reviewed: 2026-07-28
 
 A running log of recurring, legitimate issues raised in pull-request review that
 agents (and humans) should pre-empt. Each entry records the **problem**, **why
@@ -521,6 +521,72 @@ this" is false for the direct path. Validation has to live at whichever boundary
 - Add coverage that drives the internal action **directly** with malformed input
   (empty blocks, `sets: 0`, non-integer reps), not just the tool-path callers.
 
+## 14. Adding `"types": ["node"]` to the shared Convex tsconfig masks Node-only globals leaking into default-runtime files
+
+**Seen in:** #557 (1 P2 review thread). **Fixed in:** #581.
+
+**Problem.** #557 restored the `npx convex deploy` typecheck by adding
+`"types": ["node"]` to `convex/tsconfig.json`. But that tsconfig typechecks
+**every** Convex module, not just the `"use node"` action files — and some Node
+globals are only real at runtime in `"use node"` modules. Convex's default
+(V8, browser-like) runtime does **not** provide `Buffer` (note: it _does_
+expose `process.env`, which no-directive actions like `convex/tonal/proxy.ts`
+read intentionally — so this is about the genuinely unavailable globals such as
+`Buffer`, not `process.env`). Declaring Node types globally tells the
+typechecker those globals exist everywhere, so it stops flagging their use in
+default-runtime files.
+
+The concrete leak before #581: `estimateCacheValueBytes` in
+`convex/tonal/proxyCacheLimits.ts` called `Buffer.byteLength(...)`, and it was
+reachable via `isCacheValueWithinLimit` from the registered default-runtime
+action in `convex/tonal/proxy.ts`, on the cache-write path. The missing
+`Buffer` threw, and the surrounding `try/catch` treated the failure as
+`Number.POSITIVE_INFINITY`, so `isCacheValueWithinLimit` returned `false` and
+`cachedFetch` **skipped the cache write** — disabling stale-while-revalidate
+and driving extra external Tonal calls on every fresh fetch. The global Node
+types meant deploy typecheck could not catch this.
+
+**Why it matters.** A tsconfig change made to _restore_ a safety check can
+quietly _widen_ the runtime/typecheck gap: the typechecker now vouches for
+Node APIs in files that will never have them, so a latent
+`ReferenceError`-swallowed-into-a-benign-default bug (see also §1 on broad
+catches hiding non-transient failures) ships green. The failure isn't fully
+silent — `proxy.ts:113` logs `payload too large to cache, skipping write` — but
+that message _misattributes_ the cause: caching stops for that endpoint because
+of a missing global, not an oversized payload, so the log points diagnosis in
+the wrong direction.
+
+**Preventive checks.**
+
+- Prefer **Web-standard APIs over Node globals** in any module that can run in
+  the default runtime. Replace `Buffer.byteLength(s, "utf8")` with
+  `new TextEncoder().encode(s).byteLength`, which is valid in both Convex
+  runtimes.
+- Understand what `"types": ["node"]` in the shared config can and can't buy
+  you. `"use node"` selects the Convex Node runtime for a _file_, but it does
+  **not** scope TypeScript's `compilerOptions.types` — `types` is a project-wide
+  setting, so there is no per-file escape hatch. And `npx convex deploy`
+  typechecks against the shared `convex/tsconfig.json`: splitting Node/test
+  files into a separate tsconfig only helps if you actually wire that second
+  project into the deploy/CI check (a two-project `tsc -b`, or a runtime-aware
+  lint rule) — otherwise you either exclude those files from the deploy
+  typecheck entirely or leave their ambient Node declarations visible
+  project-wide. Because Convex's own guidance is to keep `"types": ["node"]` in
+  the shared `convex/tsconfig.json`, treat the primary defense above (don't use
+  the unavailable globals in shared code) as the reliable remedy, not the
+  tsconfig split.
+- When a helper touches a Node-only global, trace it to the registered action
+  entrypoints that can reach it, not just its immediate importers: a helper is
+  only safe to use `Buffer` if **every** default-runtime (no-`"use node"`)
+  entrypoint that can execute it is excluded. An intermediate importer lacking
+  the directive can still run exclusively inside a Node action bundle, so the
+  quick "any importer without `"use node"`" grep can flag valid Node-only
+  chains — confirm at least one default-runtime entrypoint actually reaches it.
+- Watch broad `try/catch` around size/serialization estimates — a swallowed
+  `ReferenceError` that returns a "too big / can't cache" sentinel disables
+  caching under a misleading payload-size log instead of surfacing the missing
+  global.
+
 ---
 
 ## How to use this log
@@ -532,9 +598,10 @@ this" is false for the direct path. Validation has to live at whichever boundary
   normalization (nullable typing, refresh vs. first-connect defaults),
   name/ID-to-catalog resolution for AI tool calls, AI tool-input (Zod) schemas
   that sit upstream of a normalize/clamp/resolve step, internal actions reachable
-  without their tool schema (week-plan/cron/action→action callers), or model-tier
+  without their tool schema (week-plan/cron/action→action callers), model-tier
   routing and classifier/gate changes (including per-provider tier→model
-  mappings)**, skim the matching section above.
+  mappings), or Convex tsconfig / runtime-boundary changes (Node globals in
+  default-runtime files)**, skim the matching section above.
 - When a review surfaces a _new_ recurring, legitimate gap (not stylistic, not
   one-off), add an entry here with the PR reference so the next agent inherits
   the lesson.
