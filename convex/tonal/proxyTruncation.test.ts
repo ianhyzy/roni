@@ -162,6 +162,10 @@ describe("cache size helpers", () => {
     expect(estimateCacheValueBytes({ title: "Push Day" })).toBeGreaterThan(0);
   });
 
+  it("measures serialized values as UTF-8 bytes", () => {
+    expect(estimateCacheValueBytes({ title: "é" })).toBe(14);
+  });
+
   it("treats unserializable values as oversized", () => {
     const circular: Record<string, unknown> = {};
     circular.self = circular;

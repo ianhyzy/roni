@@ -12,7 +12,7 @@ export function isConvexSizeError(err: unknown): boolean {
 
 export function estimateCacheValueBytes(value: unknown): number {
   try {
-    return Buffer.byteLength(JSON.stringify(value), "utf8");
+    return new TextEncoder().encode(JSON.stringify(value)).byteLength;
   } catch {
     // Unserializable payloads (circular refs, bigints) should never be cached.
     return Number.POSITIVE_INFINITY;
