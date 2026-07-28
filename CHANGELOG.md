@@ -2,6 +2,21 @@
 
 All notable changes to this project are documented here. This file is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commits on `main`. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.11.4](https://github.com/JeffOtano/roni/compare/v0.11.3...v0.11.4) (2026-07-28)
+
+
+### Bug Fixes
+
+* **deps:** remediate security audit findings ([#578](https://github.com/JeffOtano/roni/issues/578)) ([c6c8880](https://github.com/JeffOtano/roni/commit/c6c8880f9d9666e603f908004442e4acfdf0c019))
+* prevent stuck Claude chat responses ([#577](https://github.com/JeffOtano/roni/issues/577)) ([6f50564](https://github.com/JeffOtano/roni/commit/6f505648cbd7444ec6900f4b0dc3bdfd03a911a8))
+* restore convex deploy typecheck ([#557](https://github.com/JeffOtano/roni/issues/557)) ([dbffb1b](https://github.com/JeffOtano/roni/commit/dbffb1be86c850bfbd4be2410918f682845ca013))
+* use V8-safe cache byte sizing ([#581](https://github.com/JeffOtano/roni/issues/581)) ([c080b55](https://github.com/JeffOtano/roni/commit/c080b551fffabad49f43b50220965aca90e010b8))
+
+
+### Documentation
+
+* capture node-globals-in-default-runtime learning from PR [#557](https://github.com/JeffOtano/roni/issues/557) review ([#576](https://github.com/JeffOtano/roni/issues/576)) ([a3c3bc4](https://github.com/JeffOtano/roni/commit/a3c3bc4059bbd1eec446c80150a6189ae5c6f62d))
+
 ## [0.11.3](https://github.com/JeffOtano/roni/compare/v0.11.2...v0.11.3) (2026-06-26)
 
 
