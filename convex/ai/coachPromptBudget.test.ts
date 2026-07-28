@@ -179,7 +179,7 @@ describe("coachAgentConfig.contextHandler — provider-aware prompt budgets", ()
     ]);
   });
 
-  it("keeps Claude cache markers on the retained head under authenticated budget pressure", async () => {
+  it("retains Claude history without assistant cache markers under budget pressure", async () => {
     const hugeSearchResult = "search ".repeat(Math.floor(148_000 / 7));
     const messages: ModelMessage[] = [
       { role: "user", content: hugeSearchResult },
@@ -207,15 +207,10 @@ describe("coachAgentConfig.contextHandler — provider-aware prompt budgets", ()
     expect(result[0].providerOptions?.anthropic?.cacheControl).toEqual({ type: "ephemeral" });
     expect(nonSystemMessages(result)).toEqual([
       { role: "user", content: "retained preference" },
-      expect.objectContaining({
-        role: "assistant",
-        content: "retained answer",
-        providerOptions: { anthropic: { cacheControl: { type: "ephemeral" } } },
-      }),
+      { role: "assistant", content: "retained answer" },
       { role: "user", content: "latest question" },
     ]);
-    expect(snapshotIndex).toBe(4);
-    expect(taggedAssistants).toHaveLength(1);
-    expect(taggedAssistants[0].content).toBe("retained answer");
+    expect(snapshotIndex).toBe(1);
+    expect(taggedAssistants).toHaveLength(0);
   });
 });

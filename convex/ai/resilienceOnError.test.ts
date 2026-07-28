@@ -1,5 +1,6 @@
 import type { Agent } from "@convex-dev/agent";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { components } from "../_generated/api";
 import type { ActionCtx } from "../_generated/server";
 import type { ProviderId } from "./providers";
 import { streamWithRetry } from "./resilience";
@@ -55,7 +56,7 @@ describe("onError pre-emptive finalization", () => {
     );
   });
 
-  it("calls finalizeMessage with provider_overload code for Gemini high-demand stream errors", async () => {
+  it("patches pending messages with provider_overload for Gemini stream errors", async () => {
     const highDemandError = new Error(
       "This model is currently experiencing high demand. Spikes in demand are usually temporary.",
     );
@@ -80,12 +81,18 @@ describe("onError pre-emptive finalization", () => {
     });
 
     expect(runMutation).toHaveBeenCalledWith(
-      expect.anything(),
+      components.agent.messages.updateMessage,
       expect.objectContaining({
         messageId: "pending-msg",
-        result: { status: "failed", error: "provider_overload" },
+        patch: { status: "failed", error: "provider_overload" },
       }),
     );
+    expect(runQuery).toHaveBeenCalledWith(components.agent.messages.listMessagesByThreadId, {
+      threadId: "thread-1",
+      paginationOpts: { cursor: null, numItems: 50 },
+      order: "desc",
+      statuses: ["pending"],
+    });
   });
 
   it("does not expose raw provider error text in the finalization code", async () => {
@@ -114,13 +121,13 @@ describe("onError pre-emptive finalization", () => {
     expect(runMutation).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        result: { status: "failed", error: "provider_overload" },
+        patch: { status: "failed", error: "provider_overload" },
       }),
     );
     expect(runMutation).not.toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        result: expect.objectContaining({ error: expect.stringContaining("high demand") }),
+        patch: expect.objectContaining({ error: expect.stringContaining("high demand") }),
       }),
     );
   });
@@ -151,7 +158,7 @@ describe("onError pre-emptive finalization", () => {
       expect.anything(),
       expect.objectContaining({
         messageId: "pending-claude",
-        result: { status: "failed", error: "provider_overload" },
+        patch: { status: "failed", error: "provider_overload" },
       }),
     );
   });
@@ -172,8 +179,8 @@ describe("onError pre-emptive finalization", () => {
 
     expect(accumulator.toRow().finishReason).not.toBe("error");
     expect(runMutation).not.toHaveBeenCalledWith(
+      components.agent.messages.updateMessage,
       expect.anything(),
-      expect.objectContaining({ result: expect.objectContaining({ status: "failed" }) }),
     );
   });
 
@@ -205,7 +212,7 @@ describe("onError pre-emptive finalization", () => {
       expect.anything(),
       expect.objectContaining({
         messageId: "pending-msg",
-        result: { status: "failed", error: "provider_overload" },
+        patch: { status: "failed", error: "provider_overload" },
       }),
     );
   });
@@ -240,18 +247,12 @@ describe("onError pre-emptive finalization", () => {
       expect.anything(),
       expect.objectContaining({
         messageId: "pending-econnreset",
-        result: { status: "failed", error: "network" },
+        patch: { status: "failed", error: "network" },
       }),
     );
   });
 
-  it("finalizes a streaming-status message when onError fires mid-stream", async () => {
-    // Reproduces the production regression: Gemini begins yielding text (message
-    // transitions "pending" → "streaming"), then returns an overload error event.
-    // finalizePendingMessages previously filtered to status === "pending" only,
-    // so the streaming message was skipped, and the agent library's finalizeMessage
-    // ran on it — hitting the raw error delta and throwing, which Convex's Sentry
-    // integration captured as TONALCOACH-1C.
+  it("ignores already-terminal messages when onError fires", async () => {
     const highDemandError = new Error(
       "This model is currently experiencing high demand. Spikes in demand are usually temporary.",
     );
@@ -265,7 +266,10 @@ describe("onError pre-emptive finalization", () => {
       continueThread: vi.fn(async () => ({ thread: { streamText } })),
     } as unknown as Agent;
     const runQuery = vi.fn(async () => ({
-      page: [{ _id: "streaming-msg", status: "streaming" }],
+      page: [
+        { _id: "success-msg", status: "success" },
+        { _id: "failed-msg", status: "failed" },
+      ],
     }));
     const runMutation = vi.fn(async () => undefined);
 
@@ -275,12 +279,9 @@ describe("onError pre-emptive finalization", () => {
       ...baseStreamWithRetryArgs("gemini"),
     });
 
-    expect(runMutation).toHaveBeenCalledWith(
+    expect(runMutation).not.toHaveBeenCalledWith(
+      components.agent.messages.updateMessage,
       expect.anything(),
-      expect.objectContaining({
-        messageId: "streaming-msg",
-        result: { status: "failed", error: "provider_overload" },
-      }),
     );
   });
 });

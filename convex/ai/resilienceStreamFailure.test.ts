@@ -2,6 +2,7 @@ import type { Agent } from "@convex-dev/agent";
 import { saveMessage } from "@convex-dev/agent";
 import type { PrepareStepFunction, StepResult, ToolSet } from "ai";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { components } from "../_generated/api";
 import type { ActionCtx } from "../_generated/server";
 import type { ProviderId } from "./providers";
 import { streamWithRetry } from "./resilience";
@@ -104,10 +105,10 @@ describe("streamWithRetry provider response failures", () => {
     expect(saveMessage).not.toHaveBeenCalled();
     // No Discord notification for a transient signal.
     expect(runAction).not.toHaveBeenCalled();
-    // No explicit finalizeMessage call from our layer (circuit breaker will finalize on retry).
+    // No direct failure patch from this layer; the circuit breaker handles retry cleanup.
     expect(runMutation).not.toHaveBeenCalledWith(
+      components.agent.messages.updateMessage,
       expect.anything(),
-      expect.objectContaining({ result: expect.objectContaining({ status: "failed" }) }),
     );
   });
 
@@ -148,12 +149,18 @@ describe("streamWithRetry provider response failures", () => {
       terminalErrorClass: "byok_unknown_error",
     });
     expect(runMutation).toHaveBeenCalledWith(
-      expect.anything(),
+      components.agent.messages.updateMessage,
       expect.objectContaining({
         messageId: "pending-message",
-        result: { status: "failed", error: "byok_unknown_error" },
+        patch: { status: "failed", error: "byok_unknown_error" },
       }),
     );
+    expect(runQuery).toHaveBeenCalledWith(components.agent.messages.listMessagesByThreadId, {
+      threadId: "thread-1",
+      paginationOpts: { cursor: null, numItems: 50 },
+      order: "desc",
+      statuses: ["pending"],
+    });
     expect(saveMessage).toHaveBeenCalledWith(
       expect.anything(),
       expect.anything(),

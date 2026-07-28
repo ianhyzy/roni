@@ -50,14 +50,15 @@ export async function finalizeStuckThreadMessages(
     threadId,
     paginationOpts: { cursor: null, numItems: STUCK_MESSAGE_SWEEP_PAGE_SIZE },
     order: "desc",
+    statuses: ["pending"],
   });
   let finalized = 0;
   for (const message of result.page) {
-    if (message.status === "success" || message.status === "failed") continue;
+    if (message.status !== "pending") continue;
     if (message._creationTime >= cutoff) continue;
-    await ctx.runMutation(components.agent.messages.finalizeMessage, {
+    await ctx.runMutation(components.agent.messages.updateMessage, {
       messageId: message._id,
-      result: { status: "failed", error: STUCK_MESSAGE_REASON },
+      patch: { status: "failed", error: STUCK_MESSAGE_REASON },
     });
     finalized++;
   }

@@ -12,7 +12,6 @@ import {
   type ProviderId,
 } from "./providers";
 import type { Id } from "../_generated/dataModel";
-import { withAnthropicHistoryCache } from "./anthropicCache";
 import { getTrainingSnapshotForChat, type TrainingSnapshotSource } from "./trainingSnapshotCache";
 import {
   buildFullPromptContextWindow,
@@ -250,31 +249,6 @@ export function makeCoachAgentConfig(options: CoachAgentConfigOptions = {}) {
         return [staticSystem, snapshotSystem];
       }
 
-      // Anthropic supports interleaved system messages and has explicit prompt
-      // caching. Placing the snapshot after the final user boundary keeps the
-      // cached prefix (tools + static system + history up to the last
-      // assistant) byte-stable, so a cacheControl marker on that assistant
-      // turns it into a hit on every subsequent call in the 5-minute window.
-      //
-      // Gemini throws UnsupportedFunctionalityError on any system message
-      // that appears after a non-system message, so we keep the snapshot at
-      // system[1] for it and for any provider we can't confirm is safe
-      // (OpenAI supports it but we see no caching win there; OpenRouter is a
-      // passthrough to an unknown backend). Conservative default.
-      if (provider === "claude") {
-        let lastUserIdx = -1;
-        for (let i = messages.length - 1; i >= 0; i--) {
-          if (messages[i].role === "user") {
-            lastUserIdx = i;
-            break;
-          }
-        }
-        const headEnd = lastUserIdx === -1 ? messages.length : lastUserIdx + 1;
-        const head = withAnthropicHistoryCache(messages.slice(0, headEnd));
-        const tail = messages.slice(headEnd);
-        recordPostSnapshotContextTiming();
-        return [staticSystem, ...head, snapshotSystem, ...tail];
-      }
       recordPostSnapshotContextTiming();
       return [staticSystem, snapshotSystem, ...messages];
     }) satisfies ContextHandler,

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { components } from "../_generated/api";
 import type { MutationCtx } from "../_generated/server";
 import {
   CONVEX_ACTION_MAX_MS,
@@ -12,20 +13,24 @@ const NOW = 1_700_000_000_000;
 interface FakeMessage {
   _id: string;
   _creationTime: number;
-  status: "pending" | "streaming" | "success" | "failed";
+  status: "pending" | "success" | "failed";
 }
 
 function makeCtx(messages: FakeMessage[]) {
   const runMutation = vi.fn(async () => undefined);
-  const runQuery = vi.fn(async () => ({ page: messages, isDone: true, continueCursor: "" }));
+  const runQuery = vi.fn(async () => ({
+    page: messages,
+    isDone: true,
+    continueCursor: "",
+  }));
   const ctx = { runQuery, runMutation } as unknown as Pick<MutationCtx, "runQuery" | "runMutation">;
-  return { ctx, runMutation };
+  return { ctx, runMutation, runQuery };
 }
 
 describe("finalizeStuckThreadMessages", () => {
-  it("finalizes an assistant message stuck non-terminal past the grace window", async () => {
+  it("finalizes an assistant message stuck pending past the grace window", async () => {
     const stuckAt = NOW - STUCK_MESSAGE_GRACE_MS - 60_000;
-    const { ctx, runMutation } = makeCtx([
+    const { ctx, runMutation, runQuery } = makeCtx([
       { _id: "stuck-assistant", _creationTime: stuckAt, status: "pending" },
     ]);
 
@@ -33,15 +38,21 @@ describe("finalizeStuckThreadMessages", () => {
 
     expect(finalized).toBe(1);
     expect(runMutation).toHaveBeenCalledWith(
-      expect.anything(),
+      components.agent.messages.updateMessage,
       expect.objectContaining({
         messageId: "stuck-assistant",
-        result: { status: "failed", error: "stuck_timeout" },
+        patch: { status: "failed", error: "stuck_timeout" },
       }),
     );
+    expect(runQuery).toHaveBeenCalledWith(components.agent.messages.listMessagesByThreadId, {
+      threadId: "thread-1",
+      paginationOpts: { cursor: null, numItems: 50 },
+      order: "desc",
+      statuses: ["pending"],
+    });
   });
 
-  it("leaves a recently created non-terminal message alone (in-flight turn)", async () => {
+  it("leaves a recently created pending message alone (in-flight turn)", async () => {
     const recentAt = NOW - 60_000;
     const { ctx, runMutation } = makeCtx([
       { _id: "in-flight", _creationTime: recentAt, status: "pending" },
@@ -64,21 +75,6 @@ describe("finalizeStuckThreadMessages", () => {
 
     expect(finalized).toBe(0);
     expect(runMutation).not.toHaveBeenCalled();
-  });
-
-  it("finalizes a stuck streaming-status message", async () => {
-    const stuckAt = NOW - STUCK_MESSAGE_GRACE_MS - 1;
-    const { ctx, runMutation } = makeCtx([
-      { _id: "stuck-streaming", _creationTime: stuckAt, status: "streaming" },
-    ]);
-
-    const finalized = await finalizeStuckThreadMessages(ctx, "thread-1", NOW);
-
-    expect(finalized).toBe(1);
-    expect(runMutation).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({ messageId: "stuck-streaming" }),
-    );
   });
 
   it("only finalizes the stuck message, not a newer in-flight one in the same thread", async () => {

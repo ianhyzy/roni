@@ -26,17 +26,14 @@ export async function finalizePendingMessages(
     threadId,
     paginationOpts: { cursor: null, numItems: 50 },
     order: "desc",
+    statuses: ["pending"],
   });
   for (const message of result.page) {
-    // Finalize any non-terminal message. Errors can arrive while a message is
-    // already "streaming" (the provider started yielding text before the
-    // overload/error event), so checking only for "pending" misses those rows
-    // and leaves them for the agent library's finalizeMessage to encounter the
-    // raw error delta — which throws and generates Sentry noise.
-    if (message.status === "success" || message.status === "failed") continue;
-    await ctx.runMutation(components.agent.messages.finalizeMessage, {
+    if (message.status !== "pending") continue;
+    // Bypass finalizeMessage because replaying an error delta aborts its status update.
+    await ctx.runMutation(components.agent.messages.updateMessage, {
       messageId: message._id,
-      result: { status: "failed", error: reason },
+      patch: { status: "failed", error: reason },
     });
   }
 }
