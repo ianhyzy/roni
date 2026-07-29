@@ -79,14 +79,15 @@ beforeEach(() => {
 });
 
 describe("processMessage", () => {
-  it("applies weekly tool restrictions to primary and fallback attempts", async () => {
+  it("configures weekly tool restrictions and initialized search telemetry", async () => {
     checkDailyBudgetMock.mockResolvedValue(false);
     resolveUserProviderConfigMock.mockResolvedValue({
       provider: "gemini",
       apiKey: "test-gemini-key",
       isHouseKey: true,
     });
-    streamWithRetryMock.mockResolvedValue(successfulAccumulator());
+    const accumulator = successfulAccumulator();
+    streamWithRetryMock.mockResolvedValue(accumulator);
     const t = convexTest(schema, modules);
     const userId = await t.run(async (ctx) => ctx.db.insert("users", {}));
 
@@ -117,6 +118,7 @@ describe("processMessage", () => {
     expect(primaryActiveTools).not.toContain("delete_workout");
     expect(fallbackActiveTools).not.toContain("create_workout");
     expect(fallbackActiveTools).not.toContain("delete_workout");
+    expect(accumulator.setContextTiming).toHaveBeenCalledWith({ searchHits: 0, searchUsed: false });
   });
 
   it("keeps a bare one-off push on the chat tier with all tools available", async () => {
@@ -263,13 +265,14 @@ describe("processMessage", () => {
 });
 
 describe("continueAfterApproval", () => {
-  it("preserves weekly tool restrictions after approval", async () => {
+  it("preserves weekly tool restrictions and initialized search telemetry after approval", async () => {
     resolveUserProviderConfigMock.mockResolvedValue({
       provider: "gemini",
       apiKey: "test-gemini-key",
       isHouseKey: true,
     });
-    streamWithRetryMock.mockResolvedValue(successfulAccumulator());
+    const accumulator = successfulAccumulator();
+    streamWithRetryMock.mockResolvedValue(accumulator);
     const t = convexTest(schema, modules);
     const userId = await t.run(async (ctx) => ctx.db.insert("users", {}));
     await t.action(internal.chatProcessing.continueAfterApproval, {
@@ -284,6 +287,7 @@ describe("continueAfterApproval", () => {
     };
     expect(options.prepareStep({ steps: [] }).activeTools).not.toContain("create_workout");
     expect(options.fallbackPrepareStep({ steps: [] }).activeTools).not.toContain("create_workout");
+    expect(accumulator.setContextTiming).toHaveBeenCalledWith({ searchHits: 0, searchUsed: false });
   });
 
   it("clears the anchored retry lease after a continuation failure", async () => {

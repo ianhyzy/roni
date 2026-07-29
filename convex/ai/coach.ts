@@ -13,13 +13,8 @@ import {
 } from "./providers";
 import type { Id } from "../_generated/dataModel";
 import { getTrainingSnapshotForChat, type TrainingSnapshotSource } from "./trainingSnapshotCache";
-import {
-  buildFullPromptContextWindow,
-  estimateMessagesTokens,
-  mergeConsecutiveSameRole,
-  stripImagesFromOlderMessages,
-  stripOrphanedToolCalls,
-} from "./contextWindow";
+import { estimateMessagesTokens } from "./contextWindow";
+import { buildSearchTelemetryContextWindow } from "./contextWindowSearchTelemetry";
 import { COACH_TOOLS, ESTIMATED_TOOL_DEFINITION_TOKENS } from "./coachTools";
 import { buildInstructions } from "./promptSections";
 import { createModelTierPrepareStep, type ModelTierPrepareStep } from "./coachModelPolicy";
@@ -68,6 +63,8 @@ export interface CoachContextTiming {
   contextBuildCount?: number;
   contextMessageCount?: number;
   snapshotSource?: TrainingSnapshotSource;
+  searchHits?: number;
+  searchUsed?: boolean;
 }
 
 export function shouldUseCrossThreadSearch(prompt: string, hasImages: boolean = false): boolean {
@@ -175,10 +172,7 @@ export function makeCoachAgentConfig(options: CoachAgentConfigOptions = {}) {
     },
     contextHandler: (async (ctx, args) => {
       const contextStartedAt = Date.now();
-      const normalizedMessages = mergeConsecutiveSameRole(
-        stripImagesFromOlderMessages(stripOrphanedToolCalls(args.allMessages)),
-      );
-      const hasUserTurn = normalizedMessages.some((message) => message.role === "user");
+      const hasUserTurn = args.allMessages.some((message) => message.role === "user");
       const staticSystem: ModelMessage = {
         role: "system",
         content: STATIC_INSTRUCTIONS,
@@ -193,14 +187,18 @@ export function makeCoachAgentConfig(options: CoachAgentConfigOptions = {}) {
         estimateMessagesTokens([staticSystem]) + ESTIMATED_TOOL_DEFINITION_TOKENS;
 
       if (!args.userId || !hasUserTurn) {
-        const messages = buildFullPromptContextWindow({
-          messages: normalizedMessages,
+        const contextWindow = buildSearchTelemetryContextWindow({
+          messages: args.allMessages,
+          searchMessages: args.search,
           promptBudgetTokens,
           reservedPromptTokens: baseReservedPromptTokens,
         });
+        const { messages } = contextWindow;
         if (timing) {
           timing.contextBuildCount = (timing.contextBuildCount ?? 0) + 1;
           timing.contextMessageCount = (timing.contextMessageCount ?? 0) + messages.length;
+          timing.searchHits = args.search.length;
+          timing.searchUsed = contextWindow.searchUsed;
         }
         if (timing)
           timing.contextBuildMs = (timing.contextBuildMs ?? 0) + Date.now() - contextStartedAt;
@@ -216,14 +214,18 @@ export function makeCoachAgentConfig(options: CoachAgentConfigOptions = {}) {
         role: "system",
         content: `<training-data>\n${escapeTrainingDataTags(snapshotResult.snapshot)}\n</training-data>`,
       };
-      const messages = buildFullPromptContextWindow({
-        messages: normalizedMessages,
+      const contextWindow = buildSearchTelemetryContextWindow({
+        messages: args.allMessages,
+        searchMessages: args.search,
         promptBudgetTokens,
         reservedPromptTokens: baseReservedPromptTokens + estimateMessagesTokens([snapshotSystem]),
       });
+      const { messages } = contextWindow;
       if (timing) {
         timing.contextBuildCount = (timing.contextBuildCount ?? 0) + 1;
         timing.contextMessageCount = (timing.contextMessageCount ?? 0) + messages.length;
+        timing.searchHits = args.search.length;
+        timing.searchUsed = contextWindow.searchUsed;
       }
       const recordPostSnapshotContextTiming = () => {
         if (!timing) return;

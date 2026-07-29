@@ -4,6 +4,7 @@
  */
 
 import type { ModelMessage, UserContent } from "ai";
+import { hasSearchProvenance, withSearchProvenance } from "./searchProvenance";
 
 // ---------------------------------------------------------------------------
 // Merge consecutive same-role messages
@@ -28,7 +29,14 @@ export function mergeConsecutiveSameRole(messages: ModelMessage[]): ModelMessage
       typeof c === "string" ? [{ type: "text", text: c }] : (c as Array<Record<string, unknown>>);
 
     const merged = [...toParts(prev.content), ...toParts(curr.content)];
-    result[result.length - 1] = { ...prev, content: merged } as ModelMessage;
+    const mergedMessage = {
+      ...prev,
+      content: merged,
+    } as ModelMessage;
+    result[result.length - 1] =
+      hasSearchProvenance(prev) || hasSearchProvenance(curr)
+        ? withSearchProvenance(mergedMessage)
+        : mergedMessage;
   }
 
   return result;

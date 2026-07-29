@@ -299,6 +299,8 @@ describe("RunAccumulator", () => {
       contextBuildCount: 1,
       contextMessageCount: 6,
       snapshotSource: "live_rebuild",
+      searchHits: 0,
+      searchUsed: false,
     });
     acc.markFirstChunk(903_250);
     acc.markFinished(904_000);
@@ -315,6 +317,17 @@ describe("RunAccumulator", () => {
     expect(row.contextBuildCount).toBe(1);
     expect(row.contextMessageCount).toBe(6);
     expect(row.snapshotSource).toBe("live_rebuild");
+    expect(row.searchHits).toBe(0);
+    expect(row.searchUsed).toBe(false);
+  });
+
+  it("uses the latest completed context build's search metrics", () => {
+    const acc = new RunAccumulator(baseInit({ retrievalEnabled: true }));
+
+    acc.setContextTiming({ searchHits: 4, searchUsed: true });
+    acc.setContextTiming({ searchHits: 0, searchUsed: false });
+
+    expect(acc.toRow()).toMatchObject({ searchHits: 0, searchUsed: false });
   });
 
   it("ignores additional markFirstChunk calls after the first one", () => {

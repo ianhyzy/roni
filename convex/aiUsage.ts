@@ -68,6 +68,8 @@ const aiRunArgs = {
   contextMessageCount: v.optional(v.number()),
   snapshotSource: v.optional(v.literal("live_rebuild")),
   retrievalEnabled: v.optional(v.boolean()),
+  searchHits: v.optional(v.number()),
+  searchUsed: v.optional(v.boolean()),
   approvalPauses: v.number(),
   workoutPlanCreatedId: v.optional(v.id("workoutPlans")),
   workoutPushOutcome: v.optional(

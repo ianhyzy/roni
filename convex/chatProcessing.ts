@@ -196,7 +196,7 @@ export const processMessage = internalAction({
 
     let provider: ProviderId | undefined;
     let accumulator: RunAccumulator | undefined;
-    const contextTiming: CoachContextTiming = {};
+    const contextTiming: CoachContextTiming = { searchHits: 0, searchUsed: false };
     const retrievalEnabled = shouldUseCrossThreadSearch(prompt, (imageStorageIds?.length ?? 0) > 0);
     const routingIntent = classifyPromptIntent(prompt);
     const startTime = Date.now();
@@ -311,7 +311,7 @@ export const continueAfterApproval = internalAction({
 
     let provider: ProviderId | undefined;
     let accumulator: RunAccumulator | undefined;
-    const contextTiming: CoachContextTiming = {};
+    const contextTiming: CoachContextTiming = { searchHits: 0, searchUsed: false };
     const retrievalEnabled = true;
     const processingStartedAt = Date.now();
     const startTime = Date.now();

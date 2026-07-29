@@ -41,6 +41,8 @@ export interface AiRunRow {
   contextMessageCount?: number;
   snapshotSource?: "live_rebuild";
   retrievalEnabled?: boolean;
+  searchHits?: number;
+  searchUsed?: boolean;
   approvalPauses: number;
   workoutPlanCreatedId?: Id<"workoutPlans">;
   workoutPushOutcome?: "pushed" | "failed" | "none";
@@ -69,6 +71,8 @@ export interface ContextTimingMetrics {
   contextBuildCount?: number;
   contextMessageCount?: number;
   snapshotSource?: AiRunRow["snapshotSource"];
+  searchHits?: number;
+  searchUsed?: boolean;
 }
 
 export interface AttemptUsageSnapshot {
@@ -158,6 +162,8 @@ export class RunAccumulator {
   private contextBuildCount?: number;
   private contextMessageCount?: number;
   private snapshotSource?: AiRunRow["snapshotSource"];
+  private searchHits?: number;
+  private searchUsed?: boolean;
 
   constructor(private readonly init: AccumulatorInit) {
     this.startedAt = init.startedAt ?? Date.now();
@@ -255,6 +261,8 @@ export class RunAccumulator {
     this.contextBuildCount = metrics.contextBuildCount;
     this.contextMessageCount = metrics.contextMessageCount;
     this.snapshotSource = metrics.snapshotSource;
+    this.searchHits = metrics.searchHits;
+    this.searchUsed = metrics.searchUsed;
   }
 
   snapshotUsage(): AttemptUsageSnapshot {
@@ -324,6 +332,8 @@ export class RunAccumulator {
       contextMessageCount: this.contextMessageCount,
       snapshotSource: this.snapshotSource,
       retrievalEnabled: this.retrievalEnabled,
+      searchHits: this.searchHits,
+      searchUsed: this.searchUsed,
       approvalPauses: this.approvalPauses,
       workoutPlanCreatedId: this.workoutPlanCreatedId,
       workoutPushOutcome: this.workoutPushOutcome,

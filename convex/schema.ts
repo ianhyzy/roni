@@ -598,6 +598,8 @@ export default defineSchema({
     contextMessageCount: v.optional(v.number()),
     snapshotSource: v.optional(v.literal("live_rebuild")),
     retrievalEnabled: v.optional(v.boolean()),
+    searchHits: v.optional(v.number()),
+    searchUsed: v.optional(v.boolean()),
 
     approvalPauses: v.number(),
     workoutPlanCreatedId: v.optional(v.id("workoutPlans")),
@@ -622,6 +624,7 @@ export default defineSchema({
   })
     .index("by_userId_createdAt", ["userId", "createdAt"])
     .index("by_createdAt", ["createdAt"])
+    .index("by_environment_and_createdAt", ["environment", "createdAt"])
     .index("by_threadId", ["threadId"])
     .index("by_runId", ["runId"]),
 
