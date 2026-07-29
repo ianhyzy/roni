@@ -47,8 +47,6 @@ export function classifyByokError(error: unknown): ByokErrorCode | null {
     : (error as Error & { status?: number }).status;
   const lower = gatherErrorText(error);
 
-  if (lower.includes("provider_response_failed")) return "byok_unknown_error";
-
   if (status === 401 || status === 403) return "byok_key_invalid";
   if (
     lower.includes("api key not valid") ||

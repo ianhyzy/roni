@@ -256,6 +256,7 @@ async function attemptStream({
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort("Stream timeout"), ATTEMPT_TIMEOUT_MS);
   let budgetTrip: BudgetCapTrip | undefined;
+  let reportedProviderError: unknown;
   try {
     const { thread } = await agent.continueThread(ctx, { threadId, userId });
     const stopWhen = telemetry.isByok
@@ -301,6 +302,7 @@ async function attemptStream({
           }
         },
         onError: async ({ error }: { error: unknown }) => {
+          reportedProviderError ??= error;
           // @convex-dev/agent@0.6.1 does not catch stream error events in its
           // internal finalizeMessage mutation — the raw provider error propagates
           // as an unhandled exception that Convex reports to Sentry. Pre-empting
@@ -323,7 +325,9 @@ async function attemptStream({
       await finalizeTurnPending(getAttemptFinalizeCode(streamError, telemetry.isByok));
       throw streamError;
     }
-    if (accumulator.toRow().finishReason === "error") throw new Error("provider_response_failed");
+    if (accumulator.toRow().finishReason === "error") {
+      throw reportedProviderError ?? new Error("provider_response_failed");
+    }
     if (budgetTrip) {
       await ctx.runMutation(internal.aiUsage.recordBudgetStop, {
         userId: userId as Id<"users">,

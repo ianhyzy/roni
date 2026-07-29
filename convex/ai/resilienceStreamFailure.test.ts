@@ -1,5 +1,6 @@
 import type { Agent } from "@convex-dev/agent";
 import { saveMessage } from "@convex-dev/agent";
+import { APICallError } from "@ai-sdk/provider";
 import type { StepResult, ToolSet } from "ai";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { components } from "../_generated/api";
@@ -60,10 +61,6 @@ describe("streamWithRetry provider response failures", () => {
   });
 
   it("treats non-thrown provider finish errors as transient for non-BYOK users", async () => {
-    // When the AI SDK finishes a step with finishReason:"error" but does not throw
-    // (the error is embedded in the stream rather than propagated as an HTTP error),
-    // non-BYOK users must get a transient outcome so the circuit-breaker retry/fallback
-    // path fires — not a dead-end terminal error with a generic "I'm having trouble" message.
     const streamText = vi.fn(
       async (options: { onStepFinish: (step: StepResult<ToolSet>) => Promise<void> | void }) => {
         await options.onStepFinish(responseFailedStep());
@@ -136,15 +133,11 @@ describe("streamWithRetry provider response failures", () => {
       },
     );
 
-    // The error is transient: no terminal error class is set, and the circuit
-    // breaker receives { done: false } so it can retry with the fallback agent.
     expect(accumulator.toRow()).toMatchObject({
       finishReason: "error",
       terminalErrorClass: undefined,
     });
-    // No user-facing error message saved (circuit breaker handles retry/fallback).
     expect(saveMessage).not.toHaveBeenCalled();
-    // No Discord notification for a transient signal.
     expect(runAction).not.toHaveBeenCalled();
     expect(runMutation).toHaveBeenCalledWith(components.agent.messages.updateMessage, {
       messageId: "provider-error-message",
@@ -156,7 +149,7 @@ describe("streamWithRetry provider response failures", () => {
     });
   });
 
-  it("surfaces non-thrown provider finish errors as BYOK messages", async () => {
+  it("routes non-thrown BYOK provider finish errors to transient handling", async () => {
     const messages: Array<{
       _id: string;
       threadId: string;
@@ -204,6 +197,12 @@ describe("streamWithRetry provider response failures", () => {
     const scheduleNotification = vi.fn(async () => {
       throw new Error("Discord unavailable");
     });
+    let primaryOutcome: unknown;
+    runWithPrimaryCircuitBreakerMock.mockImplementationOnce(
+      async (options: { primaryAgent: Agent; runAttempt: (agent: Agent) => Promise<unknown> }) => {
+        primaryOutcome = await options.runAttempt(options.primaryAgent);
+      },
+    );
 
     const accumulator = await streamWithRetry(
       {
@@ -229,32 +228,88 @@ describe("streamWithRetry provider response failures", () => {
 
     expect(accumulator.toRow()).toMatchObject({
       finishReason: "error",
-      terminalErrorClass: "byok_unknown_error",
+      terminalErrorClass: undefined,
     });
-    expect(runMutation).toHaveBeenCalledWith(
-      components.agent.messages.updateMessage,
-      expect.objectContaining({
-        messageId: "provider-error-message",
-        patch: { status: "failed", error: RETRYING_MESSAGE_ERROR },
-      }),
+    expect(primaryOutcome).toMatchObject({
+      done: false,
+      error: expect.objectContaining({ message: "provider_response_failed" }),
+    });
+    expect(saveMessage).not.toHaveBeenCalled();
+    expect(scheduleNotification).not.toHaveBeenCalled();
+  });
+
+  it("preserves specific BYOK errors reported by the stream", async () => {
+    const rawProviderMessage = "private-provider-detail-71c8";
+    const quotaError = new APICallError({
+      message: rawProviderMessage,
+      url: "https://example.test/v1/messages",
+      requestBodyValues: {},
+      statusCode: 429,
+      isRetryable: false,
+    });
+    const streamText = vi.fn(
+      async (options: {
+        onError?: (args: { error: unknown }) => Promise<void>;
+        onStepFinish: (step: StepResult<ToolSet>) => Promise<void> | void;
+      }) => {
+        await options.onError?.({ error: quotaError });
+        await options.onStepFinish(responseFailedStep());
+        return { text: Promise.resolve("") };
+      },
     );
+    const agent = {
+      continueThread: vi.fn(async () => ({ thread: { streamText } })),
+    } as unknown as Agent;
+    const runQuery = vi.fn(async (_reference: unknown, args: { messageIds?: string[] }) =>
+      args.messageIds
+        ? [{ _id: "prompt-1", threadId: "thread-1", order: 1, status: "success" }]
+        : { page: [], isDone: true, continueCursor: "" },
+    );
+    const scheduleNotification = vi.fn(async () => undefined);
+    const runMutation = vi.fn();
+
+    const accumulator = await streamWithRetry(
+      {
+        runQuery,
+        runMutation,
+        runAction: vi.fn(),
+        scheduler: { runAfter: scheduleNotification },
+      } as unknown as ActionCtx,
+      {
+        primaryAgent: agent,
+        fallbackAgent: agent,
+        primaryModelName: "gemini-2.5-flash",
+        threadId: "thread-1",
+        promptMessageId: "prompt-1",
+        userId: "user-1",
+        prompt: "hello",
+        isByok: true,
+        provider: "gemini",
+        source: "chat",
+        environment: "prod",
+      },
+    );
+
+    expect(accumulator.toRow().terminalErrorClass).toBe("byok_quota_exceeded");
     expect(saveMessage).toHaveBeenCalledWith(
       expect.anything(),
       expect.anything(),
       expect.objectContaining({
-        promptMessageId: "prompt-1",
-        message: expect.objectContaining({
-          content: expect.stringContaining("OpenAI returned an unexpected error"),
-        }),
+        message: expect.objectContaining({ content: expect.stringContaining("over quota") }),
       }),
     );
-    expect(scheduleNotification).toHaveBeenCalledTimes(1);
-    expect(scheduleNotification).toHaveBeenCalledWith(0, expect.anything(), {
-      source: "streamWithRetry",
-      message: "byok_unknown_error on openai",
-      userId: "user-1",
-    });
-    expect(recordErrorMock).toHaveBeenCalledWith("byok_unknown_error");
+    expect(scheduleNotification).toHaveBeenCalledWith(
+      0,
+      expect.anything(),
+      expect.objectContaining({ message: "byok_quota_exceeded on gemini" }),
+    );
+    expect(
+      JSON.stringify({
+        messages: vi.mocked(saveMessage).mock.calls,
+        mutations: runMutation.mock.calls,
+        notifications: scheduleNotification.mock.calls,
+      }),
+    ).not.toContain(rawProviderMessage);
   });
 
   it("keeps the durable retry lease until the circuit-breaker chain is terminal", async () => {
