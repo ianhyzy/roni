@@ -6,6 +6,7 @@ import type { Id } from "./_generated/dataModel";
 import schema from "./schema";
 
 const modules = import.meta.glob("./**/*.*s");
+const FIXED_TIMESTAMP = 1_700_000_000_000;
 
 type Harness = ReturnType<typeof convexTest>;
 
@@ -123,8 +124,8 @@ const SEEDERS: Record<SpecializedTable, Seeder> = {
       category: "workout_style_preference",
       dedupeKey: `preference-${marker}`,
       sourceMessageId: `message-${marker}`,
-      createdAt: Date.now(),
-      lastReferencedAt: Date.now(),
+      createdAt: FIXED_TIMESTAMP,
+      lastReferencedAt: FIXED_TIMESTAMP,
       confidence: 0.9,
     });
   },

@@ -71,6 +71,13 @@ describe("MemoryFacts", () => {
     expect(mockUseQuery).toHaveBeenLastCalledWith("userMemoryFacts:listMine", "skip");
     expect(screen.queryByText(/no saved coaching preferences/i)).not.toBeInTheDocument();
 
+    mockAuth = { isAuthenticated: false, isLoading: false };
+    rerender(<MemoryFacts />);
+
+    expect(
+      screen.queryByRole("status", { name: "Loading coach memories" }),
+    ).not.toBeInTheDocument();
+
     mockAuth = { isAuthenticated: true, isLoading: false };
     rerender(<MemoryFacts />);
 

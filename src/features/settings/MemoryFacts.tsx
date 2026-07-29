@@ -61,7 +61,9 @@ export function MemoryFacts() {
     }
   }
 
-  if (isAuthLoading || !isAuthenticated || facts === undefined) {
+  if (!isAuthLoading && !isAuthenticated) return null;
+
+  if (isAuthLoading || facts === undefined) {
     return (
       <Card>
         <CardContent className="space-y-3 p-4" role="status" aria-label="Loading coach memories">
