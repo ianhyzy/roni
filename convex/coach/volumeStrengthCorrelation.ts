@@ -1,3 +1,9 @@
+import {
+  buildMusclePersonalMrvEstimates,
+  type CompletedWorkoutProjection,
+  type MusclePersonalMrvEstimate,
+} from "./personalMrvHistory";
+
 export const WINDOW_WEEKS = 26 as const;
 export const MIN_PAIRED_OBSERVATIONS = 8;
 export const PROGRAMMING_MIN_PAIRED_OBSERVATIONS = 16;
@@ -54,12 +60,14 @@ export type RegionResult = InsufficientRegionResult | ProvisionalRegionResult;
 export interface VolumeStrengthAnalysis {
   windowWeeks: typeof WINDOW_WEEKS;
   regions: readonly RegionResult[];
+  personalMrvEstimates?: readonly MusclePersonalMrvEstimate[];
   caveat: string;
 }
 
 export interface VolumePerformanceRow {
   movementId: string;
   date: string;
+  sets?: number;
   totalVolume?: number;
 }
 
@@ -82,6 +90,7 @@ export interface VolumeStrengthAnalysisInput {
   performanceRows: readonly VolumePerformanceRow[];
   strengthSnapshots: readonly RegionalStrengthSnapshot[];
   movements: readonly MovementRegionMetadata[];
+  completedWorkouts: readonly CompletedWorkoutProjection[];
 }
 
 const ANALYSIS_CAVEAT =
@@ -350,6 +359,7 @@ function buildRegionResult({
 export function analyzeVolumeStrength(input: VolumeStrengthAnalysisInput): VolumeStrengthAnalysis {
   const { weeklyVolume, incompleteWeeks, unmappedMovementCount } = aggregateWeeklyVolumes(input);
   const weeklyStrengthChange = aggregateWeeklyStrengthChanges(input);
+  const personalMrvEstimates = buildMusclePersonalMrvEstimates(input);
   for (const region of REGIONS) {
     for (const week of incompleteWeeks[region]) weeklyVolume[region].delete(week);
     for (const week of weeklyStrengthChange[region].keys()) {
@@ -369,6 +379,7 @@ export function analyzeVolumeStrength(input: VolumeStrengthAnalysisInput): Volum
         inputWindowEndDate: input.windowEndDate,
       }),
     ),
+    ...(personalMrvEstimates.length === 0 ? {} : { personalMrvEstimates }),
     caveat: ANALYSIS_CAVEAT,
   };
 }

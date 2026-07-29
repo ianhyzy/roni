@@ -14,6 +14,7 @@
 import { v } from "convex/values";
 import { internalMutation, internalQuery } from "../_generated/server";
 import type { Doc } from "../_generated/dataModel";
+import { VOLUME_LANDMARKS } from "./volumeLandmarks";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -203,19 +204,6 @@ export interface MuscleVolumeEntry {
   recommendedMax: number;
   status: "under" | "optimal" | "over";
 }
-
-/** Recommended weekly sets per muscle group for hypertrophy. */
-const VOLUME_LANDMARKS: Record<string, { min: number; max: number }> = {
-  Chest: { min: 10, max: 20 },
-  Back: { min: 10, max: 20 },
-  Shoulders: { min: 8, max: 16 },
-  Biceps: { min: 8, max: 14 },
-  Triceps: { min: 8, max: 14 },
-  Quads: { min: 10, max: 20 },
-  Glutes: { min: 8, max: 16 },
-  Hamstrings: { min: 8, max: 16 },
-  Calves: { min: 8, max: 16 },
-};
 
 /**
  * Compute weekly volume per muscle group from a week's workout plans.

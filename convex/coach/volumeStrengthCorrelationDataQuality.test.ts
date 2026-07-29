@@ -11,6 +11,7 @@ function input(overrides: Partial<VolumeStrengthAnalysisInput> = {}): VolumeStre
     performanceRows: [],
     strengthSnapshots: [],
     movements: [],
+    completedWorkouts: [],
     ...overrides,
   };
 }
@@ -189,5 +190,123 @@ describe("analyzeVolumeStrength data quality", () => {
       strengthObservationCount: 0,
       unmappedMovementCount: 0,
     });
+  });
+
+  it("fails set-based estimates closed when historical set counts are missing", () => {
+    let upper = 100;
+    const strengthSnapshots = [
+      { date: utcDate(-1), upper, lower: 100, core: 100 },
+      ...Array.from({ length: 24 }, (_, index) => {
+        upper += index % 12 < 6 ? 2 : -2;
+        return { date: utcDate(index), upper, lower: 100, core: 100 };
+      }),
+    ];
+
+    const result = analyzeVolumeStrength(
+      input({
+        windowEndDate: utcDate(23),
+        movements: [{ tonalId: "bench", bodyRegion: "upper", muscleGroups: ["Chest"] }],
+        performanceRows: Array.from({ length: 24 }, (_, index) => ({
+          movementId: "bench",
+          date: utcDate(index),
+          totalVolume: (index + 1) * 100,
+        })),
+        strengthSnapshots,
+      }),
+    );
+
+    expect(result.personalMrvEstimates).toEqual([
+      {
+        muscleGroup: "Chest",
+        region: "upper",
+        status: "insufficient_data",
+        pairedObservationCount: 0,
+        reason: "not_enough_non_overlapping_history",
+      },
+    ]);
+  });
+
+  it("excludes weeks whose completed workouts have incomplete performance projections", () => {
+    const incompleteWeeks = new Set([0, 1, 2, 3, 13, 14, 15, 16]);
+    const lowVolumeWeeks = new Set([4, 5, 17, 18]);
+    let upper = 100;
+    const strengthSnapshots = [
+      { date: utcDate(-1), upper, lower: 100, core: 100 },
+      ...Array.from({ length: 26 }, (_, index) => {
+        upper += incompleteWeeks.has(index) || lowVolumeWeeks.has(index) ? 2 : -2;
+        return { date: utcDate(index), upper, lower: 100, core: 100 };
+      }),
+    ];
+    const performanceRows = Array.from({ length: 26 }, (_, index) => index)
+      .filter((index) => !incompleteWeeks.has(index))
+      .map((index) => ({
+        movementId: "bench",
+        date: utcDate(index),
+        sets: lowVolumeWeeks.has(index) ? 10 : 15,
+        totalVolume: lowVolumeWeeks.has(index) ? 1_000 : 1_500,
+      }));
+
+    const result = analyzeVolumeStrength({
+      ...input({
+        windowEndDate: utcDate(25),
+        movements: [{ tonalId: "bench", bodyRegion: "upper", muscleGroups: ["Chest"] }],
+        performanceRows,
+        strengthSnapshots,
+      }),
+      completedWorkouts: Array.from({ length: 26 }, (_, index) => ({
+        date: utcDate(index),
+        ...(incompleteWeeks.has(index) ? {} : { performanceSyncComplete: true as const }),
+      })),
+    });
+
+    expect(result.personalMrvEstimates).toEqual([
+      {
+        muscleGroup: "Chest",
+        region: "upper",
+        status: "insufficient_data",
+        pairedObservationCount: 18,
+        reason: "not_enough_non_overlapping_history",
+      },
+    ]);
+  });
+
+  it("excludes weeks containing unmapped movements from every observed muscle estimate", () => {
+    let upper = 100;
+    const strengthSnapshots = [
+      { date: utcDate(-1), upper, lower: 100, core: 100 },
+      ...Array.from({ length: 24 }, (_, index) => {
+        upper += index % 12 < 6 ? 2 : -2;
+        return { date: utcDate(index), upper, lower: 100, core: 100 };
+      }),
+    ];
+    const performanceRows = Array.from({ length: 24 }, (_, index) => ({
+      movementId: "bench",
+      date: utcDate(index),
+      sets: index % 12 < 6 ? 8 : 14,
+      totalVolume: index % 12 < 6 ? 800 : 1_400,
+    }));
+
+    const result = analyzeVolumeStrength(
+      input({
+        windowEndDate: utcDate(23),
+        movements: [{ tonalId: "bench", bodyRegion: "upper", muscleGroups: ["Chest"] }],
+        performanceRows: [
+          ...performanceRows,
+          { movementId: "unknown", date: utcDate(0), sets: 1, totalVolume: 1 },
+          { movementId: "unknown", date: utcDate(12), sets: 1, totalVolume: 1 },
+        ],
+        strengthSnapshots,
+      }),
+    );
+
+    expect(result.personalMrvEstimates).toEqual([
+      {
+        muscleGroup: "Chest",
+        region: "upper",
+        status: "insufficient_data",
+        pairedObservationCount: 22,
+        reason: "not_enough_non_overlapping_history",
+      },
+    ]);
   });
 });

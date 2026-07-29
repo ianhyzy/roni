@@ -44,6 +44,12 @@ afterEach(() => {
 });
 
 describe("analyzeVolumeStrengthTool", () => {
+  it("keeps set thresholds observational and behind a separate enforcement gate", () => {
+    expect(analyzeVolumeStrengthTool.description).toContain("per-muscle attributed-set thresholds");
+    expect(analyzeVolumeStrengthTool.description).toContain("qualified_for_enforcement");
+    expect(analyzeVolumeStrengthTool.description).toContain("separate backend programming gate");
+  });
+
   it("derives userId from the tool context and ignores AI-supplied identity", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-07-29T12:00:00.000Z"));
@@ -151,6 +157,19 @@ describe("readVolumeStrengthCorrelation", () => {
           totalVolume: (index + 1) * 100,
           syncedAt: 1,
         });
+        await ctx.db.insert("completedWorkouts", {
+          userId,
+          activityId: `activity-${index}`,
+          date: utcDate(index),
+          title: `Workout ${index}`,
+          targetArea: "Upper",
+          totalVolume: (index + 1) * 100,
+          totalDuration: 1_800,
+          totalWork: (index + 1) * 100,
+          workoutType: "custom",
+          syncedAt: 1,
+          ...(index === 0 ? {} : { performanceSyncComplete: true as const }),
+        });
         await ctx.db.insert("strengthScoreSnapshots", {
           userId,
           date: utcDate(index),
@@ -190,6 +209,18 @@ describe("readVolumeStrengthCorrelation", () => {
         spearmanRho: 1,
       }),
     );
+    expect(result.personalMrvEstimates).toEqual([
+      expect.objectContaining({
+        muscleGroup: "Chest",
+        status: "insufficient_data",
+        pairedObservationCount: 7,
+      }),
+      expect.objectContaining({
+        muscleGroup: "Triceps",
+        status: "insufficient_data",
+        pairedObservationCount: 7,
+      }),
+    ]);
   });
 
   it("returns only insufficient results when a bounded read limit is exceeded", async () => {

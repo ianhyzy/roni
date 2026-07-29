@@ -14,6 +14,7 @@ import { requireUserId, withToolTracking } from "./helpers";
 
 const MAX_PERFORMANCE_ROWS = 3_000;
 const MAX_STRENGTH_SNAPSHOTS = 300;
+const MAX_COMPLETED_WORKOUTS = 500;
 const MAX_MOVEMENT_IDS = 500;
 
 type VolumeStrengthQueryArgs = {
@@ -61,7 +62,7 @@ export const readVolumeStrengthCorrelation = internalQuery({
     windowEndDate: v.string(),
   },
   handler: async (ctx, args): Promise<VolumeStrengthAnalysis> => {
-    const [performanceRows, strengthSnapshots] = await Promise.all([
+    const [performanceRows, strengthSnapshots, completedWorkouts] = await Promise.all([
       ctx.db
         .query("exercisePerformance")
         .withIndex("by_userId_date", (q) =>
@@ -82,10 +83,21 @@ export const readVolumeStrengthCorrelation = internalQuery({
         )
         .order("asc")
         .take(MAX_STRENGTH_SNAPSHOTS + 1),
+      ctx.db
+        .query("completedWorkouts")
+        .withIndex("by_userId_date", (q) =>
+          q
+            .eq("userId", args.userId)
+            .gte("date", args.windowStartDate)
+            .lte("date", args.windowEndDate),
+        )
+        .order("asc")
+        .take(MAX_COMPLETED_WORKOUTS + 1),
     ]);
     if (
       performanceRows.length > MAX_PERFORMANCE_ROWS ||
-      strengthSnapshots.length > MAX_STRENGTH_SNAPSHOTS
+      strengthSnapshots.length > MAX_STRENGTH_SNAPSHOTS ||
+      completedWorkouts.length > MAX_COMPLETED_WORKOUTS
     ) {
       return buildDataLimitExceededAnalysis();
     }
@@ -107,13 +119,14 @@ export const readVolumeStrengthCorrelation = internalQuery({
       performanceRows,
       strengthSnapshots,
       movements,
+      completedWorkouts,
     });
   },
 });
 
 export const analyzeVolumeStrengthTool = createTool({
   description:
-    "Use for observational 26-week regional volume and Tonal Strength Score correlation. Do not infer causal MRV or volume caps. Inputs are empty; returns counts, recency, unmapped movements, provisional Spearman rho, confidence, range, programming eligibility for further MRV estimation, and caveat. Advisory-only results must not influence volume caps.",
+    "Use for observational 26-week regional volume and Tonal Strength Score correlation. Do not infer causal MRV or volume caps. Inputs are empty; returns counts, recency, unmapped movements, provisional Spearman rho, confidence, range, programming eligibility, and optional per-muscle attributed-set thresholds fitted independently on chronological training and validation halves. Only qualified_for_enforcement thresholds are eligible for a separate backend programming gate; advisory-only results must not influence volume caps.",
   inputSchema: z.object({}),
   execute: withToolTracking("analyze_volume_strength", async (ctx) => {
     const userId = requireUserId(ctx);

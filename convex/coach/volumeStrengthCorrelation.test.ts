@@ -12,6 +12,7 @@ function input(overrides: Partial<VolumeStrengthAnalysisInput> = {}): VolumeStre
     performanceRows: [],
     strengthSnapshots: [],
     movements: [],
+    completedWorkouts: [],
     ...overrides,
   };
 }
@@ -211,6 +212,51 @@ describe("analyzeVolumeStrength", () => {
         },
       }),
     );
+  });
+
+  it("fits stable set thresholds with full credit for every tracked movement muscle", () => {
+    let upper = 100;
+    const strengthChanges = Array.from({ length: 24 }, (_, index) => (index % 12 < 6 ? 2 : -2));
+    const strengthSnapshots = [
+      { date: utcDate(-1), upper, lower: 100, core: 100 },
+      ...strengthChanges.map((change, index) => {
+        upper += change;
+        return { date: utcDate(index), upper, lower: 100, core: 100 };
+      }),
+    ];
+    const weeklySets = Array.from({ length: 24 }, (_, index) => {
+      const halfIndex = index % 12;
+      return halfIndex < 6 ? 8 + (halfIndex % 3) : 14 + (halfIndex % 3);
+    });
+
+    const result = analyzeVolumeStrength(
+      input({
+        windowEndDate: utcDate(23),
+        movements: [{ tonalId: "bench", bodyRegion: "upper", muscleGroups: ["Chest", "Triceps"] }],
+        performanceRows: weeklySets.map((sets, index) => ({
+          movementId: "bench",
+          date: utcDate(index),
+          sets,
+          totalVolume: sets * 100,
+        })),
+        strengthSnapshots,
+      }),
+    );
+
+    expect(result.personalMrvEstimates).toEqual([
+      expect.objectContaining({
+        muscleGroup: "Chest",
+        region: "upper",
+        status: "qualified_for_enforcement",
+        maxWeeklySets: 10,
+      }),
+      expect.objectContaining({
+        muscleGroup: "Triceps",
+        region: "upper",
+        status: "qualified_for_enforcement",
+        maxWeeklySets: 10,
+      }),
+    ]);
   });
 
   it("keeps an otherwise eligible relationship advisory-only when observations are stale", () => {
