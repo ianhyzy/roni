@@ -9,13 +9,25 @@ import { createTool } from "@convex-dev/agent";
 import { z } from "zod";
 import { internal } from "../_generated/api";
 import type { Id } from "../_generated/dataModel";
-import type { DraftWeekSummary } from "../coach/weekProgrammingHelpers";
+import type {
+  DraftDaySummary,
+  DraftWeekSummary,
+  ExerciseSummary,
+} from "../coach/weekProgrammingHelpers";
 import { getWeekStartDateString } from "../weekPlanHelpers";
 import { requireUserId, withToolTracking } from "./helpers";
 import { buildReasoningPrompt } from "./weekReasoning";
 
 const ALLOWED_SESSION_DURATIONS = [30, 45, 60] as const;
 type SessionDuration = (typeof ALLOWED_SESSION_DURATIONS)[number];
+
+export type ProgramWeekToolExerciseSummary = Omit<ExerciseSummary, "movementId">;
+export type ProgramWeekToolDaySummary = Omit<DraftDaySummary, "workoutPlanId" | "exercises"> & {
+  exercises: ProgramWeekToolExerciseSummary[];
+};
+export type ProgramWeekToolSummary = Omit<DraftWeekSummary, "days"> & {
+  days: ProgramWeekToolDaySummary[];
+};
 
 function validateSessionDuration(value: unknown): SessionDuration | undefined {
   const parsed =
@@ -24,6 +36,37 @@ function validateSessionDuration(value: unknown): SessionDuration | undefined {
     return parsed as SessionDuration;
   }
   return undefined;
+}
+
+/** Keep the model-facing result limited to fields used for plan presentation. */
+export function projectProgramWeekSummary(summary: DraftWeekSummary): ProgramWeekToolSummary {
+  return {
+    weekStartDate: summary.weekStartDate,
+    preferredSplit: summary.preferredSplit,
+    targetDays: summary.targetDays,
+    sessionDurationMinutes: summary.sessionDurationMinutes,
+    days: summary.days.map((day) => ({
+      dayIndex: day.dayIndex,
+      dayName: day.dayName,
+      sessionType: day.sessionType,
+      estimatedDuration: day.estimatedDuration,
+      exercises: day.exercises.map((exercise) => ({
+        name: exercise.name,
+        muscleGroups: exercise.muscleGroups,
+        sets: exercise.sets,
+        ...(exercise.reps === undefined ? {} : { reps: exercise.reps }),
+        ...(exercise.durationSeconds === undefined
+          ? {}
+          : { durationSeconds: exercise.durationSeconds }),
+        ...(exercise.lastTime === undefined ? {} : { lastTime: exercise.lastTime }),
+        ...(exercise.suggestedTarget === undefined
+          ? {}
+          : { suggestedTarget: exercise.suggestedTarget }),
+        ...(exercise.lastWeight === undefined ? {} : { lastWeight: exercise.lastWeight }),
+        ...(exercise.targetWeight === undefined ? {} : { targetWeight: exercise.targetWeight }),
+      })),
+    })),
+  };
 }
 
 export const programWeekTool = createTool({
@@ -86,7 +129,7 @@ The plan is NOT pushed to Tonal yet. Present it to the user for approval first, 
       | {
           success: true;
           weekPlanId: string;
-          summary: DraftWeekSummary;
+          summary: ProgramWeekToolSummary;
           reasoningHints: string;
           degenerateDays?: {
             dayIndex: number;
@@ -160,7 +203,11 @@ The plan is NOT pushed to Tonal yet. Present it to the user for approval first, 
           ? `\n\nWARNING: ${result.degenerateDays.length} day(s) had to be programmed with a heavily-restricted exercise pool because of injury, exercise exclusion, or equipment filters. Affected days: ${result.degenerateDays.map((d) => d.dayName).join(", ")}. The plan may feel monotonous. Consider asking the user to relax their restrictions or use search_exercises to find alternative compound movements.`
           : "";
 
-      return { ...result, reasoningHints: reasoningHints + degenerateNote };
+      return {
+        ...result,
+        summary: projectProgramWeekSummary(result.summary),
+        reasoningHints: reasoningHints + degenerateNote,
+      };
     },
   ),
 });
