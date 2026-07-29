@@ -162,9 +162,16 @@ describe("analyzeVolumeStrength", () => {
       weeklyObservationCount: 8,
       strengthObservationCount: 8,
       unmappedMovementCount: 0,
+      pairedObservationCount: 8,
+      latestPairedWeek: utcDate(7),
+      daysSinceLatestPairedWeek: 0,
       spearmanRho: 1,
       direction: "positive",
       confidence: "low",
+      programmingEligibility: {
+        status: "advisory_only",
+        reasons: ["low_confidence", "no_negative_relationship"],
+      },
       volumeRange: { minWeeklyVolume: 100, maxWeeklyVolume: 400 },
     });
   });
@@ -195,6 +202,81 @@ describe("analyzeVolumeStrength", () => {
         spearmanRho: -1,
         direction: "negative",
         confidence: "medium",
+        pairedObservationCount: 16,
+        latestPairedWeek: utcDate(15),
+        daysSinceLatestPairedWeek: 0,
+        programmingEligibility: {
+          status: "eligible_for_mrv_estimation",
+          reasons: [],
+        },
+      }),
+    );
+  });
+
+  it("keeps an otherwise eligible relationship advisory-only when observations are stale", () => {
+    const volumes = Array.from({ length: 16 }, (_, index) => index + 1);
+    const strengthChanges = Array.from({ length: 16 }, (_, index) => 16 - index);
+    const series = upperSeries(volumes, strengthChanges);
+
+    const result = analyzeVolumeStrength({ ...series, windowEndDate: utcDate(20) });
+
+    expect(result.regions[0]).toEqual(
+      expect.objectContaining({
+        status: "provisional",
+        confidence: "medium",
+        direction: "negative",
+        daysSinceLatestPairedWeek: 35,
+        programmingEligibility: {
+          status: "advisory_only",
+          reasons: ["stale_observations"],
+        },
+      }),
+    );
+  });
+
+  it("keeps a fresh medium-confidence positive relationship advisory-only", () => {
+    const volumes = Array.from({ length: 16 }, (_, index) => index + 1);
+    const strengthChanges = Array.from({ length: 16 }, (_, index) => index + 1);
+
+    const result = analyzeVolumeStrength(upperSeries(volumes, strengthChanges));
+
+    expect(result.regions[0]).toEqual(
+      expect.objectContaining({
+        status: "provisional",
+        confidence: "medium",
+        direction: "positive",
+        programmingEligibility: {
+          status: "advisory_only",
+          reasons: ["no_negative_relationship"],
+        },
+      }),
+    );
+  });
+
+  it("keeps a fresh negative relationship advisory-only when movements are unmapped", () => {
+    const volumes = Array.from({ length: 17 }, (_, index) => index + 1);
+    const strengthChanges = Array.from({ length: 17 }, (_, index) => 17 - index);
+    const series = upperSeries(volumes, strengthChanges);
+
+    const result = analyzeVolumeStrength({
+      ...series,
+      performanceRows: [
+        ...series.performanceRows,
+        { movementId: "unknown", date: utcDate(0), totalVolume: 100 },
+      ],
+    });
+
+    expect(result.regions[0]).toEqual(
+      expect.objectContaining({
+        status: "provisional",
+        pairedObservationCount: 16,
+        confidence: "medium",
+        direction: "negative",
+        unmappedMovementCount: 1,
+        programmingEligibility: {
+          status: "advisory_only",
+          reasons: ["unmapped_movements"],
+        },
       }),
     );
   });

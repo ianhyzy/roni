@@ -1,13 +1,27 @@
 export const WINDOW_WEEKS = 26 as const;
 export const MIN_PAIRED_OBSERVATIONS = 8;
-const MEDIUM_CONFIDENCE_MIN_PAIRED_OBSERVATIONS = 16;
+export const PROGRAMMING_MIN_PAIRED_OBSERVATIONS = 16;
+export const PROGRAMMING_MAX_RECENCY_DAYS = 28;
 const FLAT_CORRELATION_THRESHOLD = 0.2;
+const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
 
 export const REGIONS = ["upper", "lower", "core"] as const;
 
 export type Region = (typeof REGIONS)[number];
 export type CorrelationDirection = "positive" | "negative" | "flat";
 export type CorrelationConfidence = "low" | "medium";
+export type ProgrammingEligibilityReason =
+  "low_confidence" | "stale_observations" | "unmapped_movements" | "no_negative_relationship";
+
+export type ProgrammingEligibility =
+  | {
+      status: "advisory_only";
+      reasons: readonly ProgrammingEligibilityReason[];
+    }
+  | {
+      status: "eligible_for_mrv_estimation";
+      reasons: readonly [];
+    };
 
 interface RegionObservationCounts {
   region: Region;
@@ -22,9 +36,13 @@ export interface InsufficientRegionResult extends RegionObservationCounts {
 
 export interface ProvisionalRegionResult extends RegionObservationCounts {
   status: "provisional";
+  pairedObservationCount: number;
+  latestPairedWeek: string;
+  daysSinceLatestPairedWeek: number;
   spearmanRho: number;
   direction: CorrelationDirection;
   confidence: CorrelationConfidence;
+  programmingEligibility: ProgrammingEligibility;
   volumeRange: {
     minWeeklyVolume: number;
     maxWeeklyVolume: number;
@@ -240,12 +258,49 @@ function directionFor(rho: number): CorrelationDirection {
   return "flat";
 }
 
-function buildRegionResult(
-  region: Region,
-  weeklyVolume: WeeklyVolumeByRegion,
-  weeklyStrengthChange: WeeklyStrengthChangeByRegion,
-  unmappedMovementCount: number,
-): RegionResult {
+function daysBetweenUtcDates(startDate: string, endDate: string): number {
+  const start = Date.parse(`${startDate}T00:00:00.000Z`);
+  const end = Date.parse(`${endDate}T00:00:00.000Z`);
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return Number.MAX_SAFE_INTEGER;
+  return Math.max(0, Math.floor((end - start) / MILLISECONDS_PER_DAY));
+}
+
+function assessProgrammingEligibility({
+  confidence,
+  daysSinceLatestPairedWeek,
+  direction,
+  unmappedMovementCount,
+}: {
+  confidence: CorrelationConfidence;
+  daysSinceLatestPairedWeek: number;
+  direction: CorrelationDirection;
+  unmappedMovementCount: number;
+}): ProgrammingEligibility {
+  const reasons: ProgrammingEligibilityReason[] = [];
+  if (confidence !== "medium") reasons.push("low_confidence");
+  if (daysSinceLatestPairedWeek > PROGRAMMING_MAX_RECENCY_DAYS) {
+    reasons.push("stale_observations");
+  }
+  if (unmappedMovementCount > 0) reasons.push("unmapped_movements");
+  if (direction !== "negative") reasons.push("no_negative_relationship");
+  return reasons.length === 0
+    ? { status: "eligible_for_mrv_estimation", reasons: [] }
+    : { status: "advisory_only", reasons };
+}
+
+function buildRegionResult({
+  region,
+  weeklyVolume,
+  weeklyStrengthChange,
+  unmappedMovementCount,
+  inputWindowEndDate,
+}: {
+  region: Region;
+  weeklyVolume: WeeklyVolumeByRegion;
+  weeklyStrengthChange: WeeklyStrengthChangeByRegion;
+  unmappedMovementCount: number;
+  inputWindowEndDate: string;
+}): RegionResult {
   const counts = {
     region,
     weeklyObservationCount: weeklyVolume[region].size,
@@ -256,6 +311,7 @@ function buildRegionResult(
     .filter(([week]) => weeklyStrengthChange[region].has(week))
     .sort(([weekA], [weekB]) => weekA.localeCompare(weekB))
     .map(([week, volume]) => ({
+      week,
       volume,
       strengthChange: weeklyStrengthChange[region].get(week) ?? 0,
     }));
@@ -264,12 +320,26 @@ function buildRegionResult(
   if (rawRho === null) return { status: "insufficient_data", ...counts };
   const volumes = pairs.map((pair) => pair.volume);
   const spearmanRhoRounded = Math.round(Math.max(-1, Math.min(1, rawRho)) * 1000) / 1000;
+  const direction = directionFor(spearmanRhoRounded);
+  const confidence = pairs.length >= PROGRAMMING_MIN_PAIRED_OBSERVATIONS ? "medium" : "low";
+  const latestPairedWeek = pairs.at(-1)?.week;
+  if (!latestPairedWeek) return { status: "insufficient_data", ...counts };
+  const daysSinceLatestPairedWeek = daysBetweenUtcDates(latestPairedWeek, inputWindowEndDate);
   return {
     status: "provisional",
     ...counts,
+    pairedObservationCount: pairs.length,
+    latestPairedWeek,
+    daysSinceLatestPairedWeek,
     spearmanRho: spearmanRhoRounded,
-    direction: directionFor(spearmanRhoRounded),
-    confidence: pairs.length >= MEDIUM_CONFIDENCE_MIN_PAIRED_OBSERVATIONS ? "medium" : "low",
+    direction,
+    confidence,
+    programmingEligibility: assessProgrammingEligibility({
+      confidence,
+      daysSinceLatestPairedWeek,
+      direction,
+      unmappedMovementCount,
+    }),
     volumeRange: {
       minWeeklyVolume: Math.min(...volumes),
       maxWeeklyVolume: Math.max(...volumes),
@@ -291,7 +361,13 @@ export function analyzeVolumeStrength(input: VolumeStrengthAnalysisInput): Volum
   return {
     windowWeeks: WINDOW_WEEKS,
     regions: REGIONS.map((region) =>
-      buildRegionResult(region, weeklyVolume, weeklyStrengthChange, unmappedMovementCount),
+      buildRegionResult({
+        region,
+        weeklyVolume,
+        weeklyStrengthChange,
+        unmappedMovementCount,
+        inputWindowEndDate: input.windowEndDate,
+      }),
     ),
     caveat: ANALYSIS_CAVEAT,
   };

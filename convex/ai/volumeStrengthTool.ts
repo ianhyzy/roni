@@ -113,7 +113,7 @@ export const readVolumeStrengthCorrelation = internalQuery({
 
 export const analyzeVolumeStrengthTool = createTool({
   description:
-    "Use for observational 26-week regional volume and Tonal Strength Score correlation. Do not infer causal MRV or volume caps. Inputs are empty; returns counts, unmapped movements, provisional Spearman rho, confidence, range, and caveat.",
+    "Use for observational 26-week regional volume and Tonal Strength Score correlation. Do not infer causal MRV or volume caps. Inputs are empty; returns counts, recency, unmapped movements, provisional Spearman rho, confidence, range, programming eligibility for further MRV estimation, and caveat. Advisory-only results must not influence volume caps.",
   inputSchema: z.object({}),
   execute: withToolTracking("analyze_volume_strength", async (ctx) => {
     const userId = requireUserId(ctx);
