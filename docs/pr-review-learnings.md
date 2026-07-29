@@ -1,6 +1,6 @@
 # PR Review Learnings
 
-Last reviewed: 2026-07-28
+Last reviewed: 2026-07-29
 
 A running log of recurring, legitimate issues raised in pull-request review that
 agents (and humans) should pre-empt. Each entry records the **problem**, **why
@@ -587,6 +587,231 @@ the wrong direction.
   caching under a misleading payload-size log instead of surfacing the missing
   global.
 
+## 15. Per-turn telemetry must record what actually happened — never let default/initial values, pre-trim intent, or context-expansion artifacts count as measurements
+
+**Seen in:** #595 (2 P2 threads), #598 (2 P2 threads), and the broader intent of
+#591 ("repair AI telemetry integrity")
+
+**Problem.** New AI metrics were biased because the recorded value diverged from
+the thing being measured:
+
+- **Defaults recorded as measurements on failure paths.** #595 initialized the
+  per-turn timing object with `searchHits: 0` / `searchUsed: false`. When
+  `continueThread`/context retrieval failed _before_ the context handler ran,
+  `streamWithRetry` still returned and persisted the accumulator, so a retrieval
+  failure was recorded as an instrumented "zero-hit, search-unused" turn —
+  dragging the new hit/usage rates toward zero exactly on the broken turns.
+- **Counting a post-expansion artifact instead of the semantic quantity.** #595
+  counted `args.search` length as `searchHits`, but the production
+  `messageRange: { before: 2, after: 1 }` means one real match expands to up to
+  four context messages — so `totalHits` tracked the configured context window,
+  not retrieval effectiveness.
+- **Counting pre-trim intent instead of what the model received.** #598 set
+  `memoryFactsInjected` from the facts _gathered_, but `trimSnapshot` can drop the
+  whole priority-one section when it exceeds `SNAPSHOT_MAX_CHARS`, so a turn where
+  the model saw zero facts still landed in the `withFacts` cohort and biased the
+  pilot comparison.
+- **Failed turns counted in a success cohort.** #598 selected memory-cohort rows
+  by a non-error `finishReason` (e.g. `tool-calls`), but `RunAccumulator` can
+  carry a set `terminalErrorClass` alongside that finish reason, so a terminally
+  failed turn's partial search sequence was attributed to a cohort.
+
+**Why it matters.** A metric added to make a tune-or-disable / A-B decision is
+worse than no metric if it systematically mis-measures the failure, empty, or
+trimmed cases — the bias points the decision the wrong way and looks precise
+doing it.
+
+**Preventive checks.**
+
+- **Initialize telemetry fields as absent/undefined, not as a measured zero.**
+  Let the code path that actually performs the measurement set the explicit value
+  (including an explicit zero), and set it on _every_ completion path that reaches
+  persistence — including `continueAfterApproval` and other secondary entrypoints.
+- **Count the semantic event, before any downstream expansion or trimming.**
+  Record matched-result count before `messageRange` expansion; derive
+  "injected"/"rendered" counts from the final post-`trimSnapshot` snapshot, not
+  the pre-trim gather (see also §7 — counts must come from the post-filter list).
+- **Exclude failed/partial samples explicitly.** Include `terminalErrorClass` in
+  the row shape and reject any row where it is set, even when `finishReason` looks
+  successful — `streamWithRetry` reports terminal failures in the returned
+  accumulator, not by throwing (see §8, §18).
+- Add coverage for the failure/empty/trimmed sample, asserting it is _excluded_
+  from the rate/cohort — not just that the happy path is counted.
+
+## 16. A hand-written keyword/regex intent classifier that gates tool availability is brittle — and the gate must persist across the whole multi-turn lifecycle
+
+**Seen in:** #590 (12 review threads — the single largest cluster in this batch)
+
+**Problem.** #590 restricted weekly-programming turns to the draft-and-approval
+tools by classifying intent from the user's prompt text with an anchored
+verb/word-order whitelist. Both halves of the design leaked:
+
+- **The phrasing whitelist was trivially bypassed.** Ordinary rephrasings fell
+  through to the default `all` mode and re-exposed `create_workout`/`delete_workout`
+  on exactly the weekly flows the guard protects: modal prefixes ("Can you give
+  me a 3-day plan?", "Could you…"), alternate word order ("For next week, create
+  me a plan", "I need a PPL split"), and weekly _deletion_ verbs ("Delete my
+  weekly plan", "Discard this week's plan") that the action-verb list omitted. A
+  bare "this workout" one-off override also matched _before_ the weekly patterns,
+  disabling the restriction even when a weekly pattern also matched.
+- **The gate reset mid-lifecycle.** The weekly lifecycle is multi-turn
+  (draft → "looks good, push it" → approval continuation). `continueAfterApproval`
+  hardcoded `toolMode: "all"`, so the restriction applied on the initiating turn
+  vanished the moment an approval-gated tool ran, and any subsequent step/retry
+  regained the standalone tools.
+- **Inferred state was scoped too broadly.** The "there is a pending weekly draft"
+  signal was a _user-wide_ boolean, so terse follow-ups ("delete it", "push it")
+  were classified as weekly in _every_ thread — removing one-off tools from an
+  unrelated conversation about a standalone workout.
+
+**Why it matters.** When a keyword classifier is the _sole_ gate for a
+safety-relevant decision (which write tools the model may reach), every phrasing
+it fails to anticipate is a silent bypass, and every lifecycle transition it
+doesn't carry through re-opens the hole. Brittleness here isn't a cosmetic
+false-negative — it defeats the restriction's purpose.
+
+**Preventive checks.**
+
+- **Don't rest a safety restriction on an anchored phrasing whitelist alone.** If
+  a keyword classifier must exist, enumerate synonyms/verbs/modal-prefix forms and
+  test them, but prefer deriving intent from **durable state** (an actual pending
+  weekly-draft row for _this thread_) over parsing free text. Evaluate the
+  higher-precedence (weekly) patterns before a permissive one-off override.
+- **Carry the restriction through the entire lifecycle.** Persist the originating
+  tool mode and reuse it in approval continuations and retries; default only
+  genuinely legacy/unclassified continuations to `all`. A gate applied on turn N
+  must still hold on the continuation turn N+1.
+- **Scope inferred conversation state to the active thread**, not a user-wide
+  "any draft exists" flag, so state in one conversation can't restrict tools in
+  another.
+- **Route intent and tool mode from the same state-aware signal.** #590 also
+  computed the routing tier from the raw prompt while the tool mode used draft
+  state, so a terse weekly follow-up ran `chat`→`router` instead of
+  `programming` — cheaper/less tool-reliable models on the exact turn that needs
+  programming (ties to §12: primary _and_ fallback tier both follow from the
+  route).
+- Add coverage for the bypass phrasings, the post-approval continuation retaining
+  the restriction, and a cross-thread case (weekly draft present, standalone
+  request in a different thread stays unrestricted).
+
+## 17. A cached/projected fast-path in front of a live source must verify freshness from the newest record and mark freshness on every populate path
+
+**Seen in:** #592 (7 review threads)
+
+**Problem.** #592 added an indexed `exercisePerformance`/`completedWorkouts`
+projection as a fast path in front of the multi-second live Tonal history+detail
+fetch, returning `ready | miss | limit_exceeded`. Several ways the "fast" path
+returned stale data or never engaged:
+
+- **`ready` didn't imply fresh.** A workout completed after the last history sync
+  still satisfied every structural `ready` check, so the early return served a
+  projection missing the newest workout's PRs/regressions until the scheduled sync
+  ran. A freshness bound / latest-activity check was needed before trusting it.
+- **The freshness watermark was taken from the wrong end.** `fetchRecentWorkoutActivities`
+  returns activities newest-first, but the watermark was derived from
+  `activities[activities.length - 1]` (the _oldest_ in the batch) and stored as
+  `lastSyncedActivityDate`, so after every normal incremental sync the profile's
+  date lagged `workouts[0].date` and the projection returned `miss`.
+- **Not every populate path marked freshness.** Only the incremental-sync path
+  advanced `workoutProjectionSourceFetchedAt`; the backfill workflow populated the
+  same tables but never set it, so newly onboarded users had a permanent `miss`
+  (cacheAge computed from zero) and kept paying the live-fetch cost.
+- **The fallback never completed verification.** When the projection was stale the
+  fallback refreshed the `workoutHistory_v4` cache but didn't persist/verify a
+  snapshot; `startSyncUserHistory` then saw the fresh cache timestamp and skipped
+  the workflow, so frequent requests kept the projection permanently unverified.
+- **Verification read a shared denormalized timestamp instead of its own fetch.**
+  Re-reading `workoutHistoryCachedAt` after the fetch could pick up _another_
+  caller's newer snapshot and mark it "verified" against this action's older list.
+- **Same-day ordering used a truncated/string key.** `completedWorkouts.date` is
+  `YYYY-MM-DD`, and PR detection assumes `sessions[0]` is latest; the index
+  tie-break (and a raw-string `activityTime` compare that ignored UTC offsets)
+  could put an older same-day workout first, producing false PR/regression calls.
+
+**Why it matters.** A projection added _for latency_ silently trades correctness
+for speed if `ready` doesn't mean current: it serves stale analytics, or — when
+the watermark/verification logic is off — never engages at all and keeps the slow
+path it was built to remove, so the PR ships without delivering its measured win.
+
+**Preventive checks.**
+
+- **Separate "structurally complete" from "fresh."** Before returning a cached
+  projection, verify it covers the latest known activity (or enforce an explicit
+  freshness bound); don't let passing shape checks imply currency.
+- **Derive the freshness watermark from the newest record**, minding the source's
+  sort order (newest-first vs oldest-first), and carry the timestamp of the exact
+  fetch through the sync rather than re-reading a shared denormalized field that a
+  concurrent caller may have advanced.
+- **Mark the projection verified on _every_ path that populates it** — backfill
+  and incremental sync alike — and make the fallback path complete verification,
+  so the fast path can actually become `ready` after onboarding and after a
+  fallback refresh.
+- **Order same-day records by a full timestamp compared as an instant**, not a
+  truncated date or a raw ISO string (timezone offsets sort wrong); reject rows
+  whose timestamp can't be parsed when ordering matters for correctness.
+- Add coverage for: a workout completed after last sync (freshness miss), a
+  multi-date incremental batch (watermark = newest), post-backfill readiness, and
+  the fallback-refresh path reaching `ready`.
+
+## 18. A new async/secondary step bolted onto an existing pipeline must inherit every guard the primary path already enforces
+
+**Seen in:** #598 → #600 (the seven "late review findings" that #600 existed to fix)
+
+**Problem.** #598 attached a new background preference-extraction step (and a
+memory-fact context source) to the coach turn. It worked in isolation but skipped
+guards the primary chat path already had, so #600 had to retrofit each one:
+
+- **Quota double-charged.** The background extractor re-called
+  `resolveUserProviderConfig`, whose `_checkHouseKeyQuota` consumes a per-message
+  unit — so one user message spent two of the advertised 500 monthly units, and
+  extraction silently failed when the second charge crossed the cap. #600 split
+  quota-charging chat config from quota-free background credential resolution.
+- **Account-deletion short-circuit not inherited.** When deletion began mid-turn,
+  `readUserProfile` deliberately returned `null`, but the new profile-missing
+  branch still attached every fetched memory fact — leaking preferences to the
+  external model _after_ the deletion guard fired. #600 short-circuits all snapshot
+  sources while deletion is in progress.
+- **Post-turn work gated on `catch`, not the terminal outcome.** Extraction was
+  scheduled from the surrounding `try` block, but `streamWithRetry` absorbs
+  terminal BYOK/quota/non-transient failures into the returned accumulator instead
+  of throwing — so a turn the user only saw fail still scheduled another provider
+  call and could persist a preference. #600 gates scheduling on the accumulator
+  having no `terminalErrorClass` (see §8, §15).
+- **Concurrent writes/removals raced.** Independently scheduled extraction actions
+  could complete out of order and let an older turn overwrite a newer contradictory
+  preference (last-write-wins with no ordering); the removal UI shared a single
+  `pendingFactId`, so removing fact A then fact B crossed their enabled/confirm
+  state. #600 orders persistence by source-message creation time (breaking ties by
+  a deterministic ID) and disables all removal controls while any deletion is
+  pending.
+
+**Why it matters.** Each guard on the primary path (quota accounting, deletion
+short-circuit, terminal-error gating, write ordering, per-item UI state) encodes a
+correctness or safety invariant. A secondary step that reuses the primary's
+building blocks inherits their _mechanics_ but not their _guards_ unless you
+re-check each one — and the gaps surface as quota exhaustion, data leaks after
+deletion, work done for failed turns, and stale/crossed state.
+
+**Preventive checks.**
+
+- Before shipping a new background/secondary step on an existing turn or sync,
+  **walk the primary path's guards explicitly** and confirm the new step honors
+  each: metered-resource accounting (don't reuse a quota-consuming resolver for a
+  non-user-visible call), account-deletion/data guards, terminal-outcome gating
+  (`terminalErrorClass`, not `catch`), and idempotency/ordering under concurrency.
+- **Never break last-write-wins ties by an opaque ID's lexicographic order** —
+  carry a semantic sequence (source-message `_creationTime`/conversation `order`)
+  and reject writes older than the stored source, so out-of-order async completion
+  can't resurrect stale data. (An equal-`_creationTime` ID tie-break was still
+  flagged on #600 — ensure the tie-breaker is a real ordering, not `messageId`
+  string comparison.)
+- Give each concurrently-actionable UI row **independent pending state**, or
+  disable the whole group while any action is in flight — don't share one pending
+  key across rows.
+- Add coverage that drives the secondary step under each failure/edge condition
+  (house-key quota near the cap, deletion-in-progress, a terminal coach failure,
+  two out-of-order writes), asserting the guard holds.
+
 ---
 
 ## How to use this log
@@ -600,8 +825,13 @@ the wrong direction.
   that sit upstream of a normalize/clamp/resolve step, internal actions reachable
   without their tool schema (week-plan/cron/action→action callers), model-tier
   routing and classifier/gate changes (including per-provider tier→model
-  mappings), or Convex tsconfig / runtime-boundary changes (Node globals in
-  default-runtime files)**, skim the matching section above.
+  mappings and keyword classifiers that gate tool availability), per-turn AI
+  telemetry/metrics (what to count, which samples to exclude), cached/projected
+  read fast-paths in front of a live source (freshness, watermark, verification),
+  new async/secondary steps attached to a coach turn or sync (inheriting quota /
+  deletion / terminal-outcome / ordering guards), or Convex tsconfig /
+  runtime-boundary changes (Node globals in default-runtime files)**, skim the
+  matching section above.
 - When a review surfaces a _new_ recurring, legitimate gap (not stylistic, not
   one-off), add an entry here with the PR reference so the next agent inherits
   the lesson.

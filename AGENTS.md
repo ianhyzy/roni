@@ -314,7 +314,14 @@ refresh, name/ID-to-catalog resolvers that auto-substitute fuzzy matches or
 trust a stale ID over an exact name, AI tool-input schemas that reject
 malformed-but-repairable model output before a downstream normalize/clamp/resolve
 step, classifier/routing-gate removals that drop the gate's other behaviors
-or break per-provider tier->model fallbacks, internal actions reachable
+or break per-provider tier->model fallbacks, keyword classifiers that gate tool
+availability with brittle phrasing whitelists or drop the gate across the
+multi-turn lifecycle, per-turn AI telemetry that records defaults/pre-trim
+counts/expansion artifacts as real measurements or fails to exclude
+failed/partial samples, cached/projected read fast-paths that skip freshness
+verification or never advance their watermark, new async/secondary steps that
+skip the primary path's quota/deletion/terminal-outcome/ordering guards,
+internal actions reachable
 without their tool schema that skip validating their own input, and Convex
 tsconfig/runtime-boundary changes that let Node-only globals leak into
 default-runtime files). Skim the
@@ -322,7 +329,9 @@ matching section before touching Tonal fetch helpers, AI cost/budget paths, test
 fixtures, scheduled sweeps, error boundaries around optional integrations,
 credential/format validators, payload filter/transform steps, retry/fallback and
 normalization paths, AI tool-call name/ID resolution, tool-input (Zod) schemas,
-internal actions callable without the tool schema, model-tier routing, or Convex
+internal actions callable without the tool schema, model-tier routing, keyword
+tool-gating classifiers, AI telemetry/metrics, cached read fast-paths, new
+async/secondary coach-turn or sync steps, or Convex
 tsconfig/runtime-boundary changes -- and
 append a new entry when review surfaces a fresh recurring gap.
 
