@@ -2,6 +2,44 @@
 
 All notable changes to this project are documented here. This file is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commits on `main`. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.12.0](https://github.com/JeffOtano/roni/compare/v0.11.5...v0.12.0) (2026-07-29)
+
+
+### Features
+
+* add Fitbit Google Health integration ([#602](https://github.com/JeffOtano/roni/issues/602)) ([8a14a2a](https://github.com/JeffOtano/roni/commit/8a14a2a6da28f2f3bd906bbd98ea016c9a3df22a))
+* add volume strength correlation tool ([#593](https://github.com/JeffOtano/roni/issues/593)) ([bb932bc](https://github.com/JeffOtano/roni/commit/bb932bc66946f687836485cfccc7bb21c2b4259d))
+* **ai:** add preference memory pilot ([#598](https://github.com/JeffOtano/roni/issues/598)) ([ed294e8](https://github.com/JeffOtano/roni/commit/ed294e80301bbfeda4d610ee883d5e5f377f76ee))
+* **ai:** measure cross-thread search usage ([#595](https://github.com/JeffOtano/roni/issues/595)) ([b745fbe](https://github.com/JeffOtano/roni/commit/b745fbed9a21f480a822aad383785369c73d4d40))
+* qualify volume strength correlations ([#604](https://github.com/JeffOtano/roni/issues/604)) ([f77ab60](https://github.com/JeffOtano/roni/commit/f77ab603baecf4b216dedac6db6cd224081bdd30))
+* update AI model defaults ([#588](https://github.com/JeffOtano/roni/issues/588)) ([d6f11dd](https://github.com/JeffOtano/roni/commit/d6f11ddc1fe4ee26f272a9f66f9aa8dd3f62a7b2))
+
+
+### Bug Fixes
+
+* **ai:** harden preference memory lifecycle ([#600](https://github.com/JeffOtano/roni/issues/600)) ([7d0f81f](https://github.com/JeffOtano/roni/commit/7d0f81ff64ba0f100bc6eb35d51c70fb5c1abd30))
+* **ai:** recover masked provider failures ([#601](https://github.com/JeffOtano/roni/issues/601)) ([4b267a7](https://github.com/JeffOtano/roni/commit/4b267a7e8b51b064888a66e33a2afb39f5258795))
+* harden Tonal API integration ([#585](https://github.com/JeffOtano/roni/issues/585)) ([3f7fc11](https://github.com/JeffOtano/roni/commit/3f7fc118b5b1641c87768d345451d4070870ce83))
+* keep weekly plans on programming tools ([#590](https://github.com/JeffOtano/roni/issues/590)) ([2f09328](https://github.com/JeffOtano/roni/commit/2f093285415de5e93bc73f697069e0c7c3247138))
+* make history sync retries recoverable ([#584](https://github.com/JeffOtano/roni/issues/584)) ([bd41cbd](https://github.com/JeffOtano/roni/commit/bd41cbdd309f35e5f870964b64988cce089491a8))
+* preserve provider error classification ([#589](https://github.com/JeffOtano/roni/issues/589)) ([d387dfe](https://github.com/JeffOtano/roni/commit/d387dfe80c5e9318c6d61b476f9f1da909b9acab))
+* repair AI telemetry integrity ([#591](https://github.com/JeffOtano/roni/issues/591)) ([c2fe164](https://github.com/JeffOtano/roni/commit/c2fe1640eff703321e3de706aa76edb75c2dd123))
+* require approval for coach write tools ([#587](https://github.com/JeffOtano/roni/issues/587)) ([fa29fce](https://github.com/JeffOtano/roni/commit/fa29fce7e566f9bf2af6df40c6ccd53548662f85))
+* **settings:** address memory review findings ([#599](https://github.com/JeffOtano/roni/issues/599)) ([423e249](https://github.com/JeffOtano/roni/commit/423e249c448ffa3afea8f89d425b56ce1e8a8327))
+* support Convex TypeScript target ([#606](https://github.com/JeffOtano/roni/issues/606)) ([1a83ef2](https://github.com/JeffOtano/roni/commit/1a83ef2617b2170c98443478727956e93dcdcc2a))
+
+
+### Performance Improvements
+
+* prune completed weekly tools ([#594](https://github.com/JeffOtano/roni/issues/594)) ([65851b6](https://github.com/JeffOtano/roni/commit/65851b686034554ceb6c821b3bb8db910fd06aa3))
+* trim program week tool output ([#605](https://github.com/JeffOtano/roni/issues/605)) ([0d7d68b](https://github.com/JeffOtano/roni/commit/0d7d68b0fefd562b4af6036120e3363a06be2c48))
+* use projected workout performance ([#592](https://github.com/JeffOtano/roni/issues/592)) ([8499324](https://github.com/JeffOtano/roni/commit/84993243ea5674db0e0c29474bca04907791b07e))
+
+
+### Documentation
+
+* capture PR review learnings from recent merges ([#603](https://github.com/JeffOtano/roni/issues/603)) ([d914c4f](https://github.com/JeffOtano/roni/commit/d914c4f24509d60dd504ff3e12ed20199e9f46b6))
+
 ## [0.11.5](https://github.com/JeffOtano/roni/compare/v0.11.4...v0.11.5) (2026-07-29)
 
 
