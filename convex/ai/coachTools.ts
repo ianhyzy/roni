@@ -86,7 +86,9 @@ const RAW_COACH_TOOLS = {
 export type CoachToolName = keyof typeof RAW_COACH_TOOLS;
 export type CoachToolMode = "all" | "weekly_programming";
 
-const ALL_COACH_TOOL_NAMES = Object.freeze(Object.keys(RAW_COACH_TOOLS) as CoachToolName[]);
+export const ALL_COACH_TOOL_NAMES: readonly CoachToolName[] = Object.freeze(
+  Object.keys(RAW_COACH_TOOLS) as CoachToolName[],
+);
 const ONE_OFF_WORKOUT_TOOL_NAMES: ReadonlySet<string> = new Set([
   "create_workout",
   "delete_workout",
@@ -153,8 +155,9 @@ function getToolDescription(tool: unknown): string {
   return typeof description === "string" ? description : "";
 }
 
-function estimateToolDefinitionTokens(tools: ToolSet): number {
-  return Object.entries(tools).reduce((sum, [name, tool]) => {
+export function estimateCoachToolDefinitionTokens(toolNames: readonly CoachToolName[]): number {
+  return toolNames.reduce((sum, name) => {
+    const tool = COACH_TOOLS[name];
     const description = getToolDescription(tool);
     return (
       sum +
@@ -164,4 +167,5 @@ function estimateToolDefinitionTokens(tools: ToolSet): number {
   }, 0);
 }
 
-export const ESTIMATED_TOOL_DEFINITION_TOKENS = estimateToolDefinitionTokens(COACH_TOOLS);
+export const ESTIMATED_TOOL_DEFINITION_TOKENS =
+  estimateCoachToolDefinitionTokens(ALL_COACH_TOOL_NAMES);

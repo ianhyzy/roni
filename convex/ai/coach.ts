@@ -20,13 +20,12 @@ import {
   stripImagesFromOlderMessages,
   stripOrphanedToolCalls,
 } from "./contextWindow";
-import {
-  COACH_TOOLS,
-  type CoachToolMode,
-  ESTIMATED_TOOL_DEFINITION_TOKENS,
-  selectCoachActiveTools,
-} from "./coachTools";
+import { COACH_TOOLS, ESTIMATED_TOOL_DEFINITION_TOKENS } from "./coachTools";
 import { buildInstructions } from "./promptSections";
+import { createModelTierPrepareStep, type ModelTierPrepareStep } from "./coachModelPolicy";
+
+export { createModelTierPrepareStep, selectCoachPrepareStepTier } from "./coachModelPolicy";
+export type { ModelTierPrepareStep } from "./coachModelPolicy";
 
 // Embeddings always bill the house key, regardless of BYOK status.
 const serverProvider = createGoogleGenerativeAI({
@@ -37,23 +36,6 @@ const sharedEmbeddingModel = serverProvider.textEmbeddingModel("gemini-embedding
 const STATIC_INSTRUCTIONS = buildInstructions();
 const RECENT_MESSAGES_LIMIT = 40;
 export const COACH_MAX_STEPS = 25;
-
-const PROGRAMMING_TOOL_NAMES = new Set<string>([
-  "add_exercise",
-  "adjust_session_duration",
-  "advance_training_block",
-  "approve_week_plan",
-  "check_deload",
-  "create_workout",
-  "delete_week_plan",
-  "delete_workout",
-  "move_session",
-  "program_week",
-  "rebuild_day",
-  "set_warmup_block",
-  "start_training_block",
-  "swap_exercise",
-]);
 
 /**
  * Cheap fingerprint of the static system prompt. Surfaces in `aiRun.promptVersion`
@@ -271,10 +253,6 @@ export interface CoachAgentPair {
   prepareStep: ModelTierPrepareStep;
 }
 
-export type ModelTierPrepareStep = (options: {
-  steps: ReadonlyArray<{ toolCalls?: ReadonlyArray<{ toolName: string }> }>;
-}) => { model: LanguageModel; activeTools?: string[] };
-
 export function buildCoachAgents(apiKey: string, userTimezone?: string): CoachAgentPair {
   return buildCoachAgentsForProvider({ provider: "gemini", apiKey, userTimezone });
 }
@@ -286,35 +264,6 @@ export interface ProviderAgentArgs {
   userTimezone?: string;
   retrievalEnabled?: boolean;
   timing?: CoachContextTiming;
-}
-
-export function selectCoachPrepareStepTier(
-  initialTier: ModelTier,
-  steps: ReadonlyArray<{ toolCalls?: ReadonlyArray<{ toolName: string }> }>,
-): ModelTier {
-  if (initialTier === "programming" || initialTier === "router") return initialTier;
-
-  const hasProgrammingToolCall = steps.some((step) =>
-    step.toolCalls?.some((toolCall) => PROGRAMMING_TOOL_NAMES.has(toolCall.toolName)),
-  );
-  return hasProgrammingToolCall ? "programming" : initialTier;
-}
-
-export function createModelTierPrepareStep(args: {
-  initialTier: ModelTier;
-  tierModels: Record<ModelTier, LanguageModel>;
-  escalationMode?: "allow-programming" | "fixed-tier";
-  toolMode?: CoachToolMode;
-}): ModelTierPrepareStep {
-  const { initialTier, tierModels, escalationMode = "allow-programming", toolMode = "all" } = args;
-  const activeTools = selectCoachActiveTools(toolMode);
-  if (escalationMode === "fixed-tier") {
-    return () => ({ model: tierModels[initialTier], ...(activeTools && { activeTools }) });
-  }
-  return ({ steps }) => ({
-    model: tierModels[selectCoachPrepareStepTier(initialTier, steps)],
-    ...(activeTools && { activeTools }),
-  });
 }
 
 export function buildCoachAgentsForProvider(args: ProviderAgentArgs): CoachAgentPair {
