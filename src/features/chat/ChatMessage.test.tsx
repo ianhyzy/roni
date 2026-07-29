@@ -1,3 +1,4 @@
+import { type MessageDoc, toUIMessages } from "@convex-dev/agent";
 import type { UIMessage } from "@convex-dev/agent/react";
 import { render, screen } from "@testing-library/react";
 import type { ComponentPropsWithoutRef } from "react";
@@ -65,6 +66,36 @@ function createMessage(overrides: Partial<UIMessage>): UIMessage {
     text: "Hello",
     ...overrides,
   };
+}
+
+function createApprovalMessage(): UIMessage {
+  const message: MessageDoc = {
+    _id: "message-approval",
+    _creationTime: Date.UTC(2026, 0, 1, 15, 30),
+    message: {
+      role: "assistant",
+      content: [
+        {
+          type: "tool-call",
+          toolCallId: "tool-call-static",
+          toolName: "approve_week_plan",
+          input: { weekStartDate: "2026-04-06" },
+        },
+        {
+          type: "tool-approval-request",
+          approvalId: "approval-static",
+          toolCallId: "tool-call-static",
+        },
+      ],
+    },
+    order: 1,
+    status: "success",
+    stepOrder: 0,
+    threadId: "thread-1",
+    tool: true,
+  };
+
+  return toUIMessages([message])[0];
 }
 
 describe("ChatMessage", () => {
@@ -142,6 +173,17 @@ describe("ChatMessage", () => {
 
     expect(screen.getByTestId("tool-approval-card")).toHaveTextContent(
       "approve_week_plan:approval-1",
+    );
+    expect(screen.getByTestId("tool-call-indicator")).toHaveTextContent(
+      "approve_week_plan:approval-requested",
+    );
+  });
+
+  it("renders approval cards and tool indicators from stored approval requests", () => {
+    render(<ChatMessage message={createApprovalMessage()} threadId="thread-1" />);
+
+    expect(screen.getByTestId("tool-approval-card")).toHaveTextContent(
+      "approve_week_plan:approval-static",
     );
     expect(screen.getByTestId("tool-call-indicator")).toHaveTextContent(
       "approve_week_plan:approval-requested",

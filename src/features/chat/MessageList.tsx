@@ -1,6 +1,7 @@
 "use client";
 
 import type { UIMessage } from "@convex-dev/agent/react";
+import { isToolUIPart } from "ai";
 import { ChatMessage } from "./ChatMessage";
 import { DateDivider } from "./DateDivider";
 import { hasRetryLease } from "./chatTurnState";
@@ -26,7 +27,7 @@ export function MessageList({
   threadId: string;
 }) {
   const visibleMessages = messages.filter((message) => {
-    const hasToolParts = message.parts.some((part) => part.type === "dynamic-tool");
+    const hasToolParts = message.parts.some(isToolUIPart);
     const isRetrying = hasRetryLease(message);
     return !(
       message.role === "assistant" &&

@@ -1,3 +1,4 @@
+import { type MessageDoc, toUIMessages } from "@convex-dev/agent";
 import type { UIMessage } from "@convex-dev/agent/react";
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
@@ -34,6 +35,36 @@ function createMessage(overrides: Partial<UIMessage>): UIMessage {
     text: "Hello",
     ...overrides,
   };
+}
+
+function createApprovalMessage(): UIMessage {
+  const message: MessageDoc = {
+    _id: "message-approval",
+    _creationTime: Date.UTC(2026, 0, 1, 10, 0),
+    message: {
+      role: "assistant",
+      content: [
+        {
+          type: "tool-call",
+          toolCallId: "tool-call-static",
+          toolName: "approve_week_plan",
+          input: { weekStartDate: "2026-04-06" },
+        },
+        {
+          type: "tool-approval-request",
+          approvalId: "approval-static",
+          toolCallId: "tool-call-static",
+        },
+      ],
+    },
+    order: 1,
+    status: "success",
+    stepOrder: 0,
+    threadId: "thread-1",
+    tool: true,
+  };
+
+  return toUIMessages([message])[0];
 }
 
 describe("MessageList", () => {
@@ -86,6 +117,12 @@ describe("MessageList", () => {
 
     expect(screen.getAllByTestId("chat-message")).toHaveLength(1);
     expect(screen.queryByText("two:solo")).not.toBeInTheDocument();
+  });
+
+  it("keeps tool-only stored approval requests visible", () => {
+    render(<MessageList messages={[createApprovalMessage()]} threadId="thread-1" />);
+
+    expect(screen.getByTestId("chat-message")).toBeInTheDocument();
   });
 
   it("hides an empty failed row while its retry lease is active", () => {

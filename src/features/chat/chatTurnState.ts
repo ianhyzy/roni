@@ -1,4 +1,5 @@
 import type { UIMessage } from "@convex-dev/agent/react";
+import { isToolUIPart } from "ai";
 
 type CoachActivity = "preparing" | "tool" | "responding";
 
@@ -58,7 +59,7 @@ function getApprovalContinuation(messages: readonly UIMessage[]) {
 
   for (const message of messages) {
     for (const part of message.parts) {
-      if (part.type === "dynamic-tool" && part.approval?.approved !== undefined) {
+      if (isToolUIPart(part) && part.approval?.approved !== undefined) {
         continuation = {
           key: part.approval.id || part.toolCallId,
           awaitingText: true,
@@ -112,9 +113,7 @@ export function deriveCoachTurnState({
   if (!latestMessage) return { status: "idle" };
 
   const isAwaitingApproval = latestAttempt.messages.some((message) =>
-    message.parts.some(
-      (part) => part.type === "dynamic-tool" && part.state === "approval-requested",
-    ),
+    message.parts.some((part) => isToolUIPart(part) && part.state === "approval-requested"),
   );
   if (isAwaitingApproval) return { status: "awaiting-approval", startedAt };
 
@@ -122,7 +121,7 @@ export function deriveCoachTurnState({
   const hasRunningTool = latestAttempt.messages.some((message) =>
     message.parts.some(
       (part) =>
-        part.type === "dynamic-tool" &&
+        isToolUIPart(part) &&
         (part.state === "input-streaming" || part.state === "input-available"),
     ),
   );

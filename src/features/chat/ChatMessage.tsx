@@ -2,6 +2,7 @@
 
 import type { UIMessage } from "@convex-dev/agent/react";
 import { useSmoothText } from "@convex-dev/agent/react";
+import { getToolName, isToolUIPart } from "ai";
 import { AlertTriangle, Sparkles } from "lucide-react";
 import Image from "next/image";
 import { MarkdownContent } from "./MarkdownContent";
@@ -169,15 +170,11 @@ export function ChatMessage({ message, isGrouped, threadId }: ChatMessageProps) 
             return <SmoothAssistantText key={i} text={text} isStreaming={isStreaming} />;
           }
 
-          if (
-            part.type === "dynamic-tool" &&
-            part.state === "approval-requested" &&
-            part.approval
-          ) {
+          if (isToolUIPart(part) && part.state === "approval-requested" && part.approval) {
             return (
               <ToolApprovalCard
                 key={`approval-${part.toolCallId}`}
-                toolName={part.toolName}
+                toolName={getToolName(part)}
                 input={part.input}
                 approvalId={part.approval.id}
                 threadId={threadId}
@@ -186,7 +183,7 @@ export function ChatMessage({ message, isGrouped, threadId }: ChatMessageProps) 
           }
 
           if (
-            part.type === "dynamic-tool" &&
+            isToolUIPart(part) &&
             (part.state === "approval-responded" || part.state === "output-denied") &&
             part.approval
           ) {
@@ -223,7 +220,7 @@ export function ChatMessage({ message, isGrouped, threadId }: ChatMessageProps) 
 
         {/* Tool calls */}
         {(() => {
-          const toolParts = message.parts.filter((part) => part.type === "dynamic-tool");
+          const toolParts = message.parts.filter(isToolUIPart);
           if (toolParts.length === 0) return null;
 
           return (
@@ -231,7 +228,7 @@ export function ChatMessage({ message, isGrouped, threadId }: ChatMessageProps) 
               {toolParts.map((part) => (
                 <ToolCallIndicator
                   key={part.toolCallId}
-                  toolName={part.toolName}
+                  toolName={getToolName(part)}
                   state={part.state}
                   output={"output" in part ? part.output : undefined}
                 />
