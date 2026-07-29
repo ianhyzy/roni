@@ -1,24 +1,24 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { aiToolPreviewMaxChars } from "./env";
+import { aiToolPreviewMaxChars, resolveRuntimeEnvironment } from "./env";
+
+let originalVercelEnv: string | undefined;
+let originalOverride: string | undefined;
+
+beforeEach(() => {
+  originalVercelEnv = process.env.VERCEL_ENV;
+  originalOverride = process.env.AI_TOOL_PREVIEW_MAX_CHARS;
+  delete process.env.VERCEL_ENV;
+  delete process.env.AI_TOOL_PREVIEW_MAX_CHARS;
+});
+
+afterEach(() => {
+  if (originalVercelEnv === undefined) delete process.env.VERCEL_ENV;
+  else process.env.VERCEL_ENV = originalVercelEnv;
+  if (originalOverride === undefined) delete process.env.AI_TOOL_PREVIEW_MAX_CHARS;
+  else process.env.AI_TOOL_PREVIEW_MAX_CHARS = originalOverride;
+});
 
 describe("aiToolPreviewMaxChars", () => {
-  let originalVercelEnv: string | undefined;
-  let originalOverride: string | undefined;
-
-  beforeEach(() => {
-    originalVercelEnv = process.env.VERCEL_ENV;
-    originalOverride = process.env.AI_TOOL_PREVIEW_MAX_CHARS;
-    delete process.env.VERCEL_ENV;
-    delete process.env.AI_TOOL_PREVIEW_MAX_CHARS;
-  });
-
-  afterEach(() => {
-    if (originalVercelEnv === undefined) delete process.env.VERCEL_ENV;
-    else process.env.VERCEL_ENV = originalVercelEnv;
-    if (originalOverride === undefined) delete process.env.AI_TOOL_PREVIEW_MAX_CHARS;
-    else process.env.AI_TOOL_PREVIEW_MAX_CHARS = originalOverride;
-  });
-
   it("returns the dev default when no env vars are set", () => {
     expect(aiToolPreviewMaxChars()).toBe(4096);
   });
@@ -54,5 +54,36 @@ describe("aiToolPreviewMaxChars", () => {
 
     process.env.AI_TOOL_PREVIEW_MAX_CHARS = "-50";
     expect(aiToolPreviewMaxChars()).toBe(4096);
+  });
+});
+
+describe("resolveRuntimeEnvironment", () => {
+  it("defaults to dev outside Vercel", () => {
+    expect(resolveRuntimeEnvironment({})).toBe("dev");
+  });
+
+  it.each(["production", "prod"])("uses the explicit %s production marker", (value) => {
+    expect(resolveRuntimeEnvironment({ roniEnvironment: value })).toBe("prod");
+  });
+
+  it.each(["development", "dev"])(
+    "lets the explicit %s marker override Vercel production",
+    (value) => {
+      expect(
+        resolveRuntimeEnvironment({
+          roniEnvironment: value,
+          vercelEnvironment: "production",
+        }),
+      ).toBe("dev");
+    },
+  );
+
+  it("falls back to the Vercel marker when the explicit value is invalid", () => {
+    expect(
+      resolveRuntimeEnvironment({
+        roniEnvironment: "staging",
+        vercelEnvironment: "production",
+      }),
+    ).toBe("prod");
   });
 });

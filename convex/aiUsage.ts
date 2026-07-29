@@ -124,6 +124,7 @@ const DEFAULT_CACHE_RATE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
 
 export interface CacheHitRateRow {
   provider: string;
+  model: string;
   rows: number;
   inputTokens: number;
   cacheReadTokens: number;
@@ -133,6 +134,7 @@ export interface CacheHitRateRow {
 
 export interface AiUsageTokenRow {
   provider: string;
+  model?: string;
   inputTokens: number;
   outputTokens?: number;
   totalTokens?: number;
@@ -184,15 +186,32 @@ export function calculateWeightedUsageTokens(row: AiUsageTokenRow): number {
   );
 }
 
-export function aggregateCacheHitsByProvider(rows: AiUsageTokenRow[]): CacheHitRateRow[] {
-  const byProvider = new Map<
+export function aggregateCacheHitsByProviderAndModel(rows: AiUsageTokenRow[]): CacheHitRateRow[] {
+  const byProviderAndModel = new Map<
     string,
-    { rows: number; inputTokens: number; cacheReadTokens: number; cacheWriteTokens: number }
+    {
+      provider: string;
+      model: string;
+      rows: number;
+      inputTokens: number;
+      cacheReadTokens: number;
+      cacheWriteTokens: number;
+    }
   >();
   for (const row of rows) {
-    // Routing rows (`provider: "local"`) have no model call, skip them.
-    if (row.inputTokens === 0) continue;
-    const agg = byProvider.get(row.provider) ?? {
+    if (
+      row.provider === "local" ||
+      !Number.isFinite(row.inputTokens) ||
+      row.inputTokens <= 0 ||
+      row.model?.toLowerCase().includes("embedding")
+    ) {
+      continue;
+    }
+    const model = row.model?.trim() || "unknown";
+    const key = `${row.provider}\u0000${model}`;
+    const agg = byProviderAndModel.get(key) ?? {
+      provider: row.provider,
+      model,
       rows: 0,
       inputTokens: 0,
       cacheReadTokens: 0,
@@ -200,26 +219,29 @@ export function aggregateCacheHitsByProvider(rows: AiUsageTokenRow[]): CacheHitR
     };
     agg.rows += 1;
     agg.inputTokens += row.inputTokens;
-    agg.cacheReadTokens += row.cacheReadTokens ?? 0;
-    agg.cacheWriteTokens += row.cacheWriteTokens ?? 0;
-    byProvider.set(row.provider, agg);
+    const cacheReadTokens = row.cacheReadTokens;
+    const cacheWriteTokens = row.cacheWriteTokens;
+    agg.cacheReadTokens +=
+      cacheReadTokens !== undefined && Number.isFinite(cacheReadTokens) && cacheReadTokens > 0
+        ? Math.min(cacheReadTokens, row.inputTokens)
+        : 0;
+    agg.cacheWriteTokens +=
+      cacheWriteTokens !== undefined && Number.isFinite(cacheWriteTokens) && cacheWriteTokens > 0
+        ? Math.min(cacheWriteTokens, row.inputTokens)
+        : 0;
+    byProviderAndModel.set(key, agg);
   }
 
-  return Array.from(byProvider.entries())
-    .map(([provider, agg]) => ({
-      provider,
+  return Array.from(byProviderAndModel.values())
+    .map((agg) => ({
       ...agg,
       cacheReadRatio: agg.inputTokens === 0 ? 0 : agg.cacheReadTokens / agg.inputTokens,
     }))
     .sort((a, b) => b.inputTokens - a.inputTokens);
 }
 
-/**
- * Aggregate cache-read ratio grouped by provider over a recent window.
- * Run ad-hoc (e.g. `npx convex run aiUsage:getCacheHitRateByProvider --prod`)
- * to decide whether explicit provider caching is worth pursuing.
- */
-export const getCacheHitRateByProvider = internalQuery({
+/** Keeps model-specific cache economics separate for provider caching decisions. */
+export const getCacheHitRateByProviderAndModel = internalQuery({
   args: { windowMs: v.optional(v.number()) },
   handler: async (ctx, { windowMs = DEFAULT_CACHE_RATE_WINDOW_MS }) => {
     const since = Date.now() - windowMs;
@@ -227,7 +249,7 @@ export const getCacheHitRateByProvider = internalQuery({
       .query("aiUsage")
       .withIndex("by_createdAt", (q) => q.gte("createdAt", since))
       .collect();
-    return aggregateCacheHitsByProvider(rows);
+    return aggregateCacheHitsByProviderAndModel(rows);
   },
 });
 

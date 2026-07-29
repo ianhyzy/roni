@@ -30,10 +30,12 @@ import {
   withByokErrorSanitization,
 } from "./chatHelpers";
 import { getWeekStartDateString } from "./weekPlanHelpers";
+import { resolveRuntimeEnvironment } from "./lib/env";
 
-// Dev Convex URLs look like `https://<adj>-<animal>-123.convex.cloud` and
-// prod ones look the same, so we flag prod on Vercel's build env instead.
-const ENVIRONMENT: "dev" | "prod" = process.env.VERCEL_ENV === "production" ? "prod" : "dev";
+const ENVIRONMENT = resolveRuntimeEnvironment({
+  roniEnvironment: process.env.RONI_ENVIRONMENT,
+  vercelEnvironment: process.env.VERCEL_ENV,
+});
 const RELEASE_SHA = process.env.VERCEL_GIT_COMMIT_SHA;
 const TRIVIAL_PROMPT_MAX_CHARS = 30;
 const COMPLEX_INTENT_KEYWORDS = ["program", "plan", "build", "swap", "deload"] as const;

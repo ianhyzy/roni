@@ -7,6 +7,20 @@ export function cronsEnabled(): boolean {
   return process.env.DISABLE_CRONS !== "true";
 }
 
+export type RuntimeEnvironment = "dev" | "prod";
+
+export function resolveRuntimeEnvironment(
+  options: Readonly<{ roniEnvironment?: string; vercelEnvironment?: string }>,
+): RuntimeEnvironment {
+  if (options.roniEnvironment === "production" || options.roniEnvironment === "prod") {
+    return "prod";
+  }
+  if (options.roniEnvironment === "development" || options.roniEnvironment === "dev") {
+    return "dev";
+  }
+  return options.vercelEnvironment === "production" ? "prod" : "dev";
+}
+
 const PROD_PREVIEW_MAX_CHARS = 1024;
 const DEV_PREVIEW_MAX_CHARS = 4096;
 
