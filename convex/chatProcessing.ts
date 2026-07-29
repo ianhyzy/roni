@@ -289,8 +289,9 @@ export const processMessage = internalAction({
     } finally {
       if (accumulator) await persistRun(ctx, accumulator);
     }
-
-    if (shouldScheduleMemoryExtraction(prompt)) {
+    const coachTurnSucceeded =
+      accumulator !== undefined && accumulator.toRow().terminalErrorClass === undefined;
+    if (coachTurnSucceeded && shouldScheduleMemoryExtraction(prompt)) {
       try {
         await ctx.scheduler.runAfter(0, internal.ai.memoryFactExtraction.extractFromTurn, {
           userId,

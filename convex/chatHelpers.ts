@@ -41,11 +41,7 @@ export async function resolveUserProviderConfig(
   ctx: ActionCtx,
   userId: string,
 ): Promise<ProviderKeyResult> {
-  const context = await ctx.runQuery(internal.byok._getKeyResolutionContext, {
-    userId: userId as Id<"users">,
-  });
-  if (!context) throw new Error("byok_user_not_found");
-  const result = await resolveProviderKey(context.profile, context.userCreationTime);
+  const result = await resolveUserProviderCredentials(ctx, userId);
 
   const killSwitchActive = process.env.BYOK_DISABLED === "true";
   if (result.isHouseKey && !killSwitchActive) {
@@ -63,6 +59,17 @@ export async function resolveUserProviderConfig(
   }
 
   return result;
+}
+
+export async function resolveUserProviderCredentials(
+  ctx: ActionCtx,
+  userId: string,
+): Promise<ProviderKeyResult> {
+  const context = await ctx.runQuery(internal.byok._getKeyResolutionContext, {
+    userId: userId as Id<"users">,
+  });
+  if (!context) throw new Error("byok_user_not_found");
+  return await resolveProviderKey(context.profile, context.userCreationTime);
 }
 
 /**

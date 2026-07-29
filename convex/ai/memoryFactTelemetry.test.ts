@@ -80,6 +80,7 @@ describe("aggregateMemoryFactSearchTelemetry", () => {
     const summary = aggregateMemoryFactSearchTelemetry([
       row({ memoryFactsInjected: undefined }),
       row({ finishReason: "error" }),
+      row({ terminalErrorClass: "byok_quota_exceeded" }),
       row({ source: "approval_continuation" }),
       row({ toolSequence: ["get_strength_scores"] }),
     ]);

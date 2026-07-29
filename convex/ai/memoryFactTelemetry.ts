@@ -20,6 +20,7 @@ export interface MemoryFactTelemetryRow {
   userId: string;
   source: "chat" | "approval_continuation";
   finishReason?: string;
+  terminalErrorClass?: string;
   toolSequence: readonly string[];
   memoryFactsInjected?: number;
 }
@@ -80,6 +81,7 @@ function isEligibleTurn(row: MemoryFactTelemetryRow): boolean {
   return (
     row.source === "chat" &&
     row.finishReason !== "error" &&
+    row.terminalErrorClass === undefined &&
     row.toolSequence.some((toolName) => EXERCISE_SELECTION_TOOLS.has(toolName))
   );
 }

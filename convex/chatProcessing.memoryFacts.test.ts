@@ -121,4 +121,27 @@ describe("processMessage memory fact scheduling", () => {
 
     await expect(getExtractionJobs(t)).resolves.toEqual([]);
   });
+
+  it("does not schedule extraction for a returned terminal-error outcome", async () => {
+    checkDailyBudgetMock.mockResolvedValue(false);
+    resolveUserProviderConfigMock.mockResolvedValue({
+      provider: "gemini",
+      apiKey: "test-gemini-key",
+      isHouseKey: true,
+    });
+    streamWithRetryMock.mockResolvedValue({
+      setContextTiming: vi.fn(),
+      toRow: vi.fn(() => ({ terminalErrorClass: "byok_quota_exceeded" })),
+    });
+    const t = convexTest(schema, modules);
+    const userId = await createTestUser(t);
+
+    await t.action(internal.chatProcessing.processMessage, {
+      threadId: "thread-1",
+      userId,
+      prompt: "I prefer evening workouts.",
+    });
+
+    await expect(getExtractionJobs(t)).resolves.toEqual([]);
+  });
 });

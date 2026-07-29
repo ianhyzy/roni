@@ -22,6 +22,7 @@ const GARMIN_WELLNESS_LIMIT = Math.min(
 );
 
 export interface SnapshotInputs {
+  deletionInProgress?: boolean;
   profile: Doc<"userProfiles"> | null;
   scores: ReadonlyArray<Doc<"currentStrengthScores">>;
   readiness: Doc<"muscleReadiness"> | null;
@@ -65,6 +66,23 @@ export async function safe<T>(read: () => Promise<T>, fallback: T, sourceName: s
 export const gatherSnapshotInputs = internalQuery({
   args: { userId: v.id("users") },
   handler: async (ctx, { userId }): Promise<SnapshotInputs> => {
+    if (await isDeletionInProgress(ctx, userId)) {
+      return {
+        deletionInProgress: true,
+        profile: null,
+        scores: [],
+        readiness: null,
+        activities: [],
+        activeBlock: null,
+        recentFeedback: [],
+        activeGoals: [],
+        activeInjuries: [],
+        exerciseExclusions: [],
+        externalActivities: [],
+        garminWellness: [],
+        memoryFacts: [],
+      };
+    }
     const profile = await safe(() => readUserProfile(ctx, userId), null, "profile");
 
     const [
@@ -170,6 +188,7 @@ export const gatherSnapshotInputs = internalQuery({
     ]);
 
     return {
+      deletionInProgress: false,
       profile,
       scores,
       readiness,
@@ -190,9 +209,6 @@ async function readUserProfile(
   ctx: QueryCtx,
   userId: Id<"users">,
 ): Promise<Doc<"userProfiles"> | null> {
-  // Mirrors internal.tonal.cache.getUserProfile: deletion-in-progress users
-  // never expose profile data to downstream callers.
-  if (await isDeletionInProgress(ctx, userId)) return null;
   return ctx.db
     .query("userProfiles")
     .withIndex("by_userId", (q) => q.eq("userId", userId))

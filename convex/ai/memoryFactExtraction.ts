@@ -7,7 +7,7 @@ import { z } from "zod";
 import { components, internal } from "../_generated/api";
 import type { Id } from "../_generated/dataModel";
 import { type ActionCtx, internalAction } from "../_generated/server";
-import { resolveUserProviderConfig, withByokErrorSanitization } from "../chatHelpers";
+import { resolveUserProviderCredentials, withByokErrorSanitization } from "../chatHelpers";
 import { getModelForTier, getProviderConfig } from "./providers";
 import {
   MAX_MEMORY_FACT_LENGTH,
@@ -78,7 +78,7 @@ interface MemoryExtractionArgs {
 }
 
 async function recordExtractionUsage(
-  ctx: Parameters<typeof resolveUserProviderConfig>[0],
+  ctx: ActionCtx,
   args: {
     userId: Id<"users">;
     threadId: string;
@@ -118,12 +118,13 @@ export async function extractMemoryFactsFromTurn(
     const [message] = await ctx.runQuery(components.agent.messages.getMessagesByIds, {
       messageIds: [promptMessageId],
     });
+    if (!message) return { status: "skipped" as const };
     const prompt = getEligiblePromptText(message, { userId, threadId });
     if (!prompt || !shouldScheduleMemoryExtraction(prompt)) {
       return { status: "skipped" as const };
     }
 
-    const providerConfig = await resolveUserProviderConfig(ctx, userId);
+    const providerConfig = await resolveUserProviderCredentials(ctx, userId);
     const modelId = getModelForTier(
       providerConfig.provider,
       "summarize",
@@ -159,6 +160,7 @@ export async function extractMemoryFactsFromTurn(
       {
         userId,
         sourceMessageId: promptMessageId,
+        sourceMessageCreatedAt: message._creationTime,
         facts: result.output.facts,
       },
     );

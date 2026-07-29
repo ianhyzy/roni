@@ -269,7 +269,7 @@ describe("gatherSnapshotInputs", () => {
     expect(inputs.memoryFacts).toEqual([]);
   });
 
-  test("returns null profile for users with deletion in progress", async () => {
+  test("returns no snapshot data for users with deletion in progress", async () => {
     const t = convexTest(schema, modules);
     const userId = await t.run(async (ctx) => ctx.db.insert("users", { deletionInProgress: true }));
 
@@ -290,10 +290,32 @@ describe("gatherSnapshotInputs", () => {
         },
         lastActiveAt: Date.now(),
       });
+      await ctx.db.insert("userMemoryFacts", {
+        userId,
+        fact: "The user prefers evening workouts.",
+        category: "schedule_preference",
+        dedupeKey: "evening-workouts",
+        sourceMessageId: "message-1",
+        createdAt: 1,
+        lastReferencedAt: 1,
+        confidence: 0.95,
+      });
     });
 
     const inputs = await t.query(internal.coachState.gatherSnapshotInputs, { userId });
 
+    expect(inputs.deletionInProgress).toBe(true);
     expect(inputs.profile).toBeNull();
+    expect(inputs.scores).toEqual([]);
+    expect(inputs.readiness).toBeNull();
+    expect(inputs.activities).toEqual([]);
+    expect(inputs.activeBlock).toBeNull();
+    expect(inputs.recentFeedback).toEqual([]);
+    expect(inputs.activeGoals).toEqual([]);
+    expect(inputs.activeInjuries).toEqual([]);
+    expect(inputs.exerciseExclusions).toEqual([]);
+    expect(inputs.externalActivities).toEqual([]);
+    expect(inputs.garminWellness).toEqual([]);
+    expect(inputs.memoryFacts).toEqual([]);
   });
 });

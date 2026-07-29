@@ -10,7 +10,7 @@ import {
 } from "./memoryFactExtraction";
 
 const generateTextMock = vi.hoisted(() => vi.fn());
-const resolveUserProviderConfigMock = vi.hoisted(() => vi.fn());
+const resolveUserProviderCredentialsMock = vi.hoisted(() => vi.fn());
 
 vi.mock("ai", async (importOriginal) => ({
   ...(await importOriginal<typeof import("ai")>()),
@@ -19,7 +19,7 @@ vi.mock("ai", async (importOriginal) => ({
 
 vi.mock("../chatHelpers", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../chatHelpers")>()),
-  resolveUserProviderConfig: resolveUserProviderConfigMock,
+  resolveUserProviderCredentials: resolveUserProviderCredentialsMock,
 }));
 
 beforeEach(() => {
@@ -76,9 +76,30 @@ describe("memory fact extraction eligibility", () => {
 });
 
 describe("extractMemoryFactsFromTurn", () => {
+  it("skips when the anchored prompt message no longer exists", async () => {
+    const runMutation = vi.fn();
+
+    const result = await extractMemoryFactsFromTurn(
+      {
+        runQuery: vi.fn(async () => []),
+        runMutation,
+      } as unknown as ActionCtx,
+      {
+        userId: "user-1" as Id<"users">,
+        threadId: "thread-1",
+        promptMessageId: "message-missing",
+      },
+    );
+
+    expect(result).toEqual({ status: "skipped" });
+    expect(resolveUserProviderCredentialsMock).not.toHaveBeenCalled();
+    expect(generateTextMock).not.toHaveBeenCalled();
+    expect(runMutation).not.toHaveBeenCalled();
+  });
+
   it("records usage and persists structured facts from an owned prompt", async () => {
     const userId = "user-1" as Id<"users">;
-    resolveUserProviderConfigMock.mockResolvedValue({
+    resolveUserProviderCredentialsMock.mockResolvedValue({
       provider: "gemini",
       apiKey: "test-key",
       isHouseKey: true,
@@ -114,6 +135,7 @@ describe("extractMemoryFactsFromTurn", () => {
     );
 
     expect(result).toEqual({ status: "stored", inserted: 1, updated: 0, rejected: 0 });
+    expect(resolveUserProviderCredentialsMock).toHaveBeenCalledWith(expect.anything(), userId);
     expect(generateTextMock).toHaveBeenCalledWith(
       expect.objectContaining({
         prompt: "I prefer evening workouts.",
@@ -130,6 +152,7 @@ describe("extractMemoryFactsFromTurn", () => {
       expect.objectContaining({
         userId,
         sourceMessageId: "message-1",
+        sourceMessageCreatedAt: 1,
         facts: [expect.objectContaining({ subject: "workout time", confidence: 0.97 })],
       }),
     );
@@ -138,7 +161,7 @@ describe("extractMemoryFactsFromTurn", () => {
   it("contains provider failures without persisting a fact", async () => {
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     try {
-      resolveUserProviderConfigMock.mockRejectedValue(new Error("provider unavailable"));
+      resolveUserProviderCredentialsMock.mockRejectedValue(new Error("provider unavailable"));
       const runMutation = vi.fn();
 
       const result = await extractMemoryFactsFromTurn(

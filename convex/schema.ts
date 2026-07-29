@@ -177,6 +177,7 @@ export default defineSchema({
     ),
     dedupeKey: v.string(),
     sourceMessageId: v.string(),
+    sourceMessageCreatedAt: v.optional(v.number()),
     createdAt: v.number(),
     lastReferencedAt: v.number(),
     confidence: v.number(),

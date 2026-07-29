@@ -5,8 +5,11 @@ import type { ActionCtx } from "./_generated/server";
 import {
   getScheduledFailureContent,
   persistScheduledFailure,
+  resolveUserProviderConfig,
+  resolveUserProviderCredentials,
   shouldNotifyScheduledFailure,
 } from "./chatHelpers";
+import { BYOK_REQUIRED_AFTER } from "./byok";
 
 vi.mock("@convex-dev/agent", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@convex-dev/agent")>()),
@@ -113,6 +116,39 @@ describe("shouldNotifyScheduledFailure", () => {
     expect(
       shouldNotifyScheduledFailure(Object.assign(new Error("Unavailable"), { status: 503 })),
     ).toBe(false);
+  });
+});
+
+describe("provider credential quota", () => {
+  it("resolves background credentials without consuming a second chat quota unit", async () => {
+    const originalHouseKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+    const originalKillSwitch = process.env.BYOK_DISABLED;
+    process.env.GOOGLE_GENERATIVE_AI_API_KEY = "AIzaHouseKey00000000000000000000000abcd";
+    delete process.env.BYOK_DISABLED;
+    try {
+      const runMutation = vi.fn(async () => undefined);
+      const ctx = {
+        runQuery: vi.fn(async () => ({
+          profile: null,
+          userCreationTime: BYOK_REQUIRED_AFTER - 1,
+        })),
+        runMutation,
+      } as unknown as ActionCtx;
+
+      await expect(resolveUserProviderCredentials(ctx, "user-1")).resolves.toMatchObject({
+        provider: "gemini",
+        isHouseKey: true,
+      });
+      expect(runMutation).not.toHaveBeenCalled();
+
+      await resolveUserProviderConfig(ctx, "user-1");
+      expect(runMutation).toHaveBeenCalledTimes(1);
+    } finally {
+      if (originalHouseKey === undefined) delete process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+      else process.env.GOOGLE_GENERATIVE_AI_API_KEY = originalHouseKey;
+      if (originalKillSwitch === undefined) delete process.env.BYOK_DISABLED;
+      else process.env.BYOK_DISABLED = originalKillSwitch;
+    }
   });
 });
 

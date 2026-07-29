@@ -117,7 +117,7 @@ describe("MemoryFacts", () => {
     expect(screen.queryByText("0.96")).not.toBeInTheDocument();
   });
 
-  it("confirms deletion and disables only the pending row", async () => {
+  it("disables every removal control while a deletion is pending", async () => {
     const removal = deferred<{ removed: boolean }>();
     mockRemoveFact.mockReturnValueOnce(removal.promise);
     mockFacts = [
@@ -135,12 +135,16 @@ describe("MemoryFacts", () => {
     fireEvent.click(squatsButton);
 
     expect(screen.getByRole("heading", { name: "Forget this memory?" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Forget memory" }));
+    const confirmButton = screen.getByRole("button", { name: "Forget memory" });
+    const cancelButton = screen.getByRole("button", { name: "Cancel" });
+    fireEvent.click(confirmButton);
 
     await waitFor(() => {
       expect(mockRemoveFact).toHaveBeenCalledWith({ factId: "fact-squats" });
       expect(squatsButton).toBeDisabled();
-      expect(morningsButton).toBeEnabled();
+      expect(morningsButton).toBeDisabled();
+      expect(confirmButton).toBeDisabled();
+      expect(cancelButton).toBeDisabled();
     });
 
     await act(async () => {
@@ -153,6 +157,8 @@ describe("MemoryFacts", () => {
       expect(
         screen.queryByRole("heading", { name: "Forget this memory?" }),
       ).not.toBeInTheDocument();
+      expect(squatsButton).toBeEnabled();
+      expect(morningsButton).toBeEnabled();
     });
   });
 

@@ -85,6 +85,18 @@ function normalizeSubject(subject: string): string {
     .replace(/^-+|-+$/gu, "");
 }
 
+function isCurrentOrNewerSource(
+  sourceMessageCreatedAt: number,
+  sourceMessageId: string,
+  existing: Doc<"userMemoryFacts">,
+): boolean {
+  if (existing.sourceMessageCreatedAt === undefined) return true;
+  if (sourceMessageCreatedAt !== existing.sourceMessageCreatedAt) {
+    return sourceMessageCreatedAt > existing.sourceMessageCreatedAt;
+  }
+  return sourceMessageId >= existing.sourceMessageId;
+}
+
 export function validateExtractedPreferenceFact(
   candidate: ExtractedPreferenceFact,
 ): ExtractedPreferenceFact | null {
@@ -144,14 +156,23 @@ export const persistExtractedFacts = internalMutation({
   args: {
     userId: v.id("users"),
     sourceMessageId: v.string(),
+    sourceMessageCreatedAt: v.number(),
     facts: v.array(extractedFactValidator),
   },
-  handler: async (ctx, { userId, sourceMessageId, facts }): Promise<PersistFactsResult> => {
+  handler: async (
+    ctx,
+    { userId, sourceMessageId, sourceMessageCreatedAt, facts },
+  ): Promise<PersistFactsResult> => {
     if (await isDeletionInProgress(ctx, userId)) {
       return { ok: false, inserted: 0, updated: 0, rejected: facts.length, error: "user_missing" };
     }
     const normalizedSourceMessageId = sourceMessageId.trim();
-    if (!normalizedSourceMessageId || normalizedSourceMessageId.length > 200) {
+    if (
+      !normalizedSourceMessageId ||
+      normalizedSourceMessageId.length > 200 ||
+      !Number.isFinite(sourceMessageCreatedAt) ||
+      sourceMessageCreatedAt < 0
+    ) {
       return {
         ok: false,
         inserted: 0,
@@ -201,11 +222,16 @@ export const persistExtractedFacts = internalMutation({
         )
         .unique();
       if (existing) {
+        if (!isCurrentOrNewerSource(sourceMessageCreatedAt, normalizedSourceMessageId, existing)) {
+          rejected += 1;
+          continue;
+        }
         await ctx.db.patch(existing._id, {
           fact: candidate.fact,
           confidence: candidate.confidence,
           sourceMessageId: normalizedSourceMessageId,
-          lastReferencedAt: now,
+          sourceMessageCreatedAt,
+          lastReferencedAt: sourceMessageCreatedAt,
         });
         updated += 1;
       } else {
@@ -215,8 +241,9 @@ export const persistExtractedFacts = internalMutation({
           category: candidate.category,
           dedupeKey,
           sourceMessageId: normalizedSourceMessageId,
+          sourceMessageCreatedAt,
           createdAt: now,
-          lastReferencedAt: now,
+          lastReferencedAt: sourceMessageCreatedAt,
           confidence: candidate.confidence,
         });
         inserted += 1;

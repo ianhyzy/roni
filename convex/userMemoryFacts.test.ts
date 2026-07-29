@@ -31,6 +31,7 @@ describe("userMemoryFacts", () => {
     const first = await t.mutation(internal.userMemoryFacts.persistExtractedFacts, {
       userId,
       sourceMessageId: "message-1",
+      sourceMessageCreatedAt: 1,
       facts: [
         {
           category: "exercise_preference",
@@ -43,6 +44,7 @@ describe("userMemoryFacts", () => {
     const second = await t.mutation(internal.userMemoryFacts.persistExtractedFacts, {
       userId,
       sourceMessageId: "message-2",
+      sourceMessageCreatedAt: 2,
       facts: [
         {
           category: "exercise_preference",
@@ -71,6 +73,7 @@ describe("userMemoryFacts", () => {
     const result = await t.mutation(internal.userMemoryFacts.persistExtractedFacts, {
       userId,
       sourceMessageId: "message-1",
+      sourceMessageCreatedAt: 1,
       facts: [
         {
           category: "schedule_preference",
@@ -167,6 +170,7 @@ describe("userMemoryFacts", () => {
     await t.mutation(internal.userMemoryFacts.persistExtractedFacts, {
       userId,
       sourceMessageId: "message-new",
+      sourceMessageCreatedAt: 100,
       facts: [
         {
           category: "workout_style_preference",

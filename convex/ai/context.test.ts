@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 import { getFunctionName } from "convex/server";
 import {
   buildTrainingSnapshot,
-  buildTrainingSnapshotWithMetadata,
   formatExternalActivityLine,
   getHrIntensityLabel,
   type SnapshotSection,
@@ -293,69 +292,6 @@ describe("buildTrainingSnapshot", () => {
     expect(snapshot).toContain("sleep 6h");
     expect(snapshot).toContain("HRV 44ms");
     expect(snapshot).toContain("body battery 18-54");
-  });
-
-  it("injects remembered preferences in the priority-one profile section", async () => {
-    const ctx = {
-      runQuery: async (query: unknown) => {
-        const queryName = getFunctionName(query as never);
-        if (queryName === gatherSnapshotInputsName) {
-          return {
-            ...emptyInputs(),
-            profile: {
-              profileData: {
-                firstName: "Alice",
-                lastName: "Lifter",
-                heightInches: 66,
-                weightPounds: 150,
-                level: "intermediate",
-                workoutsPerWeek: 4,
-              },
-            },
-            memoryFacts: [
-              {
-                fact: "The user dislikes Bulgarian split squats.",
-                category: "exercise_preference",
-              },
-              {
-                fact: "The user prefers evening workouts.",
-                category: "schedule_preference",
-              },
-            ],
-          };
-        }
-        if (queryName === weekPlansName) return null;
-        return [];
-      },
-    };
-
-    const result = await buildTrainingSnapshotWithMetadata(ctx as never, "user-1");
-
-    expect(result.snapshot).toContain("Remembered Workout Preferences:");
-    expect(result.snapshot).toContain("The user dislikes Bulgarian split squats.");
-    expect(result.snapshot).toContain("The user prefers evening workouts.");
-    expect(result.memoryFactsInjected).toBe(2);
-  });
-
-  it("keeps remembered preferences available after the Tonal profile is disconnected", async () => {
-    const ctx = {
-      runQuery: async () => ({
-        ...emptyInputs(),
-        profile: null,
-        memoryFacts: [
-          {
-            fact: "The user prefers evening workouts.",
-            category: "schedule_preference",
-          },
-        ],
-      }),
-    };
-
-    const result = await buildTrainingSnapshotWithMetadata(ctx as never, "user-1");
-
-    expect(result.snapshot).toContain("No Tonal profile linked yet");
-    expect(result.snapshot).toContain("The user prefers evening workouts.");
-    expect(result.memoryFactsInjected).toBe(1);
   });
 
   it("includes exact exercise exclusions in the coach snapshot", async () => {

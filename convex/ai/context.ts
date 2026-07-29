@@ -26,6 +26,8 @@ export interface BuiltTrainingSnapshot {
   memoryFactsInjected: number;
 }
 
+const MEMORY_FACTS_HEADING = "Remembered Workout Preferences:";
+
 export async function buildTrainingSnapshotWithMetadata(
   ctx: Pick<ActionCtx, "runQuery">,
   userId: string,
@@ -43,6 +45,9 @@ export async function buildTrainingSnapshotWithMetadata(
   const inputs: SnapshotInputs = await ctx.runQuery(internal.coachState.gatherSnapshotInputs, {
     userId: convexUserId,
   });
+  if (inputs.deletionInProgress) {
+    return { snapshot: "Account deletion is in progress.", memoryFactsInjected: 0 };
+  }
   const memoryFacts = inputs.memoryFacts ?? [];
 
   const profile = inputs.profile;
@@ -53,7 +58,7 @@ export async function buildTrainingSnapshotWithMetadata(
       snapshot: [
         "No Tonal profile linked yet. Ask the user to connect their Tonal account.",
         ...(rememberedPreferences.length > 0
-          ? ["Remembered Workout Preferences:", ...rememberedPreferences]
+          ? [MEMORY_FACTS_HEADING, ...rememberedPreferences]
           : []),
       ].join("\n"),
       memoryFactsInjected: memoryFacts.length,
@@ -73,6 +78,13 @@ export async function buildTrainingSnapshotWithMetadata(
     garminWellness,
   } = inputs;
   const sections: SnapshotSection[] = [];
+
+  if (memoryFacts.length > 0) {
+    sections.push({
+      priority: 0,
+      lines: [MEMORY_FACTS_HEADING, ...memoryFacts.map((memoryFact) => `  ${memoryFact.fact}`)],
+    });
+  }
 
   // Priority 1: User profile + onboarding + preferences
   const profileLines: string[] = [];
@@ -100,12 +112,6 @@ export async function buildTrainingSnapshotWithMetadata(
     profileLines.push(
       `Preferences: ${splitNames[trainingPrefs.preferredSplit] ?? trainingPrefs.preferredSplit} | ${trainingPrefs.sessionDurationMinutes}min | ${days}`,
     );
-  }
-  if (memoryFacts.length > 0) {
-    profileLines.push("Remembered Workout Preferences:");
-    for (const memoryFact of memoryFacts) {
-      profileLines.push(`  ${memoryFact.fact}`);
-    }
   }
   sections.push({ priority: 1, lines: profileLines });
 
@@ -374,9 +380,10 @@ export async function buildTrainingSnapshotWithMetadata(
     // Missed session detection is non-critical; continue without it
   }
 
+  const snapshot = trimSnapshot(sections, SNAPSHOT_MAX_CHARS);
   return {
-    snapshot: trimSnapshot(sections, SNAPSHOT_MAX_CHARS),
-    memoryFactsInjected: memoryFacts.length,
+    snapshot,
+    memoryFactsInjected: snapshot.includes(MEMORY_FACTS_HEADING) ? memoryFacts.length : 0,
   };
 }
 

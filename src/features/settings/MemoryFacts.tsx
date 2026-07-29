@@ -38,6 +38,7 @@ export function MemoryFacts() {
   const [confirmationFactId, setConfirmationFactId] = useState<MemoryFact["id"] | null>(null);
   const [pendingFactId, setPendingFactId] = useState<MemoryFact["id"] | null>(null);
   const [removalErrorFactId, setRemovalErrorFactId] = useState<MemoryFact["id"] | null>(null);
+  const hasPendingRemoval = pendingFactId !== null;
 
   async function handleRemove(factId: MemoryFact["id"]) {
     setPendingFactId(factId);
@@ -51,13 +52,13 @@ export function MemoryFacts() {
         return;
       }
 
-      setConfirmationFactId(null);
+      setConfirmationFactId((currentFactId) => (currentFactId === factId ? null : currentFactId));
       toast.success("Memory removed");
     } catch {
       setRemovalErrorFactId(factId);
       toast.error(REMOVE_ERROR_MESSAGE);
     } finally {
-      setPendingFactId(null);
+      setPendingFactId((currentFactId) => (currentFactId === factId ? null : currentFactId));
     }
   }
 
@@ -105,7 +106,7 @@ export function MemoryFacts() {
                   <Dialog
                     open={confirmationFactId === fact.id}
                     onOpenChange={(open) => {
-                      if (!open && isPending) return;
+                      if (hasPendingRemoval) return;
                       setRemovalErrorFactId(null);
                       setConfirmationFactId(open ? fact.id : null);
                     }}
@@ -117,7 +118,7 @@ export function MemoryFacts() {
                           size="sm"
                           className="min-h-11 min-w-11 shrink-0 text-muted-foreground hover:text-destructive sm:min-h-7 sm:min-w-0"
                           aria-label={`Forget memory: ${fact.fact}`}
-                          disabled={isPending}
+                          disabled={hasPendingRemoval}
                         />
                       }
                     >
@@ -128,7 +129,7 @@ export function MemoryFacts() {
                       )}
                       <span className="hidden sm:inline">Forget</span>
                     </DialogTrigger>
-                    <DialogContent showCloseButton={!isPending}>
+                    <DialogContent showCloseButton={!hasPendingRemoval}>
                       <DialogHeader>
                         <DialogTitle>Forget this memory?</DialogTitle>
                         <DialogDescription>
@@ -149,7 +150,7 @@ export function MemoryFacts() {
                             <Button
                               variant="outline"
                               className="min-h-11 sm:min-h-8"
-                              disabled={isPending}
+                              disabled={hasPendingRemoval}
                             />
                           }
                         >
@@ -158,7 +159,7 @@ export function MemoryFacts() {
                         <Button
                           variant="destructive"
                           className="min-h-11 sm:min-h-8"
-                          disabled={isPending}
+                          disabled={hasPendingRemoval}
                           onClick={() => handleRemove(fact.id)}
                         >
                           {isPending ? (
