@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ActionCtx } from "../_generated/server";
-import { cachedFetch, fetchWorkoutMetaBatch } from "./proxy";
+import { cachedFetch, cachedFetchWithMetadata, fetchWorkoutMetaBatch } from "./proxy";
 import { MAX_CACHE_VALUE_BYTES } from "./proxyCacheLimits";
 
 type CacheRow = {
@@ -68,6 +68,24 @@ afterEach(() => {
 });
 
 describe("cachedFetch", () => {
+  it("returns metadata tied to the exact cached snapshot", async () => {
+    const { ctx, cache } = makeMockCtx();
+    const cached = [{ id: "cached" }];
+    cache.set(makeCacheKey(undefined, "metadata-test"), {
+      data: cached,
+      fetchedAt: 123,
+      expiresAt: Date.now() + 60_000,
+    });
+
+    const result = await cachedFetchWithMetadata(ctx, {
+      dataType: "metadata-test",
+      ttl: 60_000,
+      fetcher: vi.fn(),
+    });
+
+    expect(result).toEqual({ data: cached, fetchedAt: 123 });
+  });
+
   it("serves stale cached data when the fetcher throws and overwrites nothing", async () => {
     const { ctx, cache, runMutation } = makeMockCtx();
     const stale = [{ id: "old" }];

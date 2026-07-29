@@ -12,7 +12,7 @@ import type { Id } from "../_generated/dataModel";
 import { fetchRecentWorkoutActivities, fetchWorkoutActivitiesPage, tonalFetch } from "./client";
 import { retryOn5xx } from "./mutations";
 import { CACHE_TTLS, WORKOUT_HISTORY_CACHE_TYPE } from "./cache";
-import { cachedFetch, fetchWorkoutMetaBatch, toActivity } from "./proxy";
+import { cachedFetch, cachedFetchWithMetadata, fetchWorkoutMetaBatch, toActivity } from "./proxy";
 import { TonalSessionExpiredError, withTokenRetry } from "./tokenRetry";
 import type { Activity, WorkoutActivityDetail } from "./types";
 import type { WorkoutMeta } from "./workoutMeta";
@@ -112,40 +112,59 @@ async function enrichWorkoutActivities(
   );
 }
 
+export interface WorkoutHistorySnapshot {
+  activities: Activity[];
+  sourceFetchedAt?: number;
+}
+
+async function fetchRecentHistorySnapshot(
+  ctx: ActionCtx,
+  userId: Id<"users">,
+): Promise<WorkoutHistorySnapshot> {
+  try {
+    return await withTokenRetry(ctx, userId, async (token, tonalUserId) => {
+      const snapshot = await cachedFetchWithMetadata<Activity[]>(ctx, {
+        userId,
+        dataType: WORKOUT_HISTORY_CACHE_TYPE,
+        ttl: CACHE_TTLS.workoutHistory,
+        fetcher: async () => {
+          const items = await fetchRecentWorkoutActivities<WorkoutActivityDetail>(
+            token,
+            tonalUserId,
+            WORKOUT_HISTORY_PAGE_LIMIT,
+          );
+          return enrichWorkoutActivities(
+            ctx,
+            userId,
+            token,
+            tonalUserId,
+            items,
+            0,
+            WORKOUT_HISTORY_PAGE_LIMIT,
+          );
+        },
+      });
+      return { activities: snapshot.data, sourceFetchedAt: snapshot.fetchedAt };
+    });
+  } catch (e) {
+    if (e instanceof TonalSessionExpiredError) return { activities: [] };
+    throw e;
+  }
+}
+
+/** Fetch recent workout history plus the timestamp of that exact source snapshot. */
+export const fetchWorkoutHistorySnapshot = internalAction({
+  args: { userId: v.id("users") },
+  handler: async (ctx, { userId }): Promise<WorkoutHistorySnapshot> =>
+    fetchRecentHistorySnapshot(ctx, userId),
+});
+
 /** Fetch recent workout history (newest 200). Used by incremental sync. */
 export const fetchWorkoutHistory = internalAction({
   args: { userId: v.id("users"), limit: v.optional(v.number()) },
   handler: async (ctx, { userId, limit }): Promise<Activity[]> => {
-    try {
-      const activities = await withTokenRetry(ctx, userId, async (token, tonalUserId) => {
-        const fetched = await cachedFetch<Activity[]>(ctx, {
-          userId,
-          dataType: WORKOUT_HISTORY_CACHE_TYPE,
-          ttl: CACHE_TTLS.workoutHistory,
-          fetcher: async () => {
-            const items = await fetchRecentWorkoutActivities<WorkoutActivityDetail>(
-              token,
-              tonalUserId,
-              WORKOUT_HISTORY_PAGE_LIMIT,
-            );
-            return enrichWorkoutActivities(
-              ctx,
-              userId,
-              token,
-              tonalUserId,
-              items,
-              0,
-              WORKOUT_HISTORY_PAGE_LIMIT,
-            );
-          },
-        });
-        return limit != null ? fetched.slice(0, limit) : fetched;
-      });
-      return activities;
-    } catch (e) {
-      if (e instanceof TonalSessionExpiredError) return [];
-      throw e;
-    }
+    const snapshot = await fetchRecentHistorySnapshot(ctx, userId);
+    return limit === undefined ? snapshot.activities : snapshot.activities.slice(0, limit);
   },
 });
 
@@ -155,6 +174,7 @@ interface PageResult {
   activities: Activity[];
   pageSize: number;
   pgTotal: number;
+  sourceFetchedAt: number;
 }
 
 /** Fetch one page of workout history at the given offset. Cached by userId+offset
@@ -166,8 +186,8 @@ interface PageResult {
 export const fetchWorkoutHistoryPage = internalAction({
   args: { userId: v.id("users"), offset: v.number() },
   handler: async (ctx, { userId, offset }): Promise<PageResult> =>
-    withTokenRetry(ctx, userId, async (token, tonalUserId) =>
-      cachedFetch<PageResult>(ctx, {
+    withTokenRetry(ctx, userId, async (token, tonalUserId) => {
+      const snapshot = await cachedFetchWithMetadata<Omit<PageResult, "sourceFetchedAt">>(ctx, {
         userId,
         dataType: `workoutPage_v2:${offset}`,
         ttl: CACHE_TTLS.workoutHistory,
@@ -189,8 +209,9 @@ export const fetchWorkoutHistoryPage = internalAction({
           );
           return { activities, pageSize: items.length, pgTotal };
         },
-      }),
-    ),
+      });
+      return { ...snapshot.data, sourceFetchedAt: snapshot.fetchedAt };
+    }),
 });
 
 /** Activities for activation eligibility check (separate cache key from fetchWorkoutHistory). */

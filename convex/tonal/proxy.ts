@@ -65,25 +65,40 @@ interface CachedFetchOptions<T> {
   shouldCache?: (data: T) => boolean;
 }
 
+export interface CachedFetchResult<T> {
+  data: T;
+  fetchedAt: number;
+}
+
 /** Generic cache-check-then-fetch helper with stale-while-revalidate. */
 export async function cachedFetch<T>(
   ctx: ActionCtx,
   opts: Omit<CachedFetchOptions<T>, "ctx">,
 ): Promise<T> {
+  return (await cachedFetchWithMetadata(ctx, opts)).data;
+}
+
+/** Same cache contract, with the timestamp tied to the exact returned snapshot. */
+export async function cachedFetchWithMetadata<T>(
+  ctx: ActionCtx,
+  opts: Omit<CachedFetchOptions<T>, "ctx">,
+): Promise<CachedFetchResult<T>> {
   const memo = getCachedFetchMemo(ctx);
   const memoKey = `${opts.userId ?? "global"}:${opts.dataType}`;
   const inflight = memo.get(memoKey);
-  if (inflight) return inflight as Promise<T>;
+  if (inflight) return inflight as Promise<CachedFetchResult<T>>;
 
-  const promise = doCachedFetch<T>({ ctx, ...opts });
+  const promise = doCachedFetchWithMetadata<T>({ ctx, ...opts });
   promise.catch(() => memo.delete(memoKey));
   memo.set(memoKey, promise);
   return promise;
 }
 
-async function doCachedFetch<T>(opts: CachedFetchOptions<T>): Promise<T> {
+async function doCachedFetchWithMetadata<T>(
+  opts: CachedFetchOptions<T>,
+): Promise<CachedFetchResult<T>> {
   const { ctx, userId, dataType, ttl, fetcher, shouldCache } = opts;
-  let cached: { data: unknown; expiresAt: number } | null = null;
+  let cached: { data: unknown; fetchedAt: number; expiresAt: number } | null = null;
   try {
     cached = await ctx.runQuery(internal.tonal.cache.getCacheEntry, { userId, dataType });
   } catch (readErr) {
@@ -95,7 +110,7 @@ async function doCachedFetch<T>(opts: CachedFetchOptions<T>): Promise<T> {
   }
 
   if (cached && cached.expiresAt > Date.now()) {
-    return cached.data as T;
+    return { data: cached.data as T, fetchedAt: cached.fetchedAt };
   }
 
   try {
@@ -128,7 +143,7 @@ async function doCachedFetch<T>(opts: CachedFetchOptions<T>): Promise<T> {
       }
     }
 
-    return data;
+    return { data, fetchedAt: now };
   } catch (error) {
     // Never swallow auth errors -- the user must reconnect
     if (error instanceof TonalApiError && error.status === 401) throw error;
@@ -136,7 +151,7 @@ async function doCachedFetch<T>(opts: CachedFetchOptions<T>): Promise<T> {
 
     if (cached) {
       console.warn(`cachedFetch(${dataType}): refresh failed, serving stale data`, error);
-      return cached.data as T;
+      return { data: cached.data as T, fetchedAt: cached.fetchedAt };
     }
     throw error;
   }

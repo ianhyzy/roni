@@ -6,6 +6,7 @@ import {
   fetchWorkoutHistory,
   fetchWorkoutHistoryForEligibility,
   fetchWorkoutHistoryPage,
+  fetchWorkoutHistorySnapshot,
 } from "./workoutHistoryProxy";
 import type { Activity } from "./types";
 
@@ -15,10 +16,19 @@ const NOW = 1_800_000_000_000;
 
 type EligibilityHandler = (ctx: ActionCtx, args: { userId: Id<"users"> }) => Promise<Activity[]>;
 type RecentHistoryHandler = EligibilityHandler;
+type SnapshotHandler = (
+  ctx: ActionCtx,
+  args: { userId: Id<"users"> },
+) => Promise<{ activities: Activity[]; sourceFetchedAt?: number }>;
 type PageHandler = (
   ctx: ActionCtx,
   args: { userId: Id<"users">; offset: number },
-) => Promise<{ activities: Activity[]; pageSize: number; pgTotal: number }>;
+) => Promise<{
+  activities: Activity[];
+  pageSize: number;
+  pgTotal: number;
+  sourceFetchedAt: number;
+}>;
 
 interface CacheRow {
   data: unknown;
@@ -31,6 +41,11 @@ const handler = (fetchWorkoutHistoryForEligibility as unknown as { _handler: Eli
 const recentHistoryHandler = (
   fetchWorkoutHistory as unknown as {
     _handler: RecentHistoryHandler;
+  }
+)._handler;
+const snapshotHandler = (
+  fetchWorkoutHistorySnapshot as unknown as {
+    _handler: SnapshotHandler;
   }
 )._handler;
 const pageHandler = (fetchWorkoutHistoryPage as unknown as { _handler: PageHandler })._handler;
@@ -101,6 +116,27 @@ describe("fetchWorkoutHistoryForEligibility", () => {
 });
 
 describe("workout history cache versioning", () => {
+  it("returns the timestamp attached to the exact recent-history snapshot", async () => {
+    process.env.TOKEN_ENCRYPTION_KEY = TEST_ENCRYPTION_KEY;
+    const profile = {
+      tonalToken: await encrypt("access-token", TEST_ENCRYPTION_KEY),
+      tonalUserId: "tonal-user",
+    };
+    const cachedActivities = [{ activityId: "cached" }] as Activity[];
+    const cache = new Map<string, CacheRow>([
+      [
+        "workoutHistory_v4",
+        { data: cachedActivities, fetchedAt: NOW - 1_000, expiresAt: NOW + 300_000 },
+      ],
+    ]);
+    vi.useFakeTimers();
+    vi.setSystemTime(NOW);
+
+    const result = await snapshotHandler(makeCtx(profile, cache), { userId: TEST_USER_ID });
+
+    expect(result).toEqual({ activities: cachedActivities, sourceFetchedAt: NOW - 1_000 });
+  });
+
   it("ignores a fresh recent-history entry created by the old pagination logic", async () => {
     process.env.TOKEN_ENCRYPTION_KEY = TEST_ENCRYPTION_KEY;
     const profile = {
@@ -155,7 +191,12 @@ describe("workout history cache versioning", () => {
       offset: 200,
     });
 
-    expect(result).toEqual({ activities: [], pageSize: 0, pgTotal: 200 });
+    expect(result).toEqual({
+      activities: [],
+      pageSize: 0,
+      pgTotal: 200,
+      sourceFetchedAt: NOW,
+    });
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(cache.has("workoutPage_v2:200")).toBe(true);
   });

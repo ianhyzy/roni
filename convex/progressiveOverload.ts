@@ -12,6 +12,8 @@ import { TonalApiError } from "./tonal/client";
 import { TonalSessionExpiredError } from "./tonal/tokenRetry";
 import type { Activity, Movement, SetActivity, WorkoutActivityDetail } from "./tonal/types";
 import { generatePerformanceSummary } from "./coach/prDetection";
+import type { WorkoutPerformanceSummary } from "./coach/prDetection";
+import { WORKOUT_PERFORMANCE_ACTIVITY_LIMIT, type WorkoutPerformanceProjectionResult } from "./prs";
 
 const WEIGHT_STEP_LBS = 2.5;
 const PLATEAU_THRESHOLD_LBS = 2;
@@ -217,11 +219,17 @@ export const getPerMovementHistory = internalAction({
 
 export const getWorkoutPerformanceSummary = internalAction({
   args: { userId: v.id("users") },
-  handler: async (ctx, { userId }) => {
+  handler: async (ctx, { userId }): Promise<WorkoutPerformanceSummary> => {
+    const projection: WorkoutPerformanceProjectionResult = await ctx.runQuery(
+      internal.prs.getWorkoutPerformanceProjection,
+      { userId },
+    );
+    if (projection.status === "ready") return projection.summary;
+
     // 1. Get per-movement history
     const historyEntries = await ctx.runAction(internal.progressiveOverload.getPerMovementHistory, {
       userId,
-      maxActivities: 20,
+      maxActivities: WORKOUT_PERFORMANCE_ACTIVITY_LIMIT,
     });
 
     // 2. Get movement names from movements table
@@ -248,7 +256,7 @@ export const getLastTimeAndSuggested = action({
 
     const historyEntries: PerMovementHistoryEntry[] = await ctx.runAction(
       internal.progressiveOverload.getPerMovementHistory,
-      { userId, maxActivities: 20 },
+      { userId, maxActivities: WORKOUT_PERFORMANCE_ACTIVITY_LIMIT },
     );
     const perMovement = new Map<string, MovementSessionSnapshot[]>(
       historyEntries.map((e: PerMovementHistoryEntry) => [e.movementId, e.sessions]),

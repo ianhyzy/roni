@@ -14,9 +14,11 @@ import * as analytics from "../lib/posthog";
 import { workflow } from "../workflows";
 import {
   maybeRefreshProfile,
+  newestActivityDate,
   syncActivitiesAndStrength,
   syncStrengthOnly,
 } from "./historySyncCore";
+import type { WorkoutHistorySnapshot } from "./workoutHistoryProxy";
 import { computeNextSyncAt, isEligibleForRefresh } from "./cacheRefreshTiering";
 import { isoDateUtc, shouldSkipBackgroundSync } from "./historySyncPreflight";
 
@@ -56,16 +58,20 @@ export const doFetchAndPersistNewActivities = internalAction({
     totalFetched: number;
     newestDate: string | undefined;
   }> => {
-    const activities: Activity[] = await ctx.runAction(
-      internal.tonal.workoutHistoryProxy.fetchWorkoutHistory,
+    const snapshot = (await ctx.runAction(
+      internal.tonal.workoutHistoryProxy.fetchWorkoutHistorySnapshot,
       { userId },
-    );
-    if (activities.length === 0) {
-      return { synced: 0, totalFetched: 0, newestDate: undefined };
-    }
-
+    )) as WorkoutHistorySnapshot;
+    const { activities, sourceFetchedAt } = snapshot;
+    if (activities.length === 0) return { synced: 0, totalFetched: 0, newestDate: undefined };
     const result = await syncActivitiesAndStrength(ctx, userId, activities);
-    const newestDate = activities[activities.length - 1].activityTime.slice(0, 10);
+    if (sourceFetchedAt !== undefined) {
+      await ctx.runMutation(
+        internal.workoutPerformanceProjectionFreshness.markProjectionSourceVerified,
+        { userId, sourceFetchedAt },
+      );
+    }
+    const newestDate = newestActivityDate(activities);
     return { synced: result.synced, totalFetched: activities.length, newestDate };
   },
 });
@@ -103,18 +109,31 @@ export const doBackfillPage = internalAction({
     pageSize: number;
     pgTotal: number;
     newestDate: string | undefined;
+    sourceFetchedAt: number;
   }> => {
-    const { activities, pageSize, pgTotal } = (await ctx.runAction(
+    const { activities, pageSize, pgTotal, sourceFetchedAt } = (await ctx.runAction(
       internal.tonal.workoutHistoryProxy.fetchWorkoutHistoryPage,
       { userId, offset: pgOffset },
-    )) as { activities: Activity[]; pageSize: number; pgTotal: number };
+    )) as {
+      activities: Activity[];
+      pageSize: number;
+      pgTotal: number;
+      sourceFetchedAt: number;
+    };
 
     if (activities.length === 0) {
-      return { synced: 0, remaining: 0, pageSize, pgTotal, newestDate: undefined };
+      return {
+        synced: 0,
+        remaining: 0,
+        pageSize,
+        pgTotal,
+        newestDate: undefined,
+        sourceFetchedAt,
+      };
     }
 
     const result = await syncActivitiesAndStrength(ctx, userId, activities, BACKFILL_BATCH_SIZE);
-    const newestDate = activities[activities.length - 1].activityTime.slice(0, 10);
+    const newestDate = newestActivityDate(activities);
 
     return {
       synced: result.synced,
@@ -122,6 +141,7 @@ export const doBackfillPage = internalAction({
       pageSize,
       pgTotal,
       newestDate,
+      sourceFetchedAt,
     };
   },
 });
@@ -185,6 +205,7 @@ export const backfillUserHistoryWorkflow = workflow.define({
     let bestDate: string | undefined;
     let iterations = 0;
     let maxIterations = MIN_BACKFILL_ITERATIONS;
+    let verifiedSourceFetchedAt: number | undefined;
 
     while (true) {
       if (++iterations > maxIterations) {
@@ -204,7 +225,13 @@ export const backfillUserHistoryWorkflow = workflow.define({
         Math.ceil(page.pgTotal / BACKFILL_BATCH_SIZE) * ITERATION_SAFETY_FACTOR,
       );
 
-      if (page.newestDate) bestDate = page.newestDate;
+      if (page.newestDate && (bestDate === undefined || page.newestDate > bestDate)) {
+        bestDate = page.newestDate;
+      }
+      verifiedSourceFetchedAt =
+        verifiedSourceFetchedAt === undefined
+          ? page.sourceFetchedAt
+          : Math.min(verifiedSourceFetchedAt, page.sourceFetchedAt);
 
       if (page.remaining > 0) continue;
 
@@ -228,6 +255,13 @@ export const backfillUserHistoryWorkflow = workflow.define({
       userId,
       syncStatus: "complete",
     });
+
+    if (verifiedSourceFetchedAt !== undefined) {
+      await step.runMutation(
+        internal.workoutPerformanceProjectionFreshness.markProjectionSourceVerified,
+        { userId, sourceFetchedAt: verifiedSourceFetchedAt },
+      );
+    }
 
     await step.runAction(internal.tonal.historySync.doCaptureEvent, {
       userId,

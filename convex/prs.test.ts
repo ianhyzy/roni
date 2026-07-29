@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { buildHistoryFromRows, buildRecentPRSummary, isoDateDaysAgo, type PerfRow } from "./prs";
 
-// ---------------------------------------------------------------------------
-// Test data builders
-// ---------------------------------------------------------------------------
-
 let rowCounter = 0;
 
 function row(
@@ -22,10 +18,6 @@ const names = new Map([
   ["squat", "Squat"],
   ["curl", "Bicep Curl"],
 ]);
-
-// ---------------------------------------------------------------------------
-// isoDateDaysAgo
-// ---------------------------------------------------------------------------
 
 describe("isoDateDaysAgo", () => {
   it("returns YYYY-MM-DD N days before the given date", () => {

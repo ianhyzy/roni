@@ -34,6 +34,21 @@ const PROFILE_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000;
 // mutation within those limits. See historySyncCore.test.ts.
 const PERSIST_CHUNK_SIZE = 50;
 
+/** Date of the activity with the latest valid timestamp, independent of API ordering. */
+export function newestActivityDate(
+  activities: readonly Pick<Activity, "activityTime">[],
+): string | undefined {
+  let newest: { timestamp: number; date: string } | undefined;
+  for (const activity of activities) {
+    const timestamp = Date.parse(activity.activityTime);
+    if (!Number.isFinite(timestamp) || (newest !== undefined && timestamp <= newest.timestamp)) {
+      continue;
+    }
+    newest = { timestamp, date: activity.activityTime.slice(0, 10) };
+  }
+  return newest?.date;
+}
+
 /** Split an array into fixed-size chunks. The final chunk may be smaller. */
 function chunk<T>(items: readonly T[], size: number): T[][] {
   if (size <= 0) throw new Error("chunk size must be positive");
@@ -76,6 +91,7 @@ function activityToWorkoutPayload(activity: Activity): WorkoutPayload {
   return {
     activityId,
     date,
+    activityTime,
     title: p.workoutTitle,
     targetArea: p.targetArea,
     totalVolume: p.totalVolume,

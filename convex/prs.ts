@@ -1,7 +1,10 @@
-import { query } from "./_generated/server";
+import { v } from "convex/values";
+import { internalQuery, query } from "./_generated/server";
 import { getEffectiveUserId } from "./lib/auth";
 import { generatePerformanceSummary } from "./coach/prDetection";
+import type { WorkoutPerformanceSummary } from "./coach/prDetection";
 import type { PerMovementHistoryEntry } from "./progressiveOverload";
+import { CACHE_TTLS } from "./tonal/cache";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -30,12 +33,47 @@ export interface RecentPRSummary {
   totalMovementsTracked: number;
 }
 
-/**
- * Days of recent exercisePerformance history fed into the recent-trend
- * analyzer. Covers ~4 months of training, which is longer than every window
- * `generatePerformanceSummary` currently looks at.
- */
+/** Covers every recent-trend window used by `generatePerformanceSummary`. */
 const RECENT_WINDOW_DAYS = 120;
+export const WORKOUT_PERFORMANCE_ACTIVITY_LIMIT = 20;
+const WORKOUT_PERFORMANCE_CANDIDATE_LIMIT = WORKOUT_PERFORMANCE_ACTIVITY_LIMIT + 1;
+export const WORKOUT_PERFORMANCE_PER_ACTIVITY_ROW_LIMIT = 200;
+export const WORKOUT_PERFORMANCE_PROJECTION_ROW_LIMIT = 1_000;
+export const WORKOUT_PERFORMANCE_PROJECTION_MOVEMENT_LIMIT = 200;
+
+export type WorkoutPerformanceProjectionResult =
+  | { status: "ready"; summary: WorkoutPerformanceSummary }
+  | { status: "miss" }
+  | { status: "limit_exceeded" };
+
+interface ProjectionWorkout {
+  date: string;
+  activityTime?: string;
+}
+
+function orderProjectionWorkouts<T extends ProjectionWorkout>(workouts: readonly T[]): T[] | null {
+  const datesWithMultipleWorkouts = new Set<string>();
+  for (let index = 1; index < workouts.length; index++) {
+    if (workouts[index - 1].date === workouts[index].date) {
+      datesWithMultipleWorkouts.add(workouts[index].date);
+    }
+  }
+  if (
+    workouts.some(
+      (workout) =>
+        datesWithMultipleWorkouts.has(workout.date) &&
+        (workout.activityTime === undefined || !Number.isFinite(Date.parse(workout.activityTime))),
+    )
+  ) {
+    return null;
+  }
+  return [...workouts].sort(
+    (left, right) =>
+      right.date.localeCompare(left.date) ||
+      (right.activityTime === undefined ? 0 : Date.parse(right.activityTime)) -
+        (left.activityTime === undefined ? 0 : Date.parse(left.activityTime)),
+  );
+}
 
 // ---------------------------------------------------------------------------
 // Pure helpers (exported for testing)
@@ -106,6 +144,90 @@ export function isoDateDaysAgo(now: Date, daysAgo: number): string {
   const cutoff = new Date(now.getTime() - daysAgo * 24 * 60 * 60 * 1000);
   return cutoff.toISOString().slice(0, 10);
 }
+
+export const getWorkoutPerformanceProjection = internalQuery({
+  args: { userId: v.id("users") },
+  handler: async (ctx, { userId }): Promise<WorkoutPerformanceProjectionResult> => {
+    const candidates = await ctx.db
+      .query("completedWorkouts")
+      .withIndex("by_userId_date", (q) => q.eq("userId", userId))
+      .order("desc")
+      .take(WORKOUT_PERFORMANCE_CANDIDATE_LIMIT);
+
+    const orderedCandidates = orderProjectionWorkouts(candidates);
+    if (
+      orderedCandidates === null ||
+      (orderedCandidates.length > WORKOUT_PERFORMANCE_ACTIVITY_LIMIT &&
+        orderedCandidates[WORKOUT_PERFORMANCE_ACTIVITY_LIMIT - 1].date ===
+          orderedCandidates[WORKOUT_PERFORMANCE_ACTIVITY_LIMIT].date)
+    ) {
+      return { status: "miss" };
+    }
+    const workouts = orderedCandidates.slice(0, WORKOUT_PERFORMANCE_ACTIVITY_LIMIT);
+    const profile = await ctx.db
+      .query("userProfiles")
+      .withIndex("by_userId", (q) => q.eq("userId", userId))
+      .unique();
+    const cacheAge = Date.now() - (profile?.workoutProjectionSourceFetchedAt ?? 0);
+
+    if (
+      workouts.length === 0 ||
+      cacheAge < 0 ||
+      cacheAge >= CACHE_TTLS.workoutHistory ||
+      profile?.lastSyncedActivityDate !== workouts[0].date ||
+      workouts.some((workout) => workout.performanceSyncComplete !== true)
+    ) {
+      return { status: "miss" };
+    }
+
+    const rowsByActivity = await Promise.all(
+      workouts.map((workout) =>
+        ctx.db
+          .query("exercisePerformance")
+          .withIndex("by_userId_activityId_movementId", (q) =>
+            q.eq("userId", userId).eq("activityId", workout.activityId),
+          )
+          .take(WORKOUT_PERFORMANCE_PER_ACTIVITY_ROW_LIMIT + 1),
+      ),
+    );
+    if (rowsByActivity.some((rows) => rows.length > WORKOUT_PERFORMANCE_PER_ACTIVITY_ROW_LIMIT)) {
+      return { status: "limit_exceeded" };
+    }
+
+    const rows = rowsByActivity.flat();
+
+    if (rows.length > WORKOUT_PERFORMANCE_PROJECTION_ROW_LIMIT) {
+      return { status: "limit_exceeded" };
+    }
+    const weightedRows = rows.filter(
+      (row) => row.avgWeightLbs !== undefined && row.avgWeightLbs > 0,
+    );
+    if (weightedRows.length === 0) return { status: "miss" };
+
+    const movementIds = [...new Set(weightedRows.map((row) => row.movementId))];
+    if (movementIds.length > WORKOUT_PERFORMANCE_PROJECTION_MOVEMENT_LIMIT) {
+      return { status: "limit_exceeded" };
+    }
+    const movementDocs = await Promise.all(
+      movementIds.map((movementId) =>
+        ctx.db
+          .query("movements")
+          .withIndex("by_tonalId", (q) => q.eq("tonalId", movementId))
+          .unique(),
+      ),
+    );
+    const nameMap = new Map(
+      movementDocs.flatMap((movement) =>
+        movement === null ? [] : [[movement.tonalId, movement.name] as const],
+      ),
+    );
+
+    return {
+      status: "ready",
+      summary: generatePerformanceSummary(buildHistoryFromRows(weightedRows), nameMap),
+    };
+  },
+});
 
 // ---------------------------------------------------------------------------
 // getAllTimePRs — one indexed scan of the personalRecords projection.

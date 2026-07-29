@@ -183,6 +183,7 @@ import type * as weekPlans from "../weekPlans.js";
 import type * as workflows from "../workflows.js";
 import type * as workoutDetail from "../workoutDetail.js";
 import type * as workoutFeedback from "../workoutFeedback.js";
+import type * as workoutPerformanceProjectionFreshness from "../workoutPerformanceProjectionFreshness.js";
 import type * as workoutPlans from "../workoutPlans.js";
 
 import type {
@@ -367,6 +368,7 @@ declare const fullApi: ApiFromModules<{
   workflows: typeof workflows;
   workoutDetail: typeof workoutDetail;
   workoutFeedback: typeof workoutFeedback;
+  workoutPerformanceProjectionFreshness: typeof workoutPerformanceProjectionFreshness;
   workoutPlans: typeof workoutPlans;
 }>;
 

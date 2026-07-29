@@ -3,7 +3,7 @@ import { convexTest } from "convex-test";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { internal } from "../_generated/api";
 import schema from "../schema";
-import { buildVolumeByMovement } from "./historySyncCore";
+import { buildVolumeByMovement, newestActivityDate } from "./historySyncCore";
 import {
   TIER_INTERVAL_SLACK_MS,
   TIER_INTERVALS_MS,
@@ -43,6 +43,31 @@ describe("buildVolumeByMovement", () => {
 
     expect(volumes.get("movement-1")).toBe(1200);
     expect(volumes.get("movement-2")).toBe(800);
+  });
+});
+
+describe("newestActivityDate", () => {
+  test("selects the newest actual instant from newest-first history", () => {
+    expect(
+      newestActivityDate([
+        { activityTime: "2026-04-30T08:30:00Z" },
+        { activityTime: "2026-04-30T09:00:00+02:00" },
+      ]),
+    ).toBe("2026-04-30");
+  });
+
+  test("selects the newest date when history arrives out of order", () => {
+    expect(
+      newestActivityDate([
+        { activityTime: "2026-04-28T12:00:00Z" },
+        { activityTime: "2026-04-30T12:00:00Z" },
+        { activityTime: "2026-04-29T12:00:00Z" },
+      ]),
+    ).toBe("2026-04-30");
+  });
+
+  test("ignores invalid activity timestamps", () => {
+    expect(newestActivityDate([{ activityTime: "invalid" }])).toBeUndefined();
   });
 });
 

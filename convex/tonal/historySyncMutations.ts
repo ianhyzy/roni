@@ -24,6 +24,7 @@ import { DEFAULT_TARGET_AREA, DEFAULT_WORKOUT_TITLE } from "./workoutMeta";
 export const workoutValidator = v.object({
   activityId: v.string(),
   date: v.string(),
+  activityTime: v.optional(v.string()),
   title: v.string(),
   targetArea: v.string(),
   totalVolume: v.number(),
@@ -85,13 +86,12 @@ function isUsefulTitle(title: string): boolean {
 }
 
 function buildMetadataPatch(existing: Doc<"completedWorkouts">, next: WorkoutPayload) {
-  const patch: {
-    title?: string;
-    targetArea?: string;
-    workoutType?: string;
-    tonalWorkoutId?: string;
-  } = {};
+  const patch: Partial<
+    Pick<WorkoutPayload, "activityTime" | "title" | "targetArea" | "workoutType" | "tonalWorkoutId">
+  > = {};
 
+  if (next.activityTime && existing.activityTime !== next.activityTime)
+    patch.activityTime = next.activityTime;
   if (isUsefulTitle(next.title) && existing.title !== next.title) {
     patch.title = next.title;
   }
@@ -147,9 +147,10 @@ export const persistCompletedWorkouts = internalMutation({
         )
         .first();
       if (exists) {
-        if (exists.performanceSyncComplete !== true) {
+        const metadataPatch = buildMetadataPatch(exists, w);
+        if (exists.performanceSyncComplete !== true || Object.keys(metadataPatch).length > 0) {
           await ctx.db.patch(exists._id, {
-            ...buildMetadataPatch(exists, w),
+            ...metadataPatch,
             performanceSyncComplete: true,
             syncedAt: Date.now(),
           });

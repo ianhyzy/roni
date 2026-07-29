@@ -7,8 +7,10 @@ import type { ActionCtx } from "./_generated/server";
 import {
   aggregateDetailToSessions,
   getPerMovementHistory,
+  getWorkoutPerformanceSummary,
   type PerMovementHistoryEntry,
 } from "./progressiveOverload";
+import type { WorkoutPerformanceSummary } from "./coach/prDetection";
 import schema from "./schema";
 import { TonalSessionExpiredError } from "./tonal/tokenRetry";
 import type { WorkoutActivityDetail } from "./tonal/types";
@@ -22,6 +24,15 @@ type GetPerMovementHistoryHandler = (
 
 const getPerMovementHistoryHandler = (
   getPerMovementHistory as unknown as { _handler: GetPerMovementHistoryHandler }
+)._handler;
+
+type GetWorkoutPerformanceSummaryHandler = (
+  ctx: ActionCtx,
+  args: { userId: Id<"users"> },
+) => Promise<WorkoutPerformanceSummary>;
+
+const getWorkoutPerformanceSummaryHandler = (
+  getWorkoutPerformanceSummary as unknown as { _handler: GetWorkoutPerformanceSummaryHandler }
 )._handler;
 
 function makeDetail(overrides: Partial<WorkoutActivityDetail> = {}): WorkoutActivityDetail {
@@ -279,4 +290,67 @@ describe("getPerMovementHistory Tonal API resilience", () => {
     ).rejects.toBeInstanceOf(TonalSessionExpiredError);
     expect(ctx.runAction).toHaveBeenCalledTimes(2);
   });
+});
+
+describe("getWorkoutPerformanceSummary projection", () => {
+  it("returns the stored projection without fetching live workout history", async () => {
+    const summary: WorkoutPerformanceSummary = {
+      prs: [],
+      plateaus: [],
+      regressions: [],
+      steadyProgressionCount: 2,
+    };
+    const ctx = {
+      runQuery: vi.fn().mockResolvedValue({ status: "ready", summary }),
+      runAction: vi.fn(),
+    } as unknown as ActionCtx;
+
+    const result = await getWorkoutPerformanceSummaryHandler(ctx, {
+      userId: "test-user-123" as Id<"users">,
+    });
+
+    expect(result).toEqual(summary);
+    expect(ctx.runQuery).toHaveBeenCalledWith(internal.prs.getWorkoutPerformanceProjection, {
+      userId: "test-user-123",
+    });
+    expect(ctx.runAction).not.toHaveBeenCalled();
+  });
+
+  it.each(["miss", "limit_exceeded"] as const)(
+    "uses the existing live Tonal path when the projection returns %s",
+    async (status) => {
+      const history: PerMovementHistoryEntry[] = [
+        {
+          movementId: "bench",
+          sessions: [
+            {
+              sessionDate: "2026-04-15",
+              sets: 3,
+              totalReps: 30,
+              repsPerSet: 10,
+              avgWeightLbs: 100,
+            },
+            { sessionDate: "2026-04-10", sets: 3, totalReps: 30, repsPerSet: 10, avgWeightLbs: 90 },
+          ],
+        },
+      ];
+      const ctx = {
+        runQuery: vi
+          .fn()
+          .mockResolvedValueOnce({ status })
+          .mockResolvedValueOnce([{ id: "bench", name: "Bench Press" }]),
+        runAction: vi.fn().mockResolvedValue(history),
+      } as unknown as ActionCtx;
+
+      const result = await getWorkoutPerformanceSummaryHandler(ctx, {
+        userId: "test-user-123" as Id<"users">,
+      });
+
+      expect(result.prs).toMatchObject([{ movementName: "Bench Press", newWeightLbs: 100 }]);
+      expect(ctx.runAction).toHaveBeenCalledWith(
+        internal.progressiveOverload.getPerMovementHistory,
+        { userId: "test-user-123", maxActivities: 20 },
+      );
+    },
+  );
 });

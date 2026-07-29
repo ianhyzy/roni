@@ -56,6 +56,8 @@ export default defineSchema({
     nextTonalSyncAt: v.optional(v.number()),
     /** Last time the workoutHistory cache was written for this user. */
     workoutHistoryCachedAt: v.optional(v.number()),
+    /** Source-cache timestamp verified only after performance projection persistence succeeds. */
+    workoutProjectionSourceFetchedAt: v.optional(v.number()),
     /** When the user first connected their Tonal account (signup for activation analytics). */
     tonalConnectedAt: v.optional(v.number()),
     /** ISO date of the most recent synced activity (high-water mark for incremental sync). */
@@ -628,6 +630,8 @@ export default defineSchema({
     userId: v.id("users"),
     activityId: v.string(),
     date: v.string(),
+    /** Full Tonal activity timestamp; optional while legacy date-only rows age out. */
+    activityTime: v.optional(v.string()),
     title: v.string(),
     targetArea: v.string(),
     totalVolume: v.number(),
