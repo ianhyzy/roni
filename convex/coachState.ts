@@ -5,6 +5,7 @@ import { GARMIN_WELLNESS_SNAPSHOT_ROW_LIMIT } from "./ai/garminWellnessSnapshot"
 import { MAX_EXCLUDED_EXERCISES } from "./exerciseExclusions";
 import { isDeletionInProgress } from "./lib/auth";
 import { MAX_RECENT_WELLNESS_DAILY_ROWS } from "./garmin/wellnessDaily";
+import { MAX_INJECTED_MEMORY_FACTS } from "./userMemoryFacts";
 
 // Limits mirror the per-source internal queries that gatherSnapshotInputs
 // replaces. Keeping them here avoids cross-file drift when snapshot rendering
@@ -32,6 +33,7 @@ export interface SnapshotInputs {
   exerciseExclusions: ReadonlyArray<Doc<"exerciseExclusions">>;
   externalActivities: ReadonlyArray<Doc<"externalActivities">>;
   garminWellness: ReadonlyArray<Doc<"garminWellnessDaily">>;
+  memoryFacts?: ReadonlyArray<Doc<"userMemoryFacts">>;
 }
 
 /**
@@ -76,6 +78,7 @@ export const gatherSnapshotInputs = internalQuery({
       exerciseExclusions,
       externalActivities,
       garminWellness,
+      memoryFacts,
     ] = await Promise.all([
       safe<Doc<"currentStrengthScores">[]>(
         () =>
@@ -154,6 +157,16 @@ export const gatherSnapshotInputs = internalQuery({
         [],
         "garminWellness",
       ),
+      safe<Doc<"userMemoryFacts">[]>(
+        () =>
+          ctx.db
+            .query("userMemoryFacts")
+            .withIndex("by_userId_confidence_lastReferencedAt", (q) => q.eq("userId", userId))
+            .order("desc")
+            .take(MAX_INJECTED_MEMORY_FACTS),
+        [],
+        "memoryFacts",
+      ),
     ]);
 
     return {
@@ -168,6 +181,7 @@ export const gatherSnapshotInputs = internalQuery({
       exerciseExclusions,
       externalActivities,
       garminWellness,
+      memoryFacts,
     };
   },
 });

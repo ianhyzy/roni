@@ -166,6 +166,25 @@ export default defineSchema({
     .index("by_userId_movementId", ["userId", "movementId"])
     .index("by_userId_createdAt", ["userId", "createdAt"]),
 
+  /** Explicit durable workout preferences extracted from user-authored chat turns. */
+  userMemoryFacts: defineTable({
+    userId: v.id("users"),
+    fact: v.string(),
+    category: v.union(
+      v.literal("exercise_preference"),
+      v.literal("schedule_preference"),
+      v.literal("workout_style_preference"),
+    ),
+    dedupeKey: v.string(),
+    sourceMessageId: v.string(),
+    createdAt: v.number(),
+    lastReferencedAt: v.number(),
+    confidence: v.number(),
+  })
+    .index("by_userId_createdAt", ["userId", "createdAt"])
+    .index("by_userId_category_dedupeKey", ["userId", "category", "dedupeKey"])
+    .index("by_userId_confidence_lastReferencedAt", ["userId", "confidence", "lastReferencedAt"]),
+
   /** In-app check-ins (proactive messages). No SMS. */
   checkIns: defineTable({
     userId: v.id("users"),
@@ -600,6 +619,7 @@ export default defineSchema({
     retrievalEnabled: v.optional(v.boolean()),
     searchHits: v.optional(v.number()),
     searchUsed: v.optional(v.boolean()),
+    memoryFactsInjected: v.optional(v.number()),
 
     approvalPauses: v.number(),
     workoutPlanCreatedId: v.optional(v.id("workoutPlans")),

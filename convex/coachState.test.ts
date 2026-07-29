@@ -204,6 +204,30 @@ describe("gatherSnapshotInputs", () => {
     expect(inputs.garminWellness[0].calendarDate).toBe("2026-04-23");
   });
 
+  test("returns only the eight highest-ranked remembered preferences", async () => {
+    const t = convexTest(schema, modules);
+    const userId = await createUser(t);
+    await t.run(async (ctx) => {
+      for (let index = 0; index < 9; index += 1) {
+        await ctx.db.insert("userMemoryFacts", {
+          userId,
+          fact: `Preference ${index}`,
+          category: "workout_style_preference",
+          dedupeKey: `preference-${index}`,
+          sourceMessageId: `message-${index}`,
+          createdAt: index,
+          lastReferencedAt: index,
+          confidence: 0.9 + index / 100,
+        });
+      }
+    });
+
+    const inputs = await t.query(internal.coachState.gatherSnapshotInputs, { userId });
+
+    expect(inputs.memoryFacts).toHaveLength(8);
+    expect(inputs.memoryFacts?.map((fact) => fact.dedupeKey)).not.toContain("preference-0");
+  });
+
   test("returns empty arrays and nulls for sub-domains the user has no data in", async () => {
     const t = convexTest(schema, modules);
     const userId = await createUser(t);
@@ -242,6 +266,7 @@ describe("gatherSnapshotInputs", () => {
     expect(inputs.exerciseExclusions).toEqual([]);
     expect(inputs.externalActivities).toEqual([]);
     expect(inputs.garminWellness).toEqual([]);
+    expect(inputs.memoryFacts).toEqual([]);
   });
 
   test("returns null profile for users with deletion in progress", async () => {

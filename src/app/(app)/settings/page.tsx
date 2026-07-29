@@ -23,6 +23,7 @@ import { ChangePassword } from "@/features/settings/ChangePassword";
 import { EmailChange } from "@/features/settings/EmailChange";
 import { EquipmentSettings } from "@/features/settings/EquipmentSettings";
 import { ExerciseExclusions } from "@/features/settings/ExerciseExclusions";
+import { MemoryFacts } from "@/features/settings/MemoryFacts";
 import { DataExport } from "@/features/settings/DataExport";
 import { DeleteAccount } from "@/features/settings/DeleteAccount";
 import { ProfileCard } from "@/features/settings/ProfileCard";
@@ -184,6 +185,12 @@ function SettingsPageInner() {
       <section className="mb-10" id="check-ins">
         <h2 className={SECTION_HEADING}>Check-in Preferences</h2>
         <CheckInPreferences />
+      </section>
+
+      {/* Coach Memory */}
+      <section className="mb-10" id="coach-memory">
+        <h2 className={SECTION_HEADING}>Coach Memory</h2>
+        <MemoryFacts />
       </section>
 
       {/* AI Provider */}

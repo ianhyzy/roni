@@ -44,5 +44,7 @@ describe("getTrainingSnapshotForChat", () => {
     expect(second.source).toBe("live_rebuild");
     expect(first.snapshot).toContain("No Tonal profile linked yet");
     expect(second.snapshot).toContain("No Tonal profile linked yet");
+    expect(first.memoryFactsInjected).toBe(0);
+    expect(second.memoryFactsInjected).toBe(0);
   });
 });

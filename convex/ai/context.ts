@@ -21,11 +21,16 @@ import { formatGarminWellnessLines } from "./garminWellnessSnapshot";
 // Re-export for backward compatibility (tests, other consumers)
 export { type SnapshotSection, trimSnapshot, getHrIntensityLabel, formatExternalActivityLine };
 
-export async function buildTrainingSnapshot(
+export interface BuiltTrainingSnapshot {
+  snapshot: string;
+  memoryFactsInjected: number;
+}
+
+export async function buildTrainingSnapshotWithMetadata(
   ctx: Pick<ActionCtx, "runQuery">,
   userId: string,
   userTimezone?: string,
-): Promise<string> {
+): Promise<BuiltTrainingSnapshot> {
   const convexUserId = userId as Id<"users">;
 
   // Single internalQuery replaces the prior 10-runQuery fan-out. See
@@ -38,11 +43,21 @@ export async function buildTrainingSnapshot(
   const inputs: SnapshotInputs = await ctx.runQuery(internal.coachState.gatherSnapshotInputs, {
     userId: convexUserId,
   });
+  const memoryFacts = inputs.memoryFacts ?? [];
 
   const profile = inputs.profile;
   const pd = profile?.profileData;
   if (!profile || !pd) {
-    return "No Tonal profile linked yet. Ask the user to connect their Tonal account.";
+    const rememberedPreferences = memoryFacts.map((memoryFact) => `  ${memoryFact.fact}`);
+    return {
+      snapshot: [
+        "No Tonal profile linked yet. Ask the user to connect their Tonal account.",
+        ...(rememberedPreferences.length > 0
+          ? ["Remembered Workout Preferences:", ...rememberedPreferences]
+          : []),
+      ].join("\n"),
+      memoryFactsInjected: memoryFacts.length,
+    };
   }
 
   const {
@@ -85,6 +100,12 @@ export async function buildTrainingSnapshot(
     profileLines.push(
       `Preferences: ${splitNames[trainingPrefs.preferredSplit] ?? trainingPrefs.preferredSplit} | ${trainingPrefs.sessionDurationMinutes}min | ${days}`,
     );
+  }
+  if (memoryFacts.length > 0) {
+    profileLines.push("Remembered Workout Preferences:");
+    for (const memoryFact of memoryFacts) {
+      profileLines.push(`  ${memoryFact.fact}`);
+    }
   }
   sections.push({ priority: 1, lines: profileLines });
 
@@ -353,5 +374,16 @@ export async function buildTrainingSnapshot(
     // Missed session detection is non-critical; continue without it
   }
 
-  return trimSnapshot(sections, SNAPSHOT_MAX_CHARS);
+  return {
+    snapshot: trimSnapshot(sections, SNAPSHOT_MAX_CHARS),
+    memoryFactsInjected: memoryFacts.length,
+  };
+}
+
+export async function buildTrainingSnapshot(
+  ctx: Pick<ActionCtx, "runQuery">,
+  userId: string,
+  userTimezone?: string,
+): Promise<string> {
+  return (await buildTrainingSnapshotWithMetadata(ctx, userId, userTimezone)).snapshot;
 }

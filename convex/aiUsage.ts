@@ -70,6 +70,7 @@ const aiRunArgs = {
   retrievalEnabled: v.optional(v.boolean()),
   searchHits: v.optional(v.number()),
   searchUsed: v.optional(v.boolean()),
+  memoryFactsInjected: v.optional(v.number()),
   approvalPauses: v.number(),
   workoutPlanCreatedId: v.optional(v.id("workoutPlans")),
   workoutPushOutcome: v.optional(

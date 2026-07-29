@@ -32,6 +32,8 @@ import type * as ai_evalHarness from "../ai/evalHarness.js";
 import type * as ai_evalScenarios from "../ai/evalScenarios.js";
 import type * as ai_garminWellnessSnapshot from "../ai/garminWellnessSnapshot.js";
 import type * as ai_helpers from "../ai/helpers.js";
+import type * as ai_memoryFactExtraction from "../ai/memoryFactExtraction.js";
+import type * as ai_memoryFactTelemetry from "../ai/memoryFactTelemetry.js";
 import type * as ai_otel from "../ai/otel.js";
 import type * as ai_programWeekTool from "../ai/programWeekTool.js";
 import type * as ai_promptSections from "../ai/promptSections.js";
@@ -178,6 +180,7 @@ import type * as tonal_workoutHistoryProxy from "../tonal/workoutHistoryProxy.js
 import type * as tonal_workoutMeta from "../tonal/workoutMeta.js";
 import type * as userActivity from "../userActivity.js";
 import type * as userData from "../userData.js";
+import type * as userMemoryFacts from "../userMemoryFacts.js";
 import type * as userProfileActivity from "../userProfileActivity.js";
 import type * as userProfiles from "../userProfiles.js";
 import type * as users from "../users.js";
@@ -224,6 +227,8 @@ declare const fullApi: ApiFromModules<{
   "ai/evalScenarios": typeof ai_evalScenarios;
   "ai/garminWellnessSnapshot": typeof ai_garminWellnessSnapshot;
   "ai/helpers": typeof ai_helpers;
+  "ai/memoryFactExtraction": typeof ai_memoryFactExtraction;
+  "ai/memoryFactTelemetry": typeof ai_memoryFactTelemetry;
   "ai/otel": typeof ai_otel;
   "ai/programWeekTool": typeof ai_programWeekTool;
   "ai/promptSections": typeof ai_promptSections;
@@ -370,6 +375,7 @@ declare const fullApi: ApiFromModules<{
   "tonal/workoutMeta": typeof tonal_workoutMeta;
   userActivity: typeof userActivity;
   userData: typeof userData;
+  userMemoryFacts: typeof userMemoryFacts;
   userProfileActivity: typeof userProfileActivity;
   userProfiles: typeof userProfiles;
   users: typeof users;

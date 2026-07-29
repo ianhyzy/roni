@@ -30,6 +30,7 @@ type SpecializedTable =
   | "goals"
   | "aiUsage"
   | "aiRun"
+  | "userMemoryFacts"
   | "completedWorkouts";
 
 type Seeder = (
@@ -113,6 +114,18 @@ const SEEDERS: Record<SpecializedTable, Seeder> = {
       cacheWriteTokens: 0,
       approvalPauses: 0,
       createdAt: Date.now(),
+    });
+  },
+  userMemoryFacts: async (ctx, userId, marker) => {
+    await ctx.db.insert("userMemoryFacts", {
+      userId,
+      fact: `Preference ${marker}`,
+      category: "workout_style_preference",
+      dedupeKey: `preference-${marker}`,
+      sourceMessageId: `message-${marker}`,
+      createdAt: Date.now(),
+      lastReferencedAt: Date.now(),
+      confidence: 0.9,
     });
   },
   completedWorkouts: async (ctx, userId, marker) => {

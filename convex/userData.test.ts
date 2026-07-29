@@ -190,4 +190,37 @@ describe("USER_DATA_TABLES", () => {
 
     expect(data.exerciseExclusions).toHaveLength(101);
   });
+
+  test("collectUserData exports memory facts without source or dedupe metadata", async () => {
+    const t = convexTest(schema, modules);
+    const userId = await t.run(async (ctx) => {
+      const id = await ctx.db.insert("users", {});
+      await ctx.db.insert("userMemoryFacts", {
+        userId: id,
+        fact: "The user prefers evening workouts.",
+        category: "schedule_preference",
+        dedupeKey: "evening-workouts",
+        sourceMessageId: "message-1",
+        createdAt: 100,
+        lastReferencedAt: 200,
+        confidence: 0.95,
+      });
+      return id;
+    });
+
+    const data = await t.query(internal.dataExport.collectUserData, { userId });
+
+    expect(data.memoryFacts).toEqual([
+      {
+        fact: "The user prefers evening workouts.",
+        category: "schedule_preference",
+        confidence: 0.95,
+        createdAt: 100,
+        lastReferencedAt: 200,
+      },
+    ]);
+    expect(data.memoryFacts[0]).not.toHaveProperty("dedupeKey");
+    expect(data.memoryFacts[0]).not.toHaveProperty("sourceMessageId");
+    expect(data.memoryFacts[0]).not.toHaveProperty("userId");
+  });
 });

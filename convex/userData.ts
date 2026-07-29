@@ -15,6 +15,7 @@ export const USER_DATA_TABLES = [
     delete: "byUserIdBatch",
     jsonExportKey: "exerciseExclusions",
   },
+  { table: "userMemoryFacts", delete: "byUserIdBatch", jsonExportKey: "memoryFacts" },
   { table: "emailChangeRequests", delete: "byUserIdBatch", jsonExportKey: null },
   { table: "aiUsage", delete: "byUserIdBatch", jsonExportKey: null },
   { table: "aiBudgetWarnings", delete: "byUserIdBatch", jsonExportKey: null },

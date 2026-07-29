@@ -85,6 +85,13 @@ interface ExportedData extends Record<JsonExportSectionKey | "exportedAt" | "use
     muscleGroups: string[];
     createdAt: number;
   }[];
+  memoryFacts: {
+    fact: string;
+    category: string;
+    confidence: number;
+    createdAt: number;
+    lastReferencedAt: number;
+  }[];
   garminWorkoutDeliveries: GarminWorkoutDeliveryExportRow[];
   garminWellnessDaily: GarminWellnessDailyExportRow[];
 }
@@ -240,6 +247,12 @@ export const collectUserData = internalQuery({
       .order("desc")
       .collect();
 
+    const memoryFacts = await ctx.db
+      .query("userMemoryFacts")
+      .withIndex("by_userId_createdAt", (q) => q.eq("userId", userId))
+      .order("desc")
+      .collect();
+
     const garminWellnessDaily = await ctx.db
       .query("garminWellnessDaily")
       .withIndex("by_userId_calendarDate", (q) => q.eq("userId", userId))
@@ -362,6 +375,13 @@ export const collectUserData = internalQuery({
         movementName: exclusion.movementName,
         muscleGroups: exclusion.muscleGroups,
         createdAt: exclusion.createdAt,
+      })),
+      memoryFacts: memoryFacts.map((memoryFact) => ({
+        fact: memoryFact.fact,
+        category: memoryFact.category,
+        confidence: memoryFact.confidence,
+        createdAt: memoryFact.createdAt,
+        lastReferencedAt: memoryFact.lastReferencedAt,
       })),
       garminWorkoutDeliveries: garminWorkoutDeliveries.map(garminWorkoutDeliveryToExportRow),
       garminWellnessDaily: garminWellnessDaily.map(garminWellnessDailyToExportRow),

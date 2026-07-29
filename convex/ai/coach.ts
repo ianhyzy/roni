@@ -65,6 +65,7 @@ export interface CoachContextTiming {
   snapshotSource?: TrainingSnapshotSource;
   searchHits?: number;
   searchUsed?: boolean;
+  memoryFactsInjected?: number;
 }
 
 export function shouldUseCrossThreadSearch(prompt: string, hasImages: boolean = false): boolean {
@@ -209,6 +210,7 @@ export function makeCoachAgentConfig(options: CoachAgentConfigOptions = {}) {
       if (timing) {
         timing.snapshotBuildMs = (timing.snapshotBuildMs ?? 0) + snapshotResult.snapshotBuildMs;
         timing.snapshotSource ??= snapshotResult.source;
+        timing.memoryFactsInjected = snapshotResult.memoryFactsInjected;
       }
       const snapshotSystem: ModelMessage = {
         role: "system",

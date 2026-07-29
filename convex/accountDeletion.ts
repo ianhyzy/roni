@@ -75,6 +75,13 @@ async function takeBatchForDeletion(
           .withIndex("by_userId_createdAt", (q) => q.eq("userId", userId))
           .take(BATCH_SIZE)
       ).map((d) => d._id);
+    case "userMemoryFacts":
+      return (
+        await ctx.db
+          .query("userMemoryFacts")
+          .withIndex("by_userId_createdAt", (q) => q.eq("userId", userId))
+          .take(BATCH_SIZE)
+      ).map((d) => d._id);
     case "completedWorkouts":
       return (
         await ctx.db

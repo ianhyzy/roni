@@ -31,6 +31,7 @@ import {
 } from "./chatHelpers";
 import { getWeekStartDateString } from "./weekPlanHelpers";
 import { resolveRuntimeEnvironment } from "./lib/env";
+import { shouldScheduleMemoryExtraction } from "./ai/memoryFactExtraction";
 
 const ENVIRONMENT = resolveRuntimeEnvironment({
   roniEnvironment: process.env.RONI_ENVIRONMENT,
@@ -287,6 +288,18 @@ export const processMessage = internalAction({
       return;
     } finally {
       if (accumulator) await persistRun(ctx, accumulator);
+    }
+
+    if (shouldScheduleMemoryExtraction(prompt)) {
+      try {
+        await ctx.scheduler.runAfter(0, internal.ai.memoryFactExtraction.extractFromTurn, {
+          userId,
+          threadId,
+          promptMessageId: messageId,
+        });
+      } catch {
+        console.warn("[memoryFactExtraction] scheduling_failed");
+      }
     }
 
     analytics.capture(userId, "coach_response_received", {

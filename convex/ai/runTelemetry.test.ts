@@ -301,6 +301,7 @@ describe("RunAccumulator", () => {
       snapshotSource: "live_rebuild",
       searchHits: 0,
       searchUsed: false,
+      memoryFactsInjected: 3,
     });
     acc.markFirstChunk(903_250);
     acc.markFinished(904_000);
@@ -319,6 +320,7 @@ describe("RunAccumulator", () => {
     expect(row.snapshotSource).toBe("live_rebuild");
     expect(row.searchHits).toBe(0);
     expect(row.searchUsed).toBe(false);
+    expect(row.memoryFactsInjected).toBe(3);
   });
 
   it("uses the latest completed context build's search metrics", () => {

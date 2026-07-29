@@ -52,6 +52,7 @@ const USER_TABLE_BATCH_SAFETY_INDEXES = {
   currentStrengthScores: "by_userId",
   emailChangeRequests: "by_userId",
   exerciseExclusions: "by_userId",
+  userMemoryFacts: "by_userId_createdAt",
   goals: "by_userId_status",
   garminConnections: "by_userId",
   garminOauthStates: "by_userId",
