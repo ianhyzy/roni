@@ -9,7 +9,7 @@
 import { v } from "convex/values";
 import { internalAction, internalMutation, internalQuery } from "../_generated/server";
 import { internal } from "../_generated/api";
-import { tonalFetch } from "./client";
+import { TonalApiError, tonalFetch } from "./client";
 import { withTokenRetry } from "./tokenRetry";
 import { ACCESSORY_MAP } from "./accessories";
 import type { Movement } from "./types";
@@ -191,18 +191,22 @@ export const backfillThumbnails = internalAction({
     let stored = 0;
     let failed = 0;
 
-    await withTokenRetry(ctx, tokenUser.userId, async (token: string) => {
-      for (const doc of docs) {
+    for (const doc of docs) {
+      const didStore = await withTokenRetry(ctx, tokenUser.userId, async (token: string) => {
         try {
           const res = await fetch(`https://api.tonal.com/v6/assets/${doc.imageAssetId}`, {
             headers: { Authorization: `Bearer ${token}` },
             signal: AbortSignal.timeout(10_000),
           });
 
+          if (res.status === 401) {
+            const body = await res.text().catch(() => "Unauthorized");
+            throw new TonalApiError(401, body);
+          }
+
           if (!res.ok) {
             console.warn(`[movementSync] Asset fetch ${doc.imageAssetId} returned ${res.status}`);
-            failed++;
-            continue;
+            return false;
           }
 
           const blob = await res.blob();
@@ -211,13 +215,17 @@ export const backfillThumbnails = internalAction({
             id: doc._id,
             storageId,
           });
-          stored++;
+          return true;
         } catch (e) {
+          if (e instanceof TonalApiError && e.status === 401) throw e;
           console.warn(`[movementSync] Failed to fetch asset ${doc.imageAssetId}:`, e);
-          failed++;
+          return false;
         }
-      }
-    });
+      });
+
+      if (didStore) stored++;
+      else failed++;
+    }
 
     console.log(
       `[movementSync] Thumbnail backfill: ${stored} stored, ${failed} failed, ${docs.length - stored - failed} skipped`,

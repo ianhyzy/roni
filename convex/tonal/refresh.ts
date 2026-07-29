@@ -2,6 +2,7 @@ import { v } from "convex/values";
 import { internalAction } from "../_generated/server";
 import { internal } from "../_generated/api";
 import type { Id } from "../_generated/dataModel";
+import { WORKOUT_HISTORY_CACHE_TYPE } from "./cache";
 import { toUserProfileData } from "./profileData";
 import type { TonalUser } from "./types";
 
@@ -14,6 +15,7 @@ export const TONAL_REFRESH_CACHE_KEYS = [
   "strengthDistribution",
   "strengthHistory",
   "muscleReadiness",
+  WORKOUT_HISTORY_CACHE_TYPE,
   "workoutHistory_v3",
   "workoutHistory:1",
   "workoutHistory:20",

@@ -10,7 +10,7 @@ import { listMessages } from "@convex-dev/agent";
 // ---------------------------------------------------------------------------
 
 // Each tonalCache row can hold up to ~1 MiB (Convex doc size cap). Heavy users
-// accumulate 15+ entries (workoutPage:N backfill pages, workoutHistory_v3,
+// accumulate 15+ entries (workoutPage_v2:N backfill pages, workoutHistory_v4,
 // strengthHistory, customWorkouts, ...). A page size of 10 keeps per-call
 // bytes-read comfortably under Convex's 16 MiB function limit.
 const CACHE_PAGE_SIZE = 10;

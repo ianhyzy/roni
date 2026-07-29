@@ -1,6 +1,7 @@
 /// <reference types="vite/client" />
 import { convexTest } from "convex-test";
-import { describe, expect, test } from "vitest";
+import { type FunctionReference, getFunctionName } from "convex/server";
+import { describe, expect, test, vi } from "vitest";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { getRetryPushCompletion } from "./workoutPlans";
@@ -134,4 +135,95 @@ describe("getRecentMovementIds", () => {
     expect(recentMovementIds).toContain("pushed-1");
     expect(recentMovementIds).toContain("pushed-2");
   });
+});
+
+test("retry push workflow keeps a successful push when cache eviction fails", async () => {
+  type TestFunctionReference = FunctionReference<
+    "query" | "mutation" | "action",
+    "public" | "internal"
+  >;
+  type RetryPushHandler = (
+    step: {
+      runAction: (ref: unknown, args: Record<string, unknown>) => Promise<{ id: string }>;
+      runMutation: (ref: unknown, args: Record<string, unknown>) => Promise<void>;
+    },
+    args: {
+      planId: Id<"workoutPlans">;
+      userId: Id<"users">;
+      title: string;
+      blocks: Array<{ exercises: Array<{ movementId: string; sets: number }> }>;
+    },
+  ) => Promise<{ status: "pushed"; workoutId: string }>;
+
+  vi.resetModules();
+  vi.doMock("./workflows", () => ({
+    workflow: {
+      define: (definition: { handler: unknown }) => ({ _handler: definition.handler }),
+      start: vi.fn(),
+    },
+  }));
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-07-28T12:00:00Z"));
+
+  try {
+    const { retryPushWorkflow } = await import("./workoutPlans");
+    const handler = (retryPushWorkflow as unknown as { _handler: RetryPushHandler })._handler;
+    const runAction = vi.fn(async (_ref: unknown, _args: Record<string, unknown>) => ({
+      id: "tonal-workout",
+    }));
+    const runMutation = vi.fn(async (_ref: unknown, _args: Record<string, unknown>) => undefined);
+    const planId = "plan-id" as Id<"workoutPlans">;
+    const userId = "user-id" as Id<"users">;
+
+    const result = await handler(
+      { runAction, runMutation },
+      {
+        planId,
+        userId,
+        title: "Push Day",
+        blocks: [{ exercises: [{ movementId: "movement-id", sets: 3 }] }],
+      },
+    );
+
+    expect(result).toEqual({ status: "pushed", workoutId: "tonal-workout" });
+    expect(
+      runMutation.mock.calls.map(([ref]) => getFunctionName(ref as TestFunctionReference)),
+    ).toEqual(["workoutPlans:updatePushOutcome", "tonal/cache:deleteCacheEntryByType"]);
+    expect(runMutation.mock.calls[1]?.[1]).toEqual({
+      userId,
+      dataType: "customWorkouts",
+    });
+
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const failingRunMutation = vi.fn(
+      async (ref: unknown, _args: Record<string, unknown>): Promise<void> => {
+        if (
+          getFunctionName(ref as TestFunctionReference) === "tonal/cache:deleteCacheEntryByType"
+        ) {
+          throw new Error("Cache unavailable");
+        }
+      },
+    );
+
+    const resultWithCacheFailure = await handler(
+      { runAction, runMutation: failingRunMutation },
+      {
+        planId,
+        userId,
+        title: "Push Day",
+        blocks: [{ exercises: [{ movementId: "movement-id", sets: 3 }] }],
+      },
+    );
+
+    expect(resultWithCacheFailure).toEqual({ status: "pushed", workoutId: "tonal-workout" });
+    expect(consoleError).toHaveBeenCalledWith(
+      "[retryPushWorkflow] Custom workout cache eviction failed",
+      expect.objectContaining({ message: "Cache unavailable" }),
+    );
+  } finally {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    vi.doUnmock("./workflows");
+    vi.resetModules();
+  }
 });

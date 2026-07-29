@@ -11,7 +11,7 @@ import { internalAction } from "../_generated/server";
 import type { Id } from "../_generated/dataModel";
 import { fetchRecentWorkoutActivities, fetchWorkoutActivitiesPage, tonalFetch } from "./client";
 import { retryOn5xx } from "./mutations";
-import { CACHE_TTLS } from "./cache";
+import { CACHE_TTLS, WORKOUT_HISTORY_CACHE_TYPE } from "./cache";
 import { cachedFetch, fetchWorkoutMetaBatch, toActivity } from "./proxy";
 import { TonalSessionExpiredError, withTokenRetry } from "./tokenRetry";
 import type { Activity, WorkoutActivityDetail } from "./types";
@@ -120,7 +120,7 @@ export const fetchWorkoutHistory = internalAction({
       const activities = await withTokenRetry(ctx, userId, async (token, tonalUserId) => {
         const fetched = await cachedFetch<Activity[]>(ctx, {
           userId,
-          dataType: "workoutHistory_v3",
+          dataType: WORKOUT_HISTORY_CACHE_TYPE,
           ttl: CACHE_TTLS.workoutHistory,
           fetcher: async () => {
             const items = await fetchRecentWorkoutActivities<WorkoutActivityDetail>(
@@ -169,7 +169,7 @@ export const fetchWorkoutHistoryPage = internalAction({
     withTokenRetry(ctx, userId, async (token, tonalUserId) =>
       cachedFetch<PageResult>(ctx, {
         userId,
-        dataType: `workoutPage:${offset}`,
+        dataType: `workoutPage_v2:${offset}`,
         ttl: CACHE_TTLS.workoutHistory,
         fetcher: async () => {
           const { items, pgTotal } = await fetchWorkoutActivitiesPage<WorkoutActivityDetail>(
@@ -202,7 +202,7 @@ export const fetchWorkoutHistoryForEligibility = internalAction({
         cachedFetch<Activity[]>(ctx, {
           userId,
           dataType: "workoutHistoryEligibility",
-          ttl: 60 * 5,
+          ttl: 5 * 60 * 1000,
           fetcher: () =>
             retryOn5xx(() =>
               tonalFetch<Activity[]>(token, `/v6/users/${tonalUserId}/activities?limit=100`),

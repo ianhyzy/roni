@@ -88,8 +88,17 @@ export async function decryptToken(encrypted: string, encryptionKey: string): Pr
  */
 function parseJwtExpiry(jwt: string): number {
   try {
-    const payload = JSON.parse(atob(jwt.split(".")[1]));
-    if (payload.exp) {
+    const encodedPayload = jwt.split(".")[1];
+    if (!encodedPayload) throw new Error("JWT payload is missing");
+    const base64 = encodedPayload.replace(/-/g, "+").replace(/_/g, "/");
+    const payload: unknown = JSON.parse(atob(base64.padEnd(Math.ceil(base64.length / 4) * 4, "=")));
+    if (
+      typeof payload === "object" &&
+      payload !== null &&
+      "exp" in payload &&
+      typeof payload.exp === "number" &&
+      Number.isFinite(payload.exp)
+    ) {
       return payload.exp * 1000;
     }
   } catch {

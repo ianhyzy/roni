@@ -1,11 +1,10 @@
 import { v } from "convex/values";
-import { internalAction } from "../_generated/server";
+import { type ActionCtx, internalAction } from "../_generated/server";
 import { internal } from "../_generated/api";
 import { rateLimiter } from "../rateLimits";
 import type { Id } from "../_generated/dataModel";
 import { TonalApiError, tonalFetch } from "./client";
-import type { BlockInput } from "./transforms";
-import { buildTonalWorkoutSets } from "./transforms";
+import { type BlockInput, buildTonalWorkoutSets } from "./transforms";
 import { validateWorkoutBlocks } from "./validation";
 import type { WorkoutEstimate, WorkoutSetInput } from "./types";
 import { WORKOUT_SOURCE } from "../workoutPlans";
@@ -108,7 +107,6 @@ export function enrichPushErrorMessage(
   const unique = [...new Set(movementIds)];
   return `Push failed for "${title}" (movements: ${unique.join(", ")}). Tonal error: ${originalError}`;
 }
-
 /** 3s/6s backoff on Tonal 5xx; 4xx/401/non-Tonal bubble immediately. */
 export async function retryOn5xx<T>(fn: () => Promise<T>, maxRetries = 2): Promise<T> {
   for (let attempt = 0; ; attempt++) {
@@ -125,7 +123,16 @@ export async function retryOn5xx<T>(fn: () => Promise<T>, maxRetries = 2): Promi
     }
   }
 }
-
+async function expireCustomWorkoutsCache(ctx: ActionCtx, userId: Id<"users">): Promise<void> {
+  await ctx
+    .runMutation(internal.tonal.cache.deleteCacheEntryByType, {
+      userId,
+      dataType: "customWorkouts",
+    })
+    .catch((error: unknown) => {
+      console.error("Custom workout cache eviction failed", error);
+    });
+}
 /** Pushes to Tonal only — the caller records the plan. Used by createWorkout and retryPush. */
 export const pushWorkoutToTonal = internalAction({
   args: {
@@ -164,10 +171,9 @@ export const pushWorkoutToTonal = internalAction({
       `createWorkout: "${title}", ${sets.length} sets, movements: ${[...new Set(sets.map((s) => s.movementId))].join(", ")}`,
     );
 
-    return withTokenRetry(ctx, userId, async (token) => {
-      let workout: { id: string };
+    const workout = await withTokenRetry(ctx, userId, async (token) => {
       try {
-        workout = await retryOn5xx(() =>
+        return await retryOn5xx(() =>
           tonalFetch<{ id: string }>(token, "/v6/user-workouts", {
             method: "POST",
             body: payload,
@@ -180,33 +186,41 @@ export const pushWorkoutToTonal = internalAction({
         const errMsg = err instanceof Error ? err.message : String(err);
         return { error: enrichPushErrorMessage(errMsg, title, movementIds) };
       }
-      const tonalWorkoutId = workout.id;
-
-      // Real verification: fetch the stored workout and diff against intent.
-      let pushDivergence: PushDivergence | null = null;
-      try {
-        const stored = await tonalFetch<{
-          id: string;
-          sets?: { movementId: string; prescribedReps?: number; prescribedDuration?: number }[];
-        }>(token, `/v6/user-workouts/${tonalWorkoutId}`);
-        if (stored.sets !== undefined) {
-          // sets[] in the request is already expanded one-per-set, so each row counts as 1.
-          const intended = sets.map((s) => ({ movementId: s.movementId, sets: 1 }));
-          pushDivergence = computePushDivergence(intended, stored.sets);
-          if (pushDivergence) {
-            console.warn(
-              `Push divergence on workout ${tonalWorkoutId}:`,
-              JSON.stringify(pushDivergence),
-            );
-          }
-        }
-        // If stored.sets is undefined, we cannot verify; leave pushDivergence null.
-      } catch (err) {
-        console.warn(`Push verification: read-back failed for ${tonalWorkoutId}`, err);
-      }
-
-      return { id: tonalWorkoutId, setCount: sets.length, pushDivergence };
     });
+    if ("error" in workout) return workout;
+    const tonalWorkoutId = workout.id;
+
+    // Real verification: fetch the stored workout and diff against intent.
+    let pushDivergence: PushDivergence | null = null;
+    try {
+      await withTokenRetry(ctx, userId, async (token) => {
+        try {
+          const stored = await tonalFetch<{
+            id: string;
+            sets?: { movementId: string; prescribedReps?: number; prescribedDuration?: number }[];
+          }>(token, `/v6/user-workouts/${tonalWorkoutId}`);
+          if (stored.sets !== undefined) {
+            // sets[] in the request is already expanded one-per-set, so each row counts as 1.
+            const intended = sets.map((s) => ({ movementId: s.movementId, sets: 1 }));
+            pushDivergence = computePushDivergence(intended, stored.sets);
+            if (pushDivergence) {
+              console.warn(
+                `Push divergence on workout ${tonalWorkoutId}:`,
+                JSON.stringify(pushDivergence),
+              );
+            }
+          }
+        } catch (err) {
+          if (err instanceof TonalApiError && err.status === 401) throw err;
+          console.warn(`Push verification: read-back failed for ${tonalWorkoutId}`, err);
+        }
+      });
+    } catch (err) {
+      // The POST succeeded, so diagnostic read-back failures cannot make creation retryable.
+      console.warn(`Push verification: failed for ${tonalWorkoutId}`, err);
+    }
+
+    return { id: tonalWorkoutId, setCount: sets.length, pushDivergence };
   },
 });
 
@@ -227,27 +241,36 @@ export const shareWorkout = internalAction({
     });
   },
 });
-
 export const deleteAllCustomWorkouts = internalAction({
   args: { userId: v.id("users") },
   handler: async (ctx, { userId }): Promise<{ deleted: number }> => {
-    return withTokenRetry(ctx, userId, async (token) => {
-      const workouts = await tonalFetch<Array<{ id: string }>>(token, "/v6/user-workouts");
-      let deleted = 0;
+    const workouts = await withTokenRetry(ctx, userId, (token) =>
+      tonalFetch<Array<{ id: string }>>(token, "/v6/user-workouts"),
+    );
+    let deleted = 0;
+    try {
       for (const w of workouts) {
-        try {
-          await tonalFetch(token, `/v6/user-workouts/${w.id}`, { method: "DELETE" });
+        const didDelete = await withTokenRetry(ctx, userId, async (token) => {
+          try {
+            await tonalFetch(token, `/v6/user-workouts/${w.id}`, { method: "DELETE" });
+            return true;
+          } catch (e) {
+            if (e instanceof TonalApiError && e.status === 401) throw e;
+            console.error(`Failed to delete workout ${w.id}:`, e);
+            return false;
+          }
+        });
+        if (didDelete) {
           deleted++;
           await new Promise((resolve) => setTimeout(resolve, 1000));
-        } catch (e) {
-          console.error(`Failed to delete workout ${w.id}:`, e);
         }
       }
-      return { deleted };
-    });
+    } finally {
+      await expireCustomWorkoutsCache(ctx, userId);
+    }
+    return { deleted };
   },
 });
-
 export function formatTonalTitle(title: string, now?: Date): string {
   const date = (now ?? new Date()).toLocaleDateString("en-US", { month: "short", day: "numeric" });
   return `${date} · ${title}`;
@@ -297,13 +320,7 @@ export const createWorkout = internalAction({
         createdAt: now,
         pushedAt: now,
       });
-      await ctx.runMutation(internal.tonal.cache.setCacheEntry, {
-        userId,
-        dataType: "customWorkouts",
-        data: null,
-        fetchedAt: 0,
-        expiresAt: 0,
-      });
+      await expireCustomWorkoutsCache(ctx, userId);
 
       return {
         success: true,
@@ -350,13 +367,7 @@ export const deleteWorkout = internalAction({
         tonalWorkoutId: workoutId,
       });
 
-      await ctx.runMutation(internal.tonal.cache.setCacheEntry, {
-        userId,
-        dataType: "customWorkouts",
-        data: null,
-        fetchedAt: 0,
-        expiresAt: 0,
-      });
+      await expireCustomWorkoutsCache(ctx, userId);
 
       return { deleted: true };
     }),

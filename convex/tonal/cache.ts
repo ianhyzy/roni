@@ -16,7 +16,7 @@ export const CACHE_TTLS: Record<string, number> = {
   immutableWorkout: 30 * 24 * 60 * 60 * 1000, // 30 days — historical workout data never changes
 };
 
-const WORKOUT_HISTORY_CACHE_TYPE = "workoutHistory_v3";
+export const WORKOUT_HISTORY_CACHE_TYPE = "workoutHistory_v4";
 
 /**
  * Mirror the workoutHistory cache write timestamp onto userProfiles so the

@@ -198,7 +198,7 @@ describe("getUsersDueForRefresh", () => {
 });
 
 describe("setCacheEntry workoutHistory denormalization", () => {
-  test("mirrors the workoutHistory_v3 fetchedAt onto userProfiles", async () => {
+  test("mirrors the workoutHistory_v4 fetchedAt onto userProfiles", async () => {
     const t = convexTest(schema, modules);
 
     const { userId, profileId } = await t.run(async (ctx) => {
@@ -214,7 +214,7 @@ describe("setCacheEntry workoutHistory denormalization", () => {
 
     await t.mutation(internal.tonal.cache.setCacheEntry, {
       userId,
-      dataType: "workoutHistory_v3",
+      dataType: "workoutHistory_v4",
       data: [],
       fetchedAt: FROZEN_NOW,
       expiresAt: FROZEN_NOW + 30 * 60 * 1000,

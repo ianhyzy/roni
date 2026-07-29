@@ -44,16 +44,43 @@ export async function tonalFetch<T = unknown>(
 
 const PG_PAGE_SIZE = 200;
 
-/**
- * Fetch a single page of /workout-activities using pg-offset/pg-limit headers.
- * Returns { items, pgTotal } so callers can decide whether to continue.
- */
-export async function fetchWorkoutActivitiesPage<T>(
+interface WorkoutActivitiesPage<T> {
+  items: T[];
+  pgTotal: number;
+  hasAuthoritativeTotal: boolean;
+}
+
+function resolvePgTotal(
+  rawPgTotal: string | null,
+  offset: number,
+  itemCount: number,
+  limit: number,
+): Pick<WorkoutActivitiesPage<never>, "pgTotal" | "hasAuthoritativeTotal"> {
+  const parsed = rawPgTotal === null || rawPgTotal.trim() === "" ? Number.NaN : Number(rawPgTotal);
+  const observedEnd = offset + itemCount;
+  const hasValidHeader = Number.isSafeInteger(parsed) && parsed >= 0;
+  const pageShapeMatchesTotal =
+    itemCount >= limit || parsed === observedEnd || (itemCount === 0 && parsed <= offset);
+  const hasAuthoritativeTotal = hasValidHeader && parsed >= observedEnd && pageShapeMatchesTotal;
+
+  if (!hasAuthoritativeTotal && rawPgTotal !== null) {
+    console.warn(
+      `[fetchWorkoutActivitiesPage] Malformed or inconsistent pg-total header: "${rawPgTotal}"`,
+    );
+  }
+
+  return {
+    pgTotal: hasAuthoritativeTotal ? parsed : observedEnd + (itemCount > 0 ? 1 : 0),
+    hasAuthoritativeTotal,
+  };
+}
+
+async function requestWorkoutActivitiesPage<T>(
   token: string,
   tonalUserId: string,
   offset: number,
-  limit: number = PG_PAGE_SIZE,
-): Promise<{ items: T[]; pgTotal: number }> {
+  limit: number,
+): Promise<WorkoutActivitiesPage<T>> {
   const res = await fetch(`${TONAL_API_BASE}/v6/users/${tonalUserId}/workout-activities`, {
     headers: {
       Authorization: `Bearer ${token}`,
@@ -71,21 +98,57 @@ export async function fetchWorkoutActivitiesPage<T>(
     throw new TonalApiError(res.status, await res.text().catch(() => res.statusText));
   }
 
-  const items = (await res.json()) as T[];
-  // Tonal sets pg-total on paginated endpoints. If the header is missing or
-  // malformed, fall back to the item count so callers don't silently loop
-  // against NaN or issue negative-progress requests.
-  const rawPgTotal = res.headers.get("pg-total");
-  const parsed = rawPgTotal !== null ? Number(rawPgTotal) : Number.NaN;
-  // When the header is valid, use it. Otherwise, if the page is full,
-  // assume at least one more item exists so callers continue paginating.
-  const fallback = items.length >= limit ? items.length + 1 : items.length;
-  const validHeader = Number.isFinite(parsed) && parsed >= 0;
-  if (!validHeader && rawPgTotal !== null) {
-    console.warn(`[fetchWorkoutActivitiesPage] Malformed pg-total header: "${rawPgTotal}"`);
+  const payload: unknown = await res.json();
+  if (!Array.isArray(payload)) {
+    throw new Error("Tonal workout activities response must be an array");
   }
-  const pgTotal = validHeader ? Math.floor(parsed) : fallback;
+  const items = payload as T[];
+  return { items, ...resolvePgTotal(res.headers.get("pg-total"), offset, items.length, limit) };
+}
+
+/**
+ * Fetch a single page of /workout-activities using pg-offset/pg-limit headers.
+ * Returns { items, pgTotal } so callers can decide whether to continue.
+ */
+export async function fetchWorkoutActivitiesPage<T>(
+  token: string,
+  tonalUserId: string,
+  offset: number,
+  limit: number = PG_PAGE_SIZE,
+): Promise<{ items: T[]; pgTotal: number }> {
+  const { items, pgTotal } = await requestWorkoutActivitiesPage<T>(
+    token,
+    tonalUserId,
+    offset,
+    limit,
+  );
   return { items, pgTotal };
+}
+
+async function collectRecentTail<T>(
+  token: string,
+  tonalUserId: string,
+  count: number,
+  initialItems: T[],
+  initialOffset: number,
+  initialTotal?: number,
+): Promise<T[]> {
+  let tail = initialItems.slice(-count);
+  let offset = initialOffset;
+  let continuationBoundary = initialTotal;
+
+  while (continuationBoundary === undefined || offset < continuationBoundary) {
+    const page = await requestWorkoutActivitiesPage<T>(token, tonalUserId, offset, count);
+    if (page.items.length === 0) break;
+
+    tail = [...tail, ...page.items].slice(-count);
+    offset += page.items.length;
+    if (page.hasAuthoritativeTotal) {
+      continuationBoundary = Math.max(continuationBoundary ?? 0, page.pgTotal);
+    }
+  }
+
+  return tail.reverse();
 }
 
 /**
@@ -98,19 +161,38 @@ export async function fetchRecentWorkoutActivities<T>(
   tonalUserId: string,
   count: number = PG_PAGE_SIZE,
 ): Promise<T[]> {
-  // Fetch a full page from offset 0. If pgTotal fits in one page, we're done.
-  // Otherwise use pgTotal to jump to the end for the newest items.
-  const { items: firstPage, pgTotal } = await fetchWorkoutActivitiesPage<T>(
-    token,
-    tonalUserId,
-    0,
-    count,
-  );
+  if (count <= 0) return [];
 
-  if (pgTotal <= count) return firstPage.reverse();
+  const firstPage = await requestWorkoutActivitiesPage<T>(token, tonalUserId, 0, count);
 
-  // User has more than `count` items - fetch the last page from the end
-  const startOffset = Math.max(0, pgTotal - count);
-  const { items } = await fetchWorkoutActivitiesPage<T>(token, tonalUserId, startOffset, count);
-  return items.reverse();
+  if (!firstPage.hasAuthoritativeTotal) {
+    return collectRecentTail(token, tonalUserId, count, firstPage.items, firstPage.items.length);
+  }
+
+  if (firstPage.items.length >= firstPage.pgTotal) {
+    return firstPage.items.slice(-count).reverse();
+  }
+
+  const startOffset = Math.max(0, firstPage.pgTotal - count);
+  if (startOffset <= firstPage.items.length) {
+    return collectRecentTail(
+      token,
+      tonalUserId,
+      count,
+      firstPage.items,
+      firstPage.items.length,
+      firstPage.pgTotal,
+    );
+  }
+
+  const lastPage = await requestWorkoutActivitiesPage<T>(token, tonalUserId, startOffset, count);
+  const hasTrustedLastPage =
+    lastPage.hasAuthoritativeTotal &&
+    lastPage.pgTotal === firstPage.pgTotal &&
+    startOffset + lastPage.items.length >= firstPage.pgTotal;
+  if (!hasTrustedLastPage) {
+    return collectRecentTail(token, tonalUserId, count, firstPage.items, firstPage.items.length);
+  }
+
+  return lastPage.items.slice(-count).reverse();
 }

@@ -218,13 +218,14 @@ export const retryPushWorkflow = workflow.define({
       pushedAt: Date.now(),
     });
 
-    await step.runMutation(internal.tonal.cache.setCacheEntry, {
-      userId: args.userId,
-      dataType: "customWorkouts",
-      data: null,
-      fetchedAt: 0,
-      expiresAt: 0,
-    });
+    await step
+      .runMutation(internal.tonal.cache.deleteCacheEntryByType, {
+        userId: args.userId,
+        dataType: "customWorkouts",
+      })
+      .catch((error: unknown) => {
+        console.error("[retryPushWorkflow] Custom workout cache eviction failed", error);
+      });
 
     return { status: "pushed", workoutId: result.id };
   },
