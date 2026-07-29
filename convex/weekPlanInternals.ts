@@ -30,6 +30,29 @@ export const getByUserIdAndWeekStartInternal = internalQuery({
   },
 });
 
+/** Internal: whether the specified week still contains a linked draft workout. */
+export const hasPendingDraftForWeekInternal = internalQuery({
+  args: { userId: v.id("users"), weekStartDate: v.string() },
+  handler: async (ctx, { userId, weekStartDate }) => {
+    const weekPlan = await ctx.db
+      .query("weekPlans")
+      .withIndex("by_userId_weekStartDate", (q) =>
+        q.eq("userId", userId).eq("weekStartDate", weekStartDate),
+      )
+      .first();
+    if (!weekPlan) return false;
+
+    const workoutPlanIds = new Set(
+      weekPlan.days.flatMap((day) => (day.workoutPlanId ? [day.workoutPlanId] : [])),
+    );
+    for (const workoutPlanId of workoutPlanIds) {
+      const workoutPlan = await ctx.db.get(workoutPlanId);
+      if (workoutPlan?.userId === userId && workoutPlan.status === "draft") return true;
+    }
+    return false;
+  },
+});
+
 /** Internal: find week plan day slots that reference the given workout plan. */
 export const getWeekPlanDaysWithWorkoutPlanInternal = internalQuery({
   args: { userId: v.id("users"), workoutPlanId: v.id("workoutPlans") },

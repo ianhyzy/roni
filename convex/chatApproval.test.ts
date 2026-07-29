@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isApprovalStepReady } from "./chatApproval";
+import { getReadyApprovalToolNames, isApprovalStepReady } from "./chatApproval";
 
 const requestMessage = {
   _id: "request-message",
@@ -7,8 +7,18 @@ const requestMessage = {
   message: {
     role: "assistant",
     content: [
-      { type: "tool-approval-request", approvalId: "approval-1" },
-      { type: "tool-approval-request", approvalId: "approval-2" },
+      {
+        type: "tool-approval-request",
+        approvalId: "approval-1",
+        toolCallId: "tool-call-1",
+      },
+      {
+        type: "tool-approval-request",
+        approvalId: "approval-2",
+        toolCallId: "tool-call-2",
+      },
+      { type: "tool-call", toolCallId: "tool-call-1", toolName: "approve_week_plan" },
+      { type: "tool-call", toolCallId: "tool-call-2", toolName: "delete_week_plan" },
     ],
   },
 };
@@ -41,6 +51,13 @@ describe("isApprovalStepReady", () => {
     };
 
     expect(isApprovalStepReady([completeResponse, requestMessage], "response-message")).toBe(true);
+    expect(
+      getReadyApprovalToolNames([completeResponse, requestMessage], "response-message"),
+    ).toEqual(["approve_week_plan", "delete_week_plan"]);
+  });
+
+  it("does not expose tool names before the approval step is ready", () => {
+    expect(getReadyApprovalToolNames([requestMessage], "missing-response")).toEqual([]);
   });
 
   it("does not merge approval groups that merely share an order", () => {

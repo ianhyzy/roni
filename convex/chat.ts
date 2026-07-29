@@ -12,11 +12,12 @@ import { action, mutation, query, type QueryCtx } from "./_generated/server";
 import { components, internal } from "./_generated/api";
 import { getEffectiveUserId } from "./lib/auth";
 import { buildCoachAgentForStorageOnly } from "./ai/coach";
+import { selectApprovalContinuationToolMode } from "./ai/coachTools";
 import { rateLimiter } from "./rateLimits";
 import { sanitizeTimezone } from "./ai/timeDecay";
 import { assertThreadOwnership } from "./chatHelpers";
 import { RETRYING_MESSAGE_ERROR } from "./ai/resilienceReporting";
-import { isApprovalStepReady } from "./chatApproval";
+import { getReadyApprovalToolNames, isApprovalStepReady } from "./chatApproval";
 
 const RETRY_LEASE_SCAN_PAGE_SIZE = 50;
 
@@ -255,11 +256,15 @@ export const respondToToolApproval = mutation({
     });
     const continuationScheduled = isApprovalStepReady(approvalMessages.page, messageId);
     if (continuationScheduled) {
+      const toolMode = selectApprovalContinuationToolMode(
+        getReadyApprovalToolNames(approvalMessages.page, messageId),
+      );
       await ctx.scheduler.runAfter(0, internal.chatProcessing.continueAfterApproval, {
         threadId,
         messageId,
         userId,
         userTimezone: sanitizeTimezone(rawTz),
+        toolMode,
       });
     }
     return { messageId, continuationScheduled };

@@ -18,19 +18,19 @@ const apiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY;
 const describeIfKey = apiKey ? describe : describe.skip;
 
 const instructions = buildInstructions();
-const GEMINI_PRIMARY_MODEL = PROVIDERS.gemini.primaryModel;
-const GEMINI_FALLBACK_MODEL = PROVIDERS.gemini.fallbackModel ?? GEMINI_PRIMARY_MODEL;
+const GEMINI_CHAT_MODEL = PROVIDERS.gemini.modelPolicy.chat;
+const GEMINI_PROGRAMMING_MODEL = PROVIDERS.gemini.modelPolicy.programming;
 
-function selectEvalModel(scenario: EvalScenario): string {
-  return classifyPromptIntent(scenario.userMessage) === "trivial"
-    ? GEMINI_FALLBACK_MODEL
-    : GEMINI_PRIMARY_MODEL;
+function selectEvalModel(userMessage: string): string {
+  return classifyPromptIntent(userMessage) === "complex"
+    ? GEMINI_PROGRAMMING_MODEL
+    : GEMINI_CHAT_MODEL;
 }
 
 async function runScenario(scenario: EvalScenario): Promise<void> {
   const system = `${instructions}\n\n<training-data>\n${scenario.snapshot}\n</training-data>`;
   const result = await generateText({
-    model: google(selectEvalModel(scenario)),
+    model: google(selectEvalModel(scenario.userMessage)),
     system,
     prompt: scenario.userMessage,
     temperature: 0,
@@ -68,6 +68,13 @@ async function runScenario(scenario: EvalScenario): Promise<void> {
     ).toBeLessThanOrEqual(rubric.maxLength);
   }
 }
+
+describe("eval model routing", () => {
+  test("matches production chat and programming tiers", () => {
+    expect(selectEvalModel("push it")).toBe(GEMINI_CHAT_MODEL);
+    expect(selectEvalModel("build my weekly plan")).toBe(GEMINI_PROGRAMMING_MODEL);
+  });
+});
 
 describeIfKey("coach prompt evals (LLM)", { timeout: 120_000 }, () => {
   for (const scenario of EVAL_SCENARIOS) {

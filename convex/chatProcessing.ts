@@ -20,6 +20,7 @@ import { STUCK_MESSAGE_WATCHDOG_DELAY_MS } from "./ai/stuckMessageWatchdog";
 import type { RunAccumulator } from "./ai/runTelemetry";
 import { sanitizeTimezone } from "./ai/timeDecay";
 import { getFallbackTier, type ModelTier, type ProviderId } from "./ai/providers";
+import { classifyCoachToolMode, type CoachToolMode } from "./ai/coachTools";
 import * as analytics from "./lib/posthog";
 import {
   assertThreadOwnership,
@@ -28,13 +29,14 @@ import {
   resolveUserProviderConfig,
   withByokErrorSanitization,
 } from "./chatHelpers";
+import { getWeekStartDateString } from "./weekPlanHelpers";
 
 // Dev Convex URLs look like `https://<adj>-<animal>-123.convex.cloud` and
 // prod ones look the same, so we flag prod on Vercel's build env instead.
 const ENVIRONMENT: "dev" | "prod" = process.env.VERCEL_ENV === "production" ? "prod" : "dev";
 const RELEASE_SHA = process.env.VERCEL_GIT_COMMIT_SHA;
 const TRIVIAL_PROMPT_MAX_CHARS = 30;
-const COMPLEX_INTENT_KEYWORDS = ["program", "plan", "build", "swap", "push", "deload"] as const;
+const COMPLEX_INTENT_KEYWORDS = ["program", "plan", "build", "swap", "deload"] as const;
 
 export type RoutingIntent = "trivial" | "complex" | "default";
 type CoachRouteIntent = RoutingIntent | "approval_continuation";
@@ -56,6 +58,9 @@ interface CoachTierRouteOptions<TAgent> {
 
 export function classifyPromptIntent(prompt: string): RoutingIntent {
   const normalized = prompt.trim().toLowerCase();
+  if (classifyCoachToolMode(normalized) === "weekly_programming") {
+    return "complex";
+  }
   if (COMPLEX_INTENT_KEYWORDS.some((keyword) => normalized.includes(keyword))) {
     return "complex";
   }
@@ -111,13 +116,23 @@ function getPrimaryTierForIntent(intent: CoachRouteIntent): ModelTier {
   }
 }
 
-function buildTierPrepareStep(
-  tierModels: Parameters<typeof createModelTierPrepareStep>[0]["tierModels"],
-  initialTier: ModelTier,
-  escalationMode?: "fixed-tier",
-): ReturnType<typeof createModelTierPrepareStep> {
+interface TierPrepareStepOptions {
+  tierModels: Parameters<typeof createModelTierPrepareStep>[0]["tierModels"];
+  initialTier: ModelTier;
+  toolMode: CoachToolMode;
+  escalationMode?: "fixed-tier";
+}
+
+function buildTierPrepareStep({
+  tierModels,
+  initialTier,
+  toolMode,
+  escalationMode,
+}: TierPrepareStepOptions): ReturnType<typeof createModelTierPrepareStep> {
   return createModelTierPrepareStep(
-    escalationMode ? { initialTier, tierModels, escalationMode } : { initialTier, tierModels },
+    escalationMode
+      ? { initialTier, tierModels, escalationMode, toolMode }
+      : { initialTier, tierModels, toolMode },
   );
 }
 
@@ -194,6 +209,15 @@ export const processMessage = internalAction({
       );
       if (budgetExceeded) return;
 
+      const hasPendingWeekDraft = await ctx.runQuery(
+        internal.weekPlans.hasPendingDraftForWeekInternal,
+        {
+          userId,
+          weekStartDate: getWeekStartDateString(new Date()),
+        },
+      );
+      const toolMode = classifyCoachToolMode(prompt, hasPendingWeekDraft);
+
       const providerConfig = await resolveUserProviderConfig(ctx, userId);
       provider = providerConfig.provider;
 
@@ -217,12 +241,17 @@ export const processMessage = internalAction({
           primaryAgent: route.primary,
           fallbackAgent: route.fallback,
           primaryModelName: route.primaryModelName,
-          prepareStep: buildTierPrepareStep(agents.tierModels, route.primaryTier),
-          fallbackPrepareStep: buildTierPrepareStep(
-            agents.tierModels,
-            route.fallbackTier,
-            "fixed-tier",
-          ),
+          prepareStep: buildTierPrepareStep({
+            tierModels: agents.tierModels,
+            initialTier: route.primaryTier,
+            toolMode,
+          }),
+          fallbackPrepareStep: buildTierPrepareStep({
+            tierModels: agents.tierModels,
+            initialTier: route.fallbackTier,
+            toolMode,
+            escalationMode: "fixed-tier",
+          }),
           threadId,
           userId,
           promptMessageId: messageId,
@@ -272,8 +301,9 @@ export const continueAfterApproval = internalAction({
     messageId: v.string(),
     userId: v.id("users"),
     userTimezone: v.optional(v.string()),
+    toolMode: v.optional(v.union(v.literal("all"), v.literal("weekly_programming"))),
   },
-  handler: async (ctx, { threadId, messageId, userId, userTimezone: rawTz }) => {
+  handler: async (ctx, { threadId, messageId, userId, userTimezone: rawTz, toolMode = "all" }) => {
     const userTimezone = sanitizeTimezone(rawTz);
     await assertThreadOwnership(ctx, threadId, userId);
 
@@ -301,12 +331,17 @@ export const continueAfterApproval = internalAction({
           primaryAgent: route.primary,
           fallbackAgent: route.fallback,
           primaryModelName: route.primaryModelName,
-          prepareStep: buildTierPrepareStep(agents.tierModels, route.primaryTier),
-          fallbackPrepareStep: buildTierPrepareStep(
-            agents.tierModels,
-            route.fallbackTier,
-            "fixed-tier",
-          ),
+          prepareStep: buildTierPrepareStep({
+            tierModels: agents.tierModels,
+            initialTier: route.primaryTier,
+            toolMode,
+          }),
+          fallbackPrepareStep: buildTierPrepareStep({
+            tierModels: agents.tierModels,
+            initialTier: route.fallbackTier,
+            toolMode,
+            escalationMode: "fixed-tier",
+          }),
           threadId,
           userId,
           promptMessageId: messageId,

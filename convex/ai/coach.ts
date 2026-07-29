@@ -20,7 +20,12 @@ import {
   stripImagesFromOlderMessages,
   stripOrphanedToolCalls,
 } from "./contextWindow";
-import { COACH_TOOLS, ESTIMATED_TOOL_DEFINITION_TOKENS } from "./coachTools";
+import {
+  COACH_TOOLS,
+  type CoachToolMode,
+  ESTIMATED_TOOL_DEFINITION_TOKENS,
+  selectCoachActiveTools,
+} from "./coachTools";
 import { buildInstructions } from "./promptSections";
 
 // Embeddings always bill the house key, regardless of BYOK status.
@@ -268,7 +273,7 @@ export interface CoachAgentPair {
 
 export type ModelTierPrepareStep = (options: {
   steps: ReadonlyArray<{ toolCalls?: ReadonlyArray<{ toolName: string }> }>;
-}) => { model: LanguageModel };
+}) => { model: LanguageModel; activeTools?: string[] };
 
 export function buildCoachAgents(apiKey: string, userTimezone?: string): CoachAgentPair {
   return buildCoachAgentsForProvider({ provider: "gemini", apiKey, userTimezone });
@@ -299,10 +304,17 @@ export function createModelTierPrepareStep(args: {
   initialTier: ModelTier;
   tierModels: Record<ModelTier, LanguageModel>;
   escalationMode?: "allow-programming" | "fixed-tier";
+  toolMode?: CoachToolMode;
 }): ModelTierPrepareStep {
-  const { initialTier, tierModels, escalationMode = "allow-programming" } = args;
-  if (escalationMode === "fixed-tier") return () => ({ model: tierModels[initialTier] });
-  return ({ steps }) => ({ model: tierModels[selectCoachPrepareStepTier(initialTier, steps)] });
+  const { initialTier, tierModels, escalationMode = "allow-programming", toolMode = "all" } = args;
+  const activeTools = selectCoachActiveTools(toolMode);
+  if (escalationMode === "fixed-tier") {
+    return () => ({ model: tierModels[initialTier], ...(activeTools && { activeTools }) });
+  }
+  return ({ steps }) => ({
+    model: tierModels[selectCoachPrepareStepTier(initialTier, steps)],
+    ...(activeTools && { activeTools }),
+  });
 }
 
 export function buildCoachAgentsForProvider(args: ProviderAgentArgs): CoachAgentPair {

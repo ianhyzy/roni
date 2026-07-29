@@ -32,6 +32,7 @@ export {
 // Re-export internal functions to preserve internal API paths (internal.weekPlans.*)
 export {
   getByUserIdAndWeekStartInternal,
+  hasPendingDraftForWeekInternal,
   getWeekPlanDaysWithWorkoutPlanInternal,
   setDayStatusInternal,
   linkWorkoutPlanToDayInternal,

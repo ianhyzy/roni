@@ -3,14 +3,20 @@ import { saveMessage } from "@convex-dev/agent";
 import { convexTest } from "convex-test";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { internal } from "./_generated/api";
+import type { Id } from "./_generated/dataModel";
 import { classifyPromptIntent, selectCoachTierRoute } from "./chatProcessing";
 import schema from "./schema";
+import { DEFAULT_DAYS, getWeekStartDateString } from "./weekPlanHelpers";
 
 const checkDailyBudgetMock = vi.hoisted(() => vi.fn());
 const clearTurnRetryingMock = vi.hoisted(() => vi.fn(async () => undefined));
 const assertThreadOwnershipMock = vi.hoisted(() => vi.fn(async () => undefined));
 const resolveUserProviderConfigMock = vi.hoisted(() => vi.fn());
 const streamWithRetryMock = vi.hoisted(() => vi.fn());
+const successfulAccumulator = () => ({
+  setContextTiming: vi.fn(),
+  toRow: vi.fn(() => ({})),
+});
 
 vi.mock("@convex-dev/agent", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@convex-dev/agent")>()),
@@ -40,11 +46,135 @@ vi.mock("./chatHelpers", async (importOriginal) => ({
 
 const modules = import.meta.glob("./**/*.*s");
 
+async function seedCurrentWeekPlan(
+  t: ReturnType<typeof convexTest>,
+  userId: Id<"users">,
+  workoutStatus: "draft" | "completed",
+): Promise<void> {
+  await t.run(async (ctx) => {
+    const workoutPlanId = await ctx.db.insert("workoutPlans", {
+      userId,
+      title: "Current week workout",
+      blocks: [],
+      status: workoutStatus,
+      createdAt: 1,
+    });
+    const days = DEFAULT_DAYS.map((day, dayIndex) =>
+      dayIndex === 0 ? { ...day, sessionType: "full_body" as const, workoutPlanId } : { ...day },
+    );
+    await ctx.db.insert("weekPlans", {
+      userId,
+      weekStartDate: getWeekStartDateString(new Date()),
+      preferredSplit: "full_body",
+      targetDays: 1,
+      days,
+      createdAt: 1,
+      updatedAt: 1,
+    });
+  });
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
 });
 
 describe("processMessage", () => {
+  it("applies weekly tool restrictions to primary and fallback attempts", async () => {
+    checkDailyBudgetMock.mockResolvedValue(false);
+    resolveUserProviderConfigMock.mockResolvedValue({
+      provider: "gemini",
+      apiKey: "test-gemini-key",
+      isHouseKey: true,
+    });
+    streamWithRetryMock.mockResolvedValue(successfulAccumulator());
+    const t = convexTest(schema, modules);
+    const userId = await t.run(async (ctx) => ctx.db.insert("users", {}));
+
+    await t.action(internal.chatProcessing.processMessage, {
+      threadId: "thread-1",
+      userId,
+      prompt: "Push Bens workout week 1 Monday",
+    });
+
+    const options = streamWithRetryMock.mock.calls[0]?.[1] as {
+      primaryAgent: { options: { name: string } };
+      fallbackAgent: { options: { name: string } };
+      prepareStep: (args: { steps: [] }) => { activeTools?: string[] };
+      fallbackPrepareStep: (args: { steps: [] }) => { activeTools?: string[] };
+    };
+    const primaryActiveTools = options.prepareStep({ steps: [] }).activeTools;
+    const fallbackActiveTools = options.fallbackPrepareStep({ steps: [] }).activeTools;
+
+    expect(options.primaryAgent.options.name).toBe("Roni (programming)");
+    expect(options.fallbackAgent.options.name).toBe("Roni");
+    expect(primaryActiveTools).toEqual(
+      expect.arrayContaining(["program_week", "delete_week_plan", "rebuild_day", "check_deload"]),
+    );
+    expect(fallbackActiveTools).toEqual(
+      expect.arrayContaining(["program_week", "delete_week_plan", "rebuild_day", "check_deload"]),
+    );
+    expect(primaryActiveTools).not.toContain("create_workout");
+    expect(primaryActiveTools).not.toContain("delete_workout");
+    expect(fallbackActiveTools).not.toContain("create_workout");
+    expect(fallbackActiveTools).not.toContain("delete_workout");
+  });
+
+  it("keeps a bare one-off push on the chat tier with all tools available", async () => {
+    checkDailyBudgetMock.mockResolvedValue(false);
+    resolveUserProviderConfigMock.mockResolvedValue({
+      provider: "gemini",
+      apiKey: "test-gemini-key",
+      isHouseKey: true,
+    });
+    streamWithRetryMock.mockResolvedValue(successfulAccumulator());
+    const t = convexTest(schema, modules);
+    const userId = await t.run(async (ctx) => ctx.db.insert("users", {}));
+    await seedCurrentWeekPlan(t, userId, "completed");
+
+    await t.action(internal.chatProcessing.processMessage, {
+      threadId: "thread-1",
+      userId,
+      prompt: "push it",
+    });
+
+    const options = streamWithRetryMock.mock.calls[0]?.[1] as {
+      primaryAgent: { options: { name: string } };
+      fallbackAgent: { options: { name: string } };
+      prepareStep: (args: { steps: [] }) => { activeTools?: string[] };
+      fallbackPrepareStep: (args: { steps: [] }) => { activeTools?: string[] };
+    };
+    expect(options.primaryAgent.options.name).toBe("Roni");
+    expect(options.fallbackAgent.options.name).toBe("Roni (router)");
+    expect(options.prepareStep({ steps: [] }).activeTools).toBeUndefined();
+    expect(options.fallbackPrepareStep({ steps: [] }).activeTools).toBeUndefined();
+  });
+
+  it("restricts a terse follow-up when the current week has a pending draft", async () => {
+    checkDailyBudgetMock.mockResolvedValue(false);
+    resolveUserProviderConfigMock.mockResolvedValue({
+      provider: "gemini",
+      apiKey: "test-gemini-key",
+      isHouseKey: true,
+    });
+    streamWithRetryMock.mockResolvedValue(successfulAccumulator());
+    const t = convexTest(schema, modules);
+    const userId = await t.run(async (ctx) => ctx.db.insert("users", {}));
+    await seedCurrentWeekPlan(t, userId, "draft");
+
+    await t.action(internal.chatProcessing.processMessage, {
+      threadId: "thread-1",
+      userId,
+      prompt: "push it",
+    });
+
+    const options = streamWithRetryMock.mock.calls[0]?.[1] as {
+      prepareStep: (args: { steps: [] }) => { activeTools?: string[] };
+      fallbackPrepareStep: (args: { steps: [] }) => { activeTools?: string[] };
+    };
+    expect(options.prepareStep({ steps: [] }).activeTools).not.toContain("create_workout");
+    expect(options.fallbackPrepareStep({ steps: [] }).activeTools).not.toContain("create_workout");
+  });
+
   it("persists and anchors the prompt before stopping an over-budget turn", async () => {
     checkDailyBudgetMock.mockResolvedValue(true);
     const t = convexTest(schema, modules);
@@ -133,17 +263,38 @@ describe("processMessage", () => {
 });
 
 describe("continueAfterApproval", () => {
+  it("preserves weekly tool restrictions after approval", async () => {
+    resolveUserProviderConfigMock.mockResolvedValue({
+      provider: "gemini",
+      apiKey: "test-gemini-key",
+      isHouseKey: true,
+    });
+    streamWithRetryMock.mockResolvedValue(successfulAccumulator());
+    const t = convexTest(schema, modules);
+    const userId = await t.run(async (ctx) => ctx.db.insert("users", {}));
+    await t.action(internal.chatProcessing.continueAfterApproval, {
+      threadId: "thread-1",
+      messageId: "approval-message-1",
+      userId,
+      toolMode: "weekly_programming",
+    });
+    const options = streamWithRetryMock.mock.calls[0]?.[1] as {
+      prepareStep: (args: { steps: [] }) => { activeTools?: string[] };
+      fallbackPrepareStep: (args: { steps: [] }) => { activeTools?: string[] };
+    };
+    expect(options.prepareStep({ steps: [] }).activeTools).not.toContain("create_workout");
+    expect(options.fallbackPrepareStep({ steps: [] }).activeTools).not.toContain("create_workout");
+  });
+
   it("clears the anchored retry lease after a continuation failure", async () => {
     resolveUserProviderConfigMock.mockRejectedValueOnce(new Error("provider resolution failed"));
     const t = convexTest(schema, modules);
     const userId = await t.run(async (ctx) => ctx.db.insert("users", {}));
-
     await t.action(internal.chatProcessing.continueAfterApproval, {
       threadId: "thread-1",
       messageId: "approval-message-1",
       userId,
     });
-
     expect(assertThreadOwnershipMock).toHaveBeenCalledWith(expect.anything(), "thread-1", userId);
     expect(clearTurnRetryingMock).toHaveBeenCalledWith(expect.anything(), {
       threadId: "thread-1",
@@ -164,23 +315,17 @@ describe("continueAfterApproval", () => {
 describe("classifyPromptIntent", () => {
   const chars = (length: number) => "x".repeat(length);
 
-  it("routes short low-intent messages as trivial", () => {
-    expect(classifyPromptIntent("hello")).toBe("trivial");
-    expect(classifyPromptIntent("thanks!")).toBe("trivial");
-  });
-
-  it("uses a strict length boundary for trivial messages", () => {
-    expect(classifyPromptIntent(chars(29))).toBe("trivial");
-    expect(classifyPromptIntent(chars(30))).toBe("default");
-  });
-
-  it("keeps short programming and tool commands complex", () => {
-    expect(classifyPromptIntent("push it")).toBe("complex");
-    expect(classifyPromptIntent("swap bench press")).toBe("complex");
-  });
-
-  it("routes longer non-keyword messages as default", () => {
-    expect(classifyPromptIntent("How should I think about my last workout?")).toBe("default");
+  it.each([
+    ["hello", "trivial"],
+    ["thanks!", "trivial"],
+    [chars(29), "trivial"],
+    [chars(30), "default"],
+    ["push it", "trivial"],
+    ["swap bench press", "complex"],
+    ["Push Bens workout week 1 Monday", "complex"],
+    ["How should I think about my last workout?", "default"],
+  ] as const)("classifies %s as %s", (prompt, expected) => {
+    expect(classifyPromptIntent(prompt)).toBe(expected);
   });
 });
 
@@ -198,77 +343,23 @@ describe("selectCoachTierRoute", () => {
     summarize: "summarize-model",
   };
 
-  it("routes trivial prompts to the tool-capable chat tier, not the flash-lite router", () => {
-    // Regression: trivial prompts used to start on the router (flash-lite) tier,
-    // which would not reliably drive search_exercises -> create_workout, so short
-    // workout requests like "make me a workout" silently produced no workout.
+  it.each([
+    ["trivial", "chat", "router"],
+    ["complex", "programming", "chat"],
+    ["default", "chat", "router"],
+    ["approval_continuation", "programming", "chat"],
+  ] as const)("routes %s turns through %s then %s", (intent, primaryTier, fallbackTier) => {
     const route = selectCoachTierRoute(
-      {
-        tierAgents,
-        tierModelNames,
-        fallbackModelName: "router-model",
-      },
-      "trivial",
+      { tierAgents, tierModelNames, fallbackModelName: "router-model" },
+      intent,
     );
 
-    expect(route.primary).toBe(tierAgents.chat);
-    expect(route.primaryModelName).toBe("chat-model");
-    expect(route.primaryTier).toBe("chat");
-    expect(route.primaryTier).not.toBe("router");
-  });
-
-  it("uses the programming model first for complex prompts", () => {
-    const route = selectCoachTierRoute(
-      {
-        tierAgents,
-        tierModelNames,
-        fallbackModelName: "router-model",
-      },
-      "complex",
-    );
-
-    expect(route.primary).toBe(tierAgents.programming);
-    expect(route.fallback).toBe(tierAgents.chat);
-    expect(route.primaryModelName).toBe("programming-model");
-    expect(route.fallbackModelName).toBe("chat-model");
-    expect(route.primaryTier).toBe("programming");
-    expect(route.fallbackTier).toBe("chat");
-  });
-
-  it("uses the chat model first for default prompts", () => {
-    const route = selectCoachTierRoute(
-      {
-        tierAgents,
-        tierModelNames,
-        fallbackModelName: "router-model",
-      },
-      "default",
-    );
-
-    expect(route.primary).toBe(tierAgents.chat);
-    expect(route.fallback).toBe(tierAgents.router);
-    expect(route.primaryModelName).toBe("chat-model");
-    expect(route.fallbackModelName).toBe("router-model");
-    expect(route.primaryTier).toBe("chat");
-    expect(route.fallbackTier).toBe("router");
-  });
-
-  it("uses programming then chat for approval continuation", () => {
-    const route = selectCoachTierRoute(
-      {
-        tierAgents,
-        tierModelNames,
-        fallbackModelName: "router-model",
-      },
-      "approval_continuation",
-    );
-
-    expect(route.primary).toBe(tierAgents.programming);
-    expect(route.fallback).toBe(tierAgents.chat);
-    expect(route.primaryModelName).toBe("programming-model");
-    expect(route.fallbackModelName).toBe("chat-model");
-    expect(route.primaryTier).toBe("programming");
-    expect(route.fallbackTier).toBe("chat");
+    expect(route.primary).toBe(tierAgents[primaryTier]);
+    expect(route.fallback).toBe(tierAgents[fallbackTier]);
+    expect(route.primaryModelName).toBe(tierModelNames[primaryTier]);
+    expect(route.fallbackModelName).toBe(tierModelNames[fallbackTier]);
+    expect(route.primaryTier).toBe(primaryTier);
+    expect(route.fallbackTier).toBe(fallbackTier);
   });
 
   it("keeps the selected tier as fallback when the provider has no fallback model", () => {

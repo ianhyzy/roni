@@ -20,20 +20,55 @@ function getApprovalIds(message: ApprovalMessage, partType: string): string[] {
   return ids;
 }
 
+function getReadyApprovalRequest(
+  messages: readonly ApprovalMessage[],
+  responseMessageId: string,
+): ApprovalMessage | undefined {
+  const response = messages.find((message) => message._id === responseMessageId);
+  if (!response) return undefined;
+
+  const respondedIds = new Set(getApprovalIds(response, "tool-approval-response"));
+  if (respondedIds.size === 0) return undefined;
+
+  const request = messages
+    .filter((message) => message.order === response.order && message.message?.role === "assistant")
+    .find((message) =>
+      getApprovalIds(message, "tool-approval-request").some((id) => respondedIds.has(id)),
+    );
+  if (!request) return undefined;
+
+  const requestIds = getApprovalIds(request, "tool-approval-request");
+  return requestIds.length > 0 && requestIds.every((id) => respondedIds.has(id))
+    ? request
+    : undefined;
+}
+
 export function isApprovalStepReady(
   messages: readonly ApprovalMessage[],
   responseMessageId: string,
 ): boolean {
-  const response = messages.find((message) => message._id === responseMessageId);
-  if (!response) return false;
+  return getReadyApprovalRequest(messages, responseMessageId) !== undefined;
+}
 
-  const respondedIds = new Set(getApprovalIds(response, "tool-approval-response"));
-  if (respondedIds.size === 0) return false;
+export function getReadyApprovalToolNames(
+  messages: readonly ApprovalMessage[],
+  responseMessageId: string,
+): string[] {
+  const request = getReadyApprovalRequest(messages, responseMessageId);
+  const content = request?.message?.content;
+  if (!Array.isArray(content)) return [];
 
-  const requestIds = messages
-    .filter((message) => message.order === response.order && message.message?.role === "assistant")
-    .map((message) => getApprovalIds(message, "tool-approval-request"))
-    .find((ids) => ids.some((id) => respondedIds.has(id)));
-
-  return !!requestIds?.length && requestIds.every((id) => respondedIds.has(id));
+  const approvedToolCallIds = new Set(
+    content.flatMap((part) => {
+      if (!part || typeof part !== "object" || !("type" in part)) return [];
+      if (part.type !== "tool-approval-request" || !("toolCallId" in part)) return [];
+      return typeof part.toolCallId === "string" ? [part.toolCallId] : [];
+    }),
+  );
+  return content.flatMap((part) => {
+    if (!part || typeof part !== "object" || !("type" in part)) return [];
+    if (part.type !== "tool-call" || !("toolCallId" in part) || !("toolName" in part)) return [];
+    if (typeof part.toolCallId !== "string" || !approvedToolCallIds.has(part.toolCallId)) return [];
+    return typeof part.toolName === "string" ? [part.toolName] : [];
+  });
 }
