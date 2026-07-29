@@ -171,6 +171,7 @@ export const deleteWeekPlanTool = createTool({
   description:
     "Delete the current week's training plan and all linked draft workouts. Use when the user wants to discard the current weekly draft or start the week over. Do not use to delete a standalone Tonal custom workout or to remove only one exercise from a draft day. Inputs are empty; returns deleted:true or a message when no current week plan exists.",
   inputSchema: z.object({}),
+  needsApproval: true,
   execute: withToolTracking(
     "delete_week_plan",
     async (
@@ -229,6 +230,7 @@ export const approveWeekPlanTool = createTool({
   description:
     "Push all draft workouts in the current week plan to Tonal. Use only after the user clearly approves the draft plan in chat, such as saying it looks good, send it, or push it. Do not use before a plan exists or while the user is still requesting changes. Inputs are empty; returns per-day push status and a divergence note if Tonal stores any workout differently than requested.",
   inputSchema: z.object({}),
+  needsApproval: true,
   execute: withToolTracking(
     "approve_week_plan",
     async (

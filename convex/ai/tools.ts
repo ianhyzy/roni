@@ -303,6 +303,7 @@ export const createWorkoutTool = createTool({
       },
     },
   ],
+  needsApproval: true,
   execute: withToolTracking(
     "create_workout",
     async (
@@ -369,6 +370,7 @@ export const deleteWorkoutTool = createTool({
   inputSchema: z.object({
     workoutId: z.string().describe("Tonal workout ID"),
   }),
+  needsApproval: true,
   execute: withToolTracking(
     "delete_workout",
     async (ctx, input, _options): Promise<{ deleted: true }> => {

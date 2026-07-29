@@ -1,14 +1,8 @@
 import { generateText } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import type { LanguageModelV3GenerateResult } from "@ai-sdk/provider";
-import { describe, expect, it, vi } from "vitest";
-import { z } from "zod";
-import {
-  createWorkoutTool,
-  deleteWorkoutTool,
-  KNOWN_TRAINING_TYPES,
-  searchExercisesTool,
-} from "./tools";
+import { describe, expect, test, vi } from "vitest";
+import { approveWeekPlanTool, deleteWeekPlanTool } from "./weekTools";
 
 const MOCK_USAGE = {
   inputTokens: {
@@ -24,55 +18,21 @@ const MOCK_USAGE = {
   },
 };
 
-describe("searchExercisesTool input schema", () => {
-  it("rejects 'Warm-up' as trainingType (not a real catalog tag)", () => {
-    const parsed = (searchExercisesTool.inputSchema as z.ZodObject<z.ZodRawShape>).safeParse({
-      trainingType: "Warm-up",
-    });
-    expect(parsed.success).toBe(false);
-  });
-
-  it("accepts the known catalog trainingTypes", () => {
-    for (const t of KNOWN_TRAINING_TYPES) {
-      const parsed = (searchExercisesTool.inputSchema as z.ZodObject<z.ZodRawShape>).safeParse({
-        trainingType: t,
-      });
-      expect(parsed.success).toBe(true);
-    }
-  });
-});
-
 const WRITE_TOOL_CASES = [
   {
-    name: "create_workout",
-    tool: createWorkoutTool,
-    input: {
-      title: "Upper Body Strength",
-      blocks: [
-        {
-          exercises: [
-            {
-              name: "Bench Press",
-              sets: 3,
-              reps: 10,
-              spotter: false,
-              eccentric: false,
-              warmUp: false,
-            },
-          ],
-        },
-      ],
-    },
+    name: "approve_week_plan",
+    tool: approveWeekPlanTool,
+    input: {},
   },
   {
-    name: "delete_workout",
-    tool: deleteWorkoutTool,
-    input: { workoutId: "tonal-workout-id" },
+    name: "delete_week_plan",
+    tool: deleteWeekPlanTool,
+    input: {},
   },
 ];
 
 describe("write tool approval policy", () => {
-  it.each(WRITE_TOOL_CASES)(
+  test.each(WRITE_TOOL_CASES)(
     "$name pauses before its execute handler runs",
     async ({ name, tool, input }) => {
       const executeBoundary = vi.fn(async () => {
