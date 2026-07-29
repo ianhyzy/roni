@@ -16,9 +16,9 @@ import { ProviderKeyDisplay } from "./ProviderKeyDisplay";
 // Keep in sync with PROVIDERS in convex/ai/providers.ts
 // Client-side UI metadata only (no server-side createLanguageModel functions)
 const PROVIDER_UI_CONFIG: Record<ProviderId, { label: string; primaryModel: string }> = {
-  gemini: { label: "Google Gemini", primaryModel: "gemini-2.5-flash" },
-  claude: { label: "Anthropic Claude", primaryModel: "claude-sonnet-4-6" },
-  openai: { label: "OpenAI", primaryModel: "gpt-5.4-mini" },
+  gemini: { label: "Google Gemini", primaryModel: "gemini-3.6-flash" },
+  claude: { label: "Anthropic Claude", primaryModel: "claude-sonnet-5" },
+  openai: { label: "OpenAI", primaryModel: "gpt-5.6-terra" },
   openrouter: { label: "OpenRouter", primaryModel: "openrouter/auto" },
 };
 

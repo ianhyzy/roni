@@ -18,7 +18,7 @@ import { EVAL_SCENARIOS, type EvalScenario } from "../../../convex/ai/evalScenar
 import { decide, printReport, type Report, type ScenarioResult } from "./lib/report";
 import { checkBannedPhrases, checkRubric, normalizeEvalText } from "./lib/rubric";
 
-const MODEL_ID = process.env.PHOENIX_SMOKE_MODEL ?? "gemini-3-flash-preview";
+const MODEL_ID = process.env.PHOENIX_SMOKE_MODEL ?? "gemini-3.6-flash";
 
 /** Positive-integer env guard. `Number("abc")` is NaN and `Number("-4")` is negative
  *  — both would hang `runAll` by never advancing `i`. Fall back to `fallback`. */

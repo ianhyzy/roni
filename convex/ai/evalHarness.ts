@@ -45,7 +45,7 @@ export async function runScenarioAgainstPrompt(
   scenario: EvalScenario,
   options: HarnessOptions = {},
 ): Promise<HarnessResult> {
-  const modelId = options.modelId ?? "gemini-2.5-flash";
+  const modelId = options.modelId ?? "gemini-3.6-flash";
   const system = `${buildInstructions()}\n\n<training-data>\n${scenario.snapshot}\n</training-data>`;
   const result = await generateText({
     model: google(modelId),

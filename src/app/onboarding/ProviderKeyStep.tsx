@@ -73,7 +73,7 @@ export function ProviderKeyStep({ onComplete }: { readonly onComplete: () => voi
               type="text"
               value={modelName}
               onChange={(e) => setModelName(e.target.value)}
-              placeholder="e.g. openrouter/auto or anthropic/claude-sonnet-4-6"
+              placeholder="e.g. openrouter/auto or anthropic/claude-sonnet-5"
               autoComplete="off"
             />
             <p className="text-xs text-muted-foreground">

@@ -69,7 +69,7 @@ describe("budgetCapStopCondition", () => {
       "openai",
     );
 
-    expect(cost).toBeCloseTo(0.055, 6);
+    expect(cost).toBeCloseTo(0.11, 6);
   });
 
   it("fires once the cumulative BYOK cost crosses the provider cap", () => {

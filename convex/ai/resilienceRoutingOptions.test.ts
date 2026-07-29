@@ -102,7 +102,7 @@ describe("streamWithRetry prepareStep routing", () => {
   });
 });
 
-describe("Gemini thinking disabled via providerOptions", () => {
+describe("Gemini thinking minimized via providerOptions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     runWithPrimaryCircuitBreakerMock.mockImplementation(
@@ -113,7 +113,7 @@ describe("Gemini thinking disabled via providerOptions", () => {
     );
   });
 
-  it("passes thinkingBudget: 0 providerOptions for Gemini to prevent thought_signature errors", async () => {
+  it("passes minimal thinking providerOptions for Gemini 3", async () => {
     const { agent, captureStreamTextOptions } = makeSuccessAgent();
 
     await streamWithRetry(makePromptCtx(), {
@@ -123,7 +123,7 @@ describe("Gemini thinking disabled via providerOptions", () => {
     });
 
     expect(captureStreamTextOptions()?.providerOptions).toEqual({
-      google: { thinkingConfig: { thinkingBudget: 0 } },
+      google: { thinkingConfig: { thinkingLevel: "minimal" } },
     });
   });
 

@@ -15,10 +15,10 @@ describe("coach agent model tiers", () => {
     });
 
     expect(agents.tierModelNames).toEqual({
-      router: "gemini-2.5-flash-lite",
-      chat: "gemini-2.5-flash",
-      programming: "gemini-2.5-flash",
-      summarize: "gemini-2.5-flash-lite",
+      router: "gemini-3.5-flash-lite",
+      chat: "gemini-3.6-flash",
+      programming: "gemini-3.6-flash",
+      summarize: "gemini-3.5-flash-lite",
     });
     expect(
       Object.values(agents.tierModelNames).every((modelId) => !modelId.includes("preview")),

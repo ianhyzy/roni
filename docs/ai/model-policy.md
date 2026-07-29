@@ -1,6 +1,6 @@
 # AI Model Policy
 
-Last reviewed: 2026-05-11
+Last reviewed: 2026-07-28
 
 This policy defines the default production model tiers used by the coach. The source of truth in code is `convex/ai/providers.ts`; this document explains the intent, default model IDs, and standard pricing assumptions.
 
@@ -26,12 +26,12 @@ OpenRouter is the exception: all tiers use the selected OpenRouter model, and fa
 
 ## Defaults
 
-| Provider   | `router`                | `chat`              | `programming`     | `summarize`             |
-| ---------- | ----------------------- | ------------------- | ----------------- | ----------------------- |
-| Gemini     | `gemini-2.5-flash-lite` | `gemini-2.5-flash`  | `gemini-2.5-pro`  | `gemini-2.5-flash-lite` |
-| Claude     | `claude-haiku-4-5`      | `claude-sonnet-4-6` | `claude-opus-4-7` | `claude-haiku-4-5`      |
-| OpenAI     | `gpt-5.4-nano`          | `gpt-5.4-mini`      | `gpt-5.4`         | `gpt-5.4-nano`          |
-| OpenRouter | `openrouter/auto`       | `openrouter/auto`   | `openrouter/auto` | `openrouter/auto`       |
+| Provider   | `router`                | `chat`             | `programming`      | `summarize`             |
+| ---------- | ----------------------- | ------------------ | ------------------ | ----------------------- |
+| Gemini     | `gemini-3.5-flash-lite` | `gemini-3.6-flash` | `gemini-3.6-flash` | `gemini-3.5-flash-lite` |
+| Claude     | `claude-haiku-4-5`      | `claude-sonnet-5`  | `claude-opus-5`    | `claude-haiku-4-5`      |
+| OpenAI     | `gpt-5.6-luna`          | `gpt-5.6-terra`    | `gpt-5.6-sol`      | `gpt-5.6-luna`          |
+| OpenRouter | `openrouter/auto`       | `openrouter/auto`  | `openrouter/auto`  | `openrouter/auto`       |
 
 Compatibility aliases are still exposed for older call sites:
 
@@ -56,16 +56,25 @@ Prices are standard USD per 1M tokens. Cached input is the provider's cache-read
 
 | Model                   |                   Input |            Cached input |             Cache write |                   Output |
 | ----------------------- | ----------------------: | ----------------------: | ----------------------: | -----------------------: |
+| `gemini-3.5-flash-lite` |                   $0.30 |                   $0.03 |                   $0.03 |                    $2.50 |
+| `gemini-3.6-flash`      |                   $1.50 |                   $0.15 |                   $0.15 |                    $7.50 |
+| `claude-haiku-4-5`      |                   $1.00 |                   $0.10 |                   $1.25 |                    $5.00 |
+| `claude-sonnet-5`       |                   $3.00 |                   $0.30 |                   $3.75 |                   $15.00 |
+| `claude-opus-5`         |                   $5.00 |                   $0.50 |                   $6.25 |                   $25.00 |
+| `gpt-5.6-luna`          |                   $1.00 |                   $0.10 |                   $1.25 |                    $6.00 |
+| `gpt-5.6-terra`         |                   $2.50 |                   $0.25 |                  $3.125 |                   $15.00 |
+| `gpt-5.6-sol`           |                   $5.00 |                   $0.50 |                   $6.25 |                   $30.00 |
 | `gemini-2.5-flash-lite` |                   $0.10 |                   $0.01 |                   $0.01 |                    $0.40 |
 | `gemini-2.5-flash`      |                   $0.30 |                   $0.03 |                   $0.03 |                    $2.50 |
 | `gemini-2.5-pro`        | Conservative cap: $2.50 | Conservative cap: $0.25 | Conservative cap: $0.25 | Conservative cap: $15.00 |
-| `claude-haiku-4-5`      |                   $1.00 |                   $0.10 |                   $1.25 |                    $5.00 |
 | `claude-sonnet-4-6`     |                   $3.00 |                   $0.30 |                   $3.75 |                   $15.00 |
 | `claude-opus-4-7`       |                   $5.00 |                   $0.50 |                   $6.25 |                   $25.00 |
 | `gpt-5.4-nano`          |                   $0.20 |                   $0.02 |                   $0.20 |                    $1.25 |
 | `gpt-5.4-mini`          |                   $0.75 |                  $0.075 |                   $0.75 |                    $4.50 |
 | `gpt-5.4`               |                   $2.50 |                   $0.25 |                   $2.50 |                   $15.00 |
 | `openrouter/auto`       | Conservative cap: $5.00 | Conservative cap: $0.50 | Conservative cap: $5.00 | Conservative cap: $25.00 |
+
+Legacy entries remain configured because explicit OpenRouter overrides can still report those model families and the cost guardrail needs an exact known price when they do.
 
 Budget-cap estimation uses the reported model ID from each AI SDK step. If a step omits model metadata or reports an unknown model, the estimator falls back to the most expensive configured tier for that provider.
 

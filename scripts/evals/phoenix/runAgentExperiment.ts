@@ -134,7 +134,7 @@ async function main(): Promise<void> {
   });
 
   const correctnessJudge = createCorrectnessEvaluator({
-    model: google(process.env.PHOENIX_JUDGE_MODEL ?? "gemini-2.5-flash"),
+    model: google(process.env.PHOENIX_JUDGE_MODEL ?? "gemini-3.6-flash"),
   });
   const correctnessEvaluator: Evaluator = {
     name: "coach-correctness",

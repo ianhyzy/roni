@@ -365,7 +365,7 @@ function getTierAgentName(tier: ModelTier): string {
 export function buildCoachAgentForStorageOnly(): Agent {
   return new Agent(components.agent, {
     name: "Roni (Storage Only)",
-    languageModel: serverProvider("gemini-2.5-flash"),
+    languageModel: serverProvider("gemini-3.6-flash"),
     ...coachAgentConfig,
   });
 }

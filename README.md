@@ -277,7 +277,7 @@ User (chat) --> send message --> AI Coach Agent (Gemini, tool-driven) --> reads 
 
 ### AI Coach
 
-The coach uses `@convex-dev/agent` with Google Gemini models. In the current codebase the primary model is `gemini-3-flash-preview`, the fallback model is `gemini-2.5-flash`, and embeddings use the server-side Google AI key. Tool-driven capabilities include:
+The coach uses `@convex-dev/agent` with a tiered provider policy. The shared-key Gemini path uses `gemini-3.6-flash` for chat and programming, `gemini-3.5-flash-lite` for routing and summarization, and the server-side Google AI key for embeddings. BYOK users can select Gemini, Claude, OpenAI, or OpenRouter; the current tier defaults are documented in the [AI model policy](./docs/ai/model-policy.md). Tool-driven capabilities include:
 
 - Read Tonal training history, strength scores, and workout data
 - Create and modify weekly workout plans with periodization

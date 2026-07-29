@@ -22,6 +22,24 @@ export interface ModelPricing {
   outputUsdPerMillion: number;
 }
 
+type ModelPricingRates = readonly [
+  inputUsdPerMillion: number,
+  cacheReadUsdPerMillion: number,
+  cacheWriteUsdPerMillion: number,
+  outputUsdPerMillion: number,
+];
+
+function modelPricing(rates: ModelPricingRates): ModelPricing {
+  const [inputUsdPerMillion, cacheReadUsdPerMillion, cacheWriteUsdPerMillion, outputUsdPerMillion] =
+    rates;
+  return {
+    inputUsdPerMillion,
+    cacheReadUsdPerMillion,
+    cacheWriteUsdPerMillion,
+    outputUsdPerMillion,
+  };
+}
+
 export interface ProviderConfig {
   label: string;
   modelPolicy: Record<ModelTier, string>;
@@ -65,7 +83,7 @@ export function getPromptInputBudget(provider: ProviderId, modelId: string): num
     case "openrouter":
       return getKnownPromptInputBudget(normalized) ?? SMALL_PROMPT_BUDGET;
     case "gemini":
-      if (normalized.startsWith("gemini-3-") || normalized.startsWith("gemini-2.5-")) {
+      if (normalized.startsWith("gemini-3") || normalized.startsWith("gemini-2.5-")) {
         return HIGH_CAPACITY_PROMPT_BUDGET;
       }
       return SMALL_PROMPT_BUDGET;
@@ -76,7 +94,12 @@ export function getPromptInputBudget(provider: ProviderId, modelId: string): num
       }
       return SMALL_PROMPT_BUDGET;
     case "openai":
-      if (normalized === "gpt-5.4" || normalized.startsWith("gpt-5.4-")) {
+      if (
+        normalized === "gpt-5.6" ||
+        normalized.startsWith("gpt-5.6-") ||
+        normalized === "gpt-5.4" ||
+        normalized.startsWith("gpt-5.4-")
+      ) {
         return HIGH_CAPACITY_PROMPT_BUDGET;
       }
       return SMALL_PROMPT_BUDGET;
@@ -88,14 +111,19 @@ export function getPromptInputBudget(provider: ProviderId, modelId: string): num
 }
 
 function getKnownPromptInputBudget(normalizedModelId: string): number | undefined {
-  if (normalizedModelId.startsWith("gemini-3-") || normalizedModelId.startsWith("gemini-2.5-")) {
+  if (normalizedModelId.startsWith("gemini-3") || normalizedModelId.startsWith("gemini-2.5-")) {
     return HIGH_CAPACITY_PROMPT_BUDGET;
   }
   if (normalizedModelId.includes("haiku")) return SMALL_PROMPT_BUDGET;
   if (normalizedModelId.includes("sonnet") || normalizedModelId.includes("opus")) {
     return HIGH_CAPACITY_PROMPT_BUDGET;
   }
-  if (normalizedModelId === "gpt-5.4" || normalizedModelId.startsWith("gpt-5.4-")) {
+  if (
+    normalizedModelId === "gpt-5.6" ||
+    normalizedModelId.startsWith("gpt-5.6-") ||
+    normalizedModelId === "gpt-5.4" ||
+    normalizedModelId.startsWith("gpt-5.4-")
+  ) {
     return HIGH_CAPACITY_PROMPT_BUDGET;
   }
   return undefined;
@@ -107,93 +135,71 @@ const MODEL_PRICING: ReadonlyArray<{
 }> = [
   {
     matches: ["openrouter/auto", "auto"],
-    pricing: {
-      inputUsdPerMillion: 5,
-      cacheReadUsdPerMillion: 0.5,
-      cacheWriteUsdPerMillion: 5,
-      outputUsdPerMillion: 25,
-    },
+    pricing: modelPricing([5, 0.5, 5, 25]),
+  },
+  {
+    matches: ["gpt-5.6-luna"],
+    pricing: modelPricing([1, 0.1, 1.25, 6]),
+  },
+  {
+    matches: ["gpt-5.6-terra"],
+    pricing: modelPricing([2.5, 0.25, 3.125, 15]),
+  },
+  {
+    matches: ["gpt-5.6-sol"],
+    pricing: modelPricing([5, 0.5, 6.25, 30]),
   },
   {
     matches: ["gpt-5.4-nano"],
-    pricing: {
-      inputUsdPerMillion: 0.2,
-      cacheReadUsdPerMillion: 0.02,
-      cacheWriteUsdPerMillion: 0.2,
-      outputUsdPerMillion: 1.25,
-    },
+    pricing: modelPricing([0.2, 0.02, 0.2, 1.25]),
   },
   {
     matches: ["gpt-5.4-mini"],
-    pricing: {
-      inputUsdPerMillion: 0.75,
-      cacheReadUsdPerMillion: 0.075,
-      cacheWriteUsdPerMillion: 0.75,
-      outputUsdPerMillion: 4.5,
-    },
+    pricing: modelPricing([0.75, 0.075, 0.75, 4.5]),
   },
   {
     matches: ["gpt-5.4"],
-    pricing: {
-      inputUsdPerMillion: 2.5,
-      cacheReadUsdPerMillion: 0.25,
-      cacheWriteUsdPerMillion: 2.5,
-      outputUsdPerMillion: 15,
-    },
+    pricing: modelPricing([2.5, 0.25, 2.5, 15]),
+  },
+  {
+    matches: ["claude-opus-5"],
+    pricing: modelPricing([5, 0.5, 6.25, 25]),
+  },
+  {
+    matches: ["claude-sonnet-5"],
+    pricing: modelPricing([3, 0.3, 3.75, 15]),
   },
   {
     matches: ["claude-opus-4-7", "claude-opus-4.7", "claude-opus-4-6", "claude-opus-4.6"],
-    pricing: {
-      inputUsdPerMillion: 5,
-      cacheReadUsdPerMillion: 0.5,
-      cacheWriteUsdPerMillion: 6.25,
-      outputUsdPerMillion: 25,
-    },
+    pricing: modelPricing([5, 0.5, 6.25, 25]),
   },
   {
     matches: ["claude-sonnet-4-6", "claude-sonnet-4.6"],
-    pricing: {
-      inputUsdPerMillion: 3,
-      cacheReadUsdPerMillion: 0.3,
-      cacheWriteUsdPerMillion: 3.75,
-      outputUsdPerMillion: 15,
-    },
+    pricing: modelPricing([3, 0.3, 3.75, 15]),
   },
   {
     matches: ["claude-haiku-4-5", "claude-haiku-4.5"],
-    pricing: {
-      inputUsdPerMillion: 1,
-      cacheReadUsdPerMillion: 0.1,
-      cacheWriteUsdPerMillion: 1.25,
-      outputUsdPerMillion: 5,
-    },
+    pricing: modelPricing([1, 0.1, 1.25, 5]),
+  },
+  {
+    matches: ["gemini-3.5-flash-lite"],
+    pricing: modelPricing([0.3, 0.03, 0.03, 2.5]),
+  },
+  {
+    matches: ["gemini-3.6-flash"],
+    pricing: modelPricing([1.5, 0.15, 0.15, 7.5]),
   },
   {
     matches: ["gemini-2.5-pro"],
-    pricing: {
-      inputUsdPerMillion: 2.5,
-      cacheReadUsdPerMillion: 0.25,
-      cacheWriteUsdPerMillion: 0.25,
-      outputUsdPerMillion: 15,
-    },
+    pricing: modelPricing([2.5, 0.25, 0.25, 15]),
   },
   {
     matches: ["gemini-2.5-flash-lite"],
-    pricing: {
-      inputUsdPerMillion: 0.1,
-      cacheReadUsdPerMillion: 0.01,
-      cacheWriteUsdPerMillion: 0.01,
-      outputUsdPerMillion: 0.4,
-    },
+    pricing: modelPricing([0.1, 0.01, 0.01, 0.4]),
   },
   {
     matches: ["gemini-2.5-flash"],
-    pricing: {
-      inputUsdPerMillion: 0.3,
-      cacheReadUsdPerMillion: 0.03,
-      cacheWriteUsdPerMillion: 0.03,
-      outputUsdPerMillion: 2.5,
-    },
+    pricing: modelPricing([0.3, 0.03, 0.03, 2.5]),
   },
 ] as const;
 
@@ -279,10 +285,10 @@ export const PROVIDERS: Record<ProviderId, ProviderConfig> = {
   gemini: defineProviderConfig({
     label: "Google Gemini",
     modelPolicy: {
-      router: "gemini-2.5-flash-lite",
-      chat: "gemini-2.5-flash",
-      programming: "gemini-2.5-flash",
-      summarize: "gemini-2.5-flash-lite",
+      router: "gemini-3.5-flash-lite",
+      chat: "gemini-3.6-flash",
+      programming: "gemini-3.6-flash",
+      summarize: "gemini-3.5-flash-lite",
     },
     keyRegex: /^(?:AIza[A-Za-z0-9_-]{35}|AQ\.?[A-Za-z0-9_-]{20,})$/,
     keyFormatError: "Key format looks wrong. Gemini keys start with 'AIza' or 'AQ'.",
@@ -300,8 +306,8 @@ export const PROVIDERS: Record<ProviderId, ProviderConfig> = {
     label: "Anthropic Claude",
     modelPolicy: {
       router: "claude-haiku-4-5",
-      chat: "claude-sonnet-4-6",
-      programming: "claude-opus-4-7",
+      chat: "claude-sonnet-5",
+      programming: "claude-opus-5",
       summarize: "claude-haiku-4-5",
     },
     keyRegex: /^sk-ant-/,
@@ -319,10 +325,10 @@ export const PROVIDERS: Record<ProviderId, ProviderConfig> = {
   openai: defineProviderConfig({
     label: "OpenAI",
     modelPolicy: {
-      router: "gpt-5.4-nano",
-      chat: "gpt-5.4-mini",
-      programming: "gpt-5.4",
-      summarize: "gpt-5.4-nano",
+      router: "gpt-5.6-luna",
+      chat: "gpt-5.6-terra",
+      programming: "gpt-5.6-sol",
+      summarize: "gpt-5.6-luna",
     },
     keyRegex: /^sk-(?!ant-)(?!or-)/,
     keyFormatError:

@@ -274,10 +274,10 @@ async function attemptStream({
         prepareStep,
         experimental_telemetry: buildTelemetryConfig(telemetry),
         experimental_context: { runId: telemetry.runId },
-        // @convex-dev/agent drops thought_signature from stored tool calls; disabling thinking prevents Gemini from requiring them on replay.
+        // @ai-sdk/google restores missing thought signatures on replay; minimal thinking keeps Gemini 3 coach turns responsive.
         providerOptions:
           telemetry.provider === "gemini"
-            ? { google: { thinkingConfig: { thinkingBudget: 0 } } }
+            ? { google: { thinkingConfig: { thinkingLevel: "minimal" } } }
             : undefined,
         onChunk: (event: { chunk: { type: string } }) => {
           try {

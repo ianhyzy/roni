@@ -91,23 +91,23 @@ describe("getProviderConfig", () => {
   });
 
   it("uses chat/router compatibility aliases from the tier policy", () => {
-    expect(getProviderConfig("gemini").primaryModel).toBe("gemini-2.5-flash");
-    expect(getProviderConfig("gemini").fallbackModel).toBe("gemini-2.5-flash-lite");
-    expect(getProviderConfig("claude").primaryModel).toBe("claude-sonnet-4-6");
+    expect(getProviderConfig("gemini").primaryModel).toBe("gemini-3.6-flash");
+    expect(getProviderConfig("gemini").fallbackModel).toBe("gemini-3.5-flash-lite");
+    expect(getProviderConfig("claude").primaryModel).toBe("claude-sonnet-5");
     expect(getProviderConfig("claude").fallbackModel).toBe("claude-haiku-4-5");
-    expect(getProviderConfig("openai").primaryModel).toBe("gpt-5.4-mini");
-    expect(getProviderConfig("openai").fallbackModel).toBe("gpt-5.4-nano");
+    expect(getProviderConfig("openai").primaryModel).toBe("gpt-5.6-terra");
+    expect(getProviderConfig("openai").fallbackModel).toBe("gpt-5.6-luna");
     expect(getProviderConfig("openrouter").primaryModel).toBe("openrouter/auto");
     expect(getProviderConfig("openrouter").fallbackModel).toBeNull();
   });
 
   it("resolves explicit tier models", () => {
-    expect(getModelForTier("gemini", "router")).toBe("gemini-2.5-flash-lite");
-    expect(getModelForTier("gemini", "chat")).toBe("gemini-2.5-flash");
-    expect(getModelForTier("gemini", "programming")).toBe("gemini-2.5-flash");
-    expect(getModelForTier("gemini", "summarize")).toBe("gemini-2.5-flash-lite");
-    expect(getModelForTier("claude", "programming")).toBe("claude-opus-4-7");
-    expect(getModelForTier("openai", "router")).toBe("gpt-5.4-nano");
+    expect(getModelForTier("gemini", "router")).toBe("gemini-3.5-flash-lite");
+    expect(getModelForTier("gemini", "chat")).toBe("gemini-3.6-flash");
+    expect(getModelForTier("gemini", "programming")).toBe("gemini-3.6-flash");
+    expect(getModelForTier("gemini", "summarize")).toBe("gemini-3.5-flash-lite");
+    expect(getModelForTier("claude", "programming")).toBe("claude-opus-5");
+    expect(getModelForTier("openai", "router")).toBe("gpt-5.6-luna");
     expect(getModelForTier("openrouter", "programming", "anthropic/claude-sonnet-4.6")).toBe(
       "anthropic/claude-sonnet-4.6",
     );
@@ -141,15 +141,22 @@ describe("isValidProvider", () => {
 
 describe("getPromptInputBudget", () => {
   it("uses conservative high-capacity budgets for Gemini and OpenAI defaults", () => {
+    expect(getPromptInputBudget("gemini", "gemini-3.5-flash-lite")).toBe(500_000);
+    expect(getPromptInputBudget("gemini", "gemini-3.6-flash")).toBe(500_000);
     expect(getPromptInputBudget("gemini", "gemini-2.5-pro")).toBe(500_000);
     expect(getPromptInputBudget("gemini", "gemini-2.5-flash")).toBe(500_000);
     expect(getPromptInputBudget("gemini", "gemini-2.5-flash-lite")).toBe(500_000);
+    expect(getPromptInputBudget("openai", "gpt-5.6-luna")).toBe(500_000);
+    expect(getPromptInputBudget("openai", "gpt-5.6-terra")).toBe(500_000);
+    expect(getPromptInputBudget("openai", "gpt-5.6-sol")).toBe(500_000);
     expect(getPromptInputBudget("openai", "gpt-5.4")).toBe(500_000);
     expect(getPromptInputBudget("openai", "gpt-5.4-mini")).toBe(500_000);
     expect(getPromptInputBudget("openai", "gpt-5.4-nano")).toBe(500_000);
   });
 
   it("uses high-capacity Claude budgets for Sonnet and Opus", () => {
+    expect(getPromptInputBudget("claude", "claude-sonnet-5")).toBe(500_000);
+    expect(getPromptInputBudget("claude", "claude-opus-5")).toBe(500_000);
     expect(getPromptInputBudget("claude", "claude-sonnet-4-6")).toBe(500_000);
     expect(getPromptInputBudget("claude", "claude-opus-4-7")).toBe(500_000);
   });
@@ -161,6 +168,9 @@ describe("getPromptInputBudget", () => {
   });
 
   it("normalizes provider-prefixed, cased, and padded model IDs", () => {
+    expect(getPromptInputBudget("gemini", "google/gemini-3.6-flash")).toBe(500_000);
+    expect(getPromptInputBudget("claude", "anthropic/claude-sonnet-5")).toBe(500_000);
+    expect(getPromptInputBudget("openai", " OpenAI/GPT-5.6-Terra ")).toBe(500_000);
     expect(getPromptInputBudget("gemini", "google/gemini-2.5-flash")).toBe(500_000);
     expect(getPromptInputBudget("claude", "anthropic/claude-sonnet-4-6")).toBe(500_000);
     expect(getPromptInputBudget("openai", " OpenAI/GPT-5.4-mini ")).toBe(500_000);
@@ -188,7 +198,33 @@ describe("getModelPricing", () => {
     );
   });
 
+  it.each([
+    ["gemini", "gemini-3.5-flash-lite", 0.3, 0.03, 0.03, 2.5],
+    ["gemini", "gemini-3.6-flash", 1.5, 0.15, 0.15, 7.5],
+    ["claude", "claude-sonnet-5", 3, 0.3, 3.75, 15],
+    ["claude", "claude-opus-5", 5, 0.5, 6.25, 25],
+    ["openai", "gpt-5.6-luna", 1, 0.1, 1.25, 6],
+    ["openai", "gpt-5.6-terra", 2.5, 0.25, 3.125, 15],
+    ["openai", "gpt-5.6-sol", 5, 0.5, 6.25, 30],
+  ] as const)(
+    "prices current %s model %s",
+    (provider, modelId, input, cacheRead, cacheWrite, output) => {
+      expect(getModelPricing(provider, modelId)).toEqual({
+        inputUsdPerMillion: input,
+        cacheReadUsdPerMillion: cacheRead,
+        cacheWriteUsdPerMillion: cacheWrite,
+        outputUsdPerMillion: output,
+      });
+    },
+  );
+
   it("prices dated provider model variants by family", () => {
+    expect(getModelPricing("claude", "anthropic/claude-sonnet-5-20260715")).toEqual(
+      getModelPricing("claude", "claude-sonnet-5"),
+    );
+    expect(getModelPricing("openrouter", "openai/gpt-5.6-terra-20260715")).toEqual(
+      getModelPricing("openai", "gpt-5.6-terra"),
+    );
     expect(getModelPricing("claude", "anthropic/claude-sonnet-4-6-20250514")).toEqual(
       getModelPricing("claude", "claude-sonnet-4-6"),
     );

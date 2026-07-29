@@ -11,7 +11,7 @@ import { EVAL_SCENARIOS, type EvalScenario } from "../../../convex/ai/evalScenar
 import { estimateMessagesTokens } from "../../../convex/ai/contextWindow";
 import { checkBannedPhrases, checkRubric, normalizeEvalText } from "./lib/rubric";
 
-const MODEL_ID = process.env.CONTEXT_BENCHMARK_MODEL ?? "gemini-3-flash-preview";
+const MODEL_ID = process.env.CONTEXT_BENCHMARK_MODEL ?? "gemini-3.6-flash";
 
 const BENCHMARK_MODES = ["recent-only", "snapshot-only", "rag-fallback"] as const;
 type BenchmarkMode = (typeof BENCHMARK_MODES)[number];
