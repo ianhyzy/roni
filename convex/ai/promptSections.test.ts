@@ -61,6 +61,13 @@ describe("schema consistency", () => {
     expect(section![1]).toContain("Do NOT output JSON");
     expect(section![1]).not.toContain("```week-plan");
   });
+
+  it("frames volume-strength analysis as advisory rather than causal MRV", () => {
+    expect(prompt).toContain("analyze_volume_strength");
+    expect(prompt).toContain("observational");
+    expect(prompt).toContain("not causal MRV");
+    expect(prompt).toContain("hard cap");
+  });
 });
 
 describe("structural integrity", () => {

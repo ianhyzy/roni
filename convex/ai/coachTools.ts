@@ -18,6 +18,7 @@ import { estimateDurationTool } from "./estimationTools";
 import { estimateMessagesTokens } from "./contextWindow";
 import { programWeekTool } from "./programWeekTool";
 import { rebuildDayTool } from "./rebuildDayTool";
+import { analyzeVolumeStrengthTool } from "./volumeStrengthTool";
 import {
   createWorkoutTool,
   deleteWorkoutTool,
@@ -79,6 +80,7 @@ const RAW_COACH_TOOLS = {
   resolve_injury: resolveInjuryTool,
   get_injuries: getInjuriesTool,
   get_weekly_volume: getWeeklyVolumeTool,
+  analyze_volume_strength: analyzeVolumeStrengthTool,
 } satisfies ToolSet;
 
 export type CoachToolName = keyof typeof RAW_COACH_TOOLS;

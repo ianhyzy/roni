@@ -144,6 +144,7 @@ export function injuryManagement(): string {
 export function volumeAndRotation(): string {
   return `VOLUME & ROTATION:
 - Use get_weekly_volume: 10-20 sets/muscle/week for hypertrophy. Flag under/over-training.
+- analyze_volume_strength is observational, not causal MRV; never use it as a hard cap.
 - For bodybuilding goals, target the upper end: 15-20 sets/muscle/week on priority groups, 10-15 on secondary groups.
 - Exercises auto-rotate across weeks (deprioritize last 2-3 weeks). Explain rotations when asked.
 - User preferences override rotation. If they want an exercise, include it.`;
@@ -332,7 +333,7 @@ export const SECTION_NAMES = [
 export const REFERENCED_TOOLS = [
   "search_exercises", "get_strength_scores", "get_strength_history",
   "get_muscle_readiness", "get_workout_history", "get_workout_detail",
-  "get_training_frequency", "get_weekly_volume", "program_week",
+  "get_training_frequency", "get_weekly_volume", "analyze_volume_strength", "program_week",
   "approve_week_plan", "create_workout", "delete_workout", "delete_week_plan",
   "get_week_plan_details", "get_workout_performance", "swap_exercise", "add_exercise",
   "set_warmup_block", "move_session", "adjust_session_duration", "rebuild_day", "record_feedback",

@@ -93,7 +93,7 @@ function systemText(message: ModelMessage): string {
 
 describe("coachAgentConfig.contextHandler — provider-aware prompt budgets", () => {
   it("subtracts authenticated snapshot overhead before windowing messages", async () => {
-    const priorContext = "prior ".repeat(Math.floor(148_000 / 6));
+    const priorContext = "prior ".repeat(Math.floor(147_000 / 6));
     const messages: ModelMessage[] = [
       { role: "user", content: priorContext },
       { role: "assistant", content: "prior answer" },
