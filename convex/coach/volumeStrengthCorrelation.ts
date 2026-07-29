@@ -322,7 +322,7 @@ function buildRegionResult({
   const spearmanRhoRounded = Math.round(Math.max(-1, Math.min(1, rawRho)) * 1000) / 1000;
   const direction = directionFor(spearmanRhoRounded);
   const confidence = pairs.length >= PROGRAMMING_MIN_PAIRED_OBSERVATIONS ? "medium" : "low";
-  const latestPairedWeek = pairs.at(-1)?.week;
+  const latestPairedWeek = pairs[pairs.length - 1]?.week;
   if (!latestPairedWeek) return { status: "insufficient_data", ...counts };
   const daysSinceLatestPairedWeek = daysBetweenUtcDates(latestPairedWeek, inputWindowEndDate);
   return {

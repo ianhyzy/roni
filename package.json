@@ -32,7 +32,7 @@
     "test:coverage": "vitest run --coverage",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p convex/tsconfig.json --noEmit",
     "convex:smoke": "convex dev --once --typecheck enable",
     "setup": "tsx scripts/setup.ts",
     "knip": "knip",
