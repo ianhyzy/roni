@@ -20,6 +20,7 @@ export async function checkDailyBudget(
   ctx: ActionCtx,
   userId: string,
   threadId: string,
+  promptMessageId: string,
 ): Promise<boolean> {
   const { totalTokens: todayWeightedUsage, latestUsageTokens } = await ctx.runQuery(
     internal.aiUsage.getDailyTokenUsageStats,
@@ -31,6 +32,7 @@ export async function checkDailyBudget(
   if (todayWeightedUsage >= DAILY_TOKEN_BUDGET) {
     await saveMessage(ctx, components.agent, {
       threadId,
+      promptMessageId,
       userId,
       message: { role: "assistant", content: BUDGET_EXCEEDED_MESSAGE },
     });

@@ -179,4 +179,50 @@ describe("ChatMessage", () => {
 
     expect(screen.getByText(/Approved/)).toBeInTheDocument();
   });
+
+  it("marks a partial failed response as interrupted", () => {
+    const message = createMessage({
+      parts: [{ text: "Your first two exercises are", type: "text" }],
+      role: "assistant",
+      status: "failed",
+      text: "Your first two exercises are",
+    });
+
+    render(<ChatMessage message={message} threadId="thread-1" />);
+
+    expect(screen.getByTestId("markdown")).toHaveTextContent("Your first two exercises are");
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Roni's response was interrupted before it finished.",
+    );
+  });
+
+  it("shows a generic failure when no response text was produced", () => {
+    const message = createMessage({
+      parts: [],
+      role: "assistant",
+      status: "failed",
+      text: "",
+    });
+
+    render(<ChatMessage message={message} threadId="thread-1" />);
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Roni couldn't finish this response. Please try again.",
+    );
+  });
+
+  it("does not present a retrying attempt as a terminal failure", () => {
+    const message = createMessage({
+      metadata: { roniTurn: { phase: "retrying" } },
+      parts: [{ text: "Your first two exercises are", type: "text" }],
+      role: "assistant",
+      status: "failed",
+      text: "Your first two exercises are",
+    });
+
+    render(<ChatMessage message={message} threadId="thread-1" />);
+
+    expect(screen.getByTestId("markdown")).toHaveTextContent("Your first two exercises are");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
 });

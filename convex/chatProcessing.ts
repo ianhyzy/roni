@@ -4,7 +4,7 @@
 
 import { v } from "convex/values";
 import { saveMessage } from "@convex-dev/agent";
-import { action, type ActionCtx, internalAction } from "./_generated/server";
+import { type ActionCtx, internalAction } from "./_generated/server";
 import { components, internal } from "./_generated/api";
 import {
   buildCoachAgentsForProvider,
@@ -15,6 +15,7 @@ import {
 } from "./ai/coach";
 import { checkDailyBudget } from "./ai/budget";
 import { streamWithRetry } from "./ai/resilience";
+import { type AgentTurnRef, clearTurnRetrying } from "./ai/resilienceReporting";
 import { STUCK_MESSAGE_WATCHDOG_DELAY_MS } from "./ai/stuckMessageWatchdog";
 import type { RunAccumulator } from "./ai/runTelemetry";
 import { sanitizeTimezone } from "./ai/timeDecay";
@@ -124,11 +125,11 @@ function buildTierPrepareStep(
 // a hung tool call) before it finalizes its assistant message, leaving the chat
 // stuck on "generating" forever. Scheduling this durable sweep up front means it
 // still runs after the action dies and fails the orphaned message.
-async function scheduleStuckMessageWatchdog(ctx: ActionCtx, threadId: string): Promise<void> {
+async function scheduleStuckMessageWatchdog(ctx: ActionCtx, turnRef: AgentTurnRef): Promise<void> {
   await ctx.scheduler.runAfter(
     STUCK_MESSAGE_WATCHDOG_DELAY_MS,
     internal.ai.stuckMessageWatchdog.finalizeStuckMessagesForThread,
-    { threadId },
+    turnRef,
   );
 }
 
@@ -166,8 +167,6 @@ export const processMessage = internalAction({
   ) => {
     const processingStartedAt = Date.now();
     const userTimezone = sanitizeTimezone(rawTz);
-    const budgetExceeded = await checkDailyBudget(ctx, userId, threadId);
-    if (budgetExceeded) return;
 
     // Pre-save the user message once so retries use promptMessageId
     // instead of re-saving, re-embedding, and duplicating the message.
@@ -176,6 +175,7 @@ export const processMessage = internalAction({
       userId,
       message: { role: "user" as const, content: prompt },
     });
+    const turnRef: AgentTurnRef = { threadId, promptMessageId: messageId };
 
     let provider: ProviderId | undefined;
     let accumulator: RunAccumulator | undefined;
@@ -184,7 +184,15 @@ export const processMessage = internalAction({
     const routingIntent = classifyPromptIntent(prompt);
     const startTime = Date.now();
     try {
-      await scheduleStuckMessageWatchdog(ctx, threadId);
+      await scheduleStuckMessageWatchdog(ctx, turnRef);
+
+      const budgetExceeded = await checkDailyBudget(
+        ctx,
+        userId,
+        turnRef.threadId,
+        turnRef.promptMessageId,
+      );
+      if (budgetExceeded) return;
 
       const providerConfig = await resolveUserProviderConfig(ctx, userId);
       provider = providerConfig.provider;
@@ -233,14 +241,18 @@ export const processMessage = internalAction({
       );
       accumulator.setContextTiming(contextTiming);
     } catch (error) {
-      await persistScheduledFailure({
-        ctx,
-        threadId,
-        userId,
-        error,
-        provider,
-        source: "chatProcessing.processMessage",
-      });
+      try {
+        await persistScheduledFailure({
+          ctx,
+          ...turnRef,
+          userId,
+          error,
+          provider,
+          source: "chatProcessing.processMessage",
+        });
+      } finally {
+        await clearTurnRetrying(ctx, turnRef);
+      }
       return;
     } finally {
       if (accumulator) await persistRun(ctx, accumulator);
@@ -254,16 +266,15 @@ export const processMessage = internalAction({
   },
 });
 
-export const continueAfterApproval = action({
+export const continueAfterApproval = internalAction({
   args: {
     threadId: v.string(),
     messageId: v.string(),
+    userId: v.id("users"),
     userTimezone: v.optional(v.string()),
   },
-  handler: async (ctx, { threadId, messageId, userTimezone: rawTz }) => {
+  handler: async (ctx, { threadId, messageId, userId, userTimezone: rawTz }) => {
     const userTimezone = sanitizeTimezone(rawTz);
-    const userId = await ctx.runQuery(internal.lib.auth.resolveEffectiveUserId, {});
-    if (!userId) throw new Error("Not authenticated");
     await assertThreadOwnership(ctx, threadId, userId);
 
     let provider: ProviderId | undefined;
@@ -273,7 +284,7 @@ export const continueAfterApproval = action({
     const processingStartedAt = Date.now();
     const startTime = Date.now();
     try {
-      await scheduleStuckMessageWatchdog(ctx, threadId);
+      await scheduleStuckMessageWatchdog(ctx, { threadId, promptMessageId: messageId });
 
       const providerConfig = await resolveUserProviderConfig(ctx, userId);
       provider = providerConfig.provider;
@@ -311,14 +322,19 @@ export const continueAfterApproval = action({
       );
       accumulator.setContextTiming(contextTiming);
     } catch (error) {
-      await persistScheduledFailure({
-        ctx,
-        threadId,
-        userId,
-        error,
-        provider,
-        source: "chatProcessing.continueAfterApproval",
-      });
+      try {
+        await persistScheduledFailure({
+          ctx,
+          threadId,
+          promptMessageId: messageId,
+          userId,
+          error,
+          provider,
+          source: "chatProcessing.continueAfterApproval",
+        });
+      } finally {
+        await clearTurnRetrying(ctx, { threadId, promptMessageId: messageId });
+      }
       return;
     } finally {
       if (accumulator) await persistRun(ctx, accumulator);

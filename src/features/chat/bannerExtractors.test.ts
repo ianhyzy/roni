@@ -31,6 +31,16 @@ describe("extractBannerProps", () => {
       expect(extractBannerProps("approve_week_plan", "string")).toBeNull();
       expect(extractBannerProps("approve_week_plan", null)).toBeNull();
       expect(extractBannerProps("approve_week_plan", { unrelated: true })).toBeNull();
+      expect(extractBannerProps("approve_week_plan", { pushed: 4, failed: 0 })).toBeNull();
+    });
+
+    it("never reports success when the explicit success sentinel is false", () => {
+      expect(
+        extractBannerProps("approve_week_plan", { success: false, pushed: 4, failed: 0 }),
+      ).toEqual({
+        variant: "error",
+        message: "Failed to push workouts to Tonal",
+      });
     });
   });
 
@@ -137,6 +147,83 @@ describe("extractBannerProps", () => {
       });
     });
   });
+
+  it.each([
+    {
+      toolName: "add_exercise",
+      sentinel: "success",
+      successMessage: "Exercise added",
+      errorMessage: "Failed to add exercise",
+    },
+    {
+      toolName: "set_warmup_block",
+      sentinel: "success",
+      successMessage: "Warmup updated",
+      errorMessage: "Failed to update warmup",
+    },
+    {
+      toolName: "rebuild_day",
+      sentinel: "success",
+      successMessage: "Workout rebuilt",
+      errorMessage: "Failed to rebuild workout",
+    },
+    {
+      toolName: "record_feedback",
+      sentinel: "recorded",
+      successMessage: "Feedback recorded",
+      errorMessage: "Failed to record feedback",
+    },
+    {
+      toolName: "report_injury",
+      sentinel: "recorded",
+      successMessage: "Injury recorded",
+      errorMessage: "Failed to record injury",
+    },
+    {
+      toolName: "start_training_block",
+      sentinel: "started",
+      successMessage: "Training block started",
+      errorMessage: "Failed to start training block",
+    },
+    {
+      toolName: "advance_training_block",
+      sentinel: "advanced",
+      successMessage: "Training block advanced",
+      errorMessage: "Failed to advance training block",
+    },
+    {
+      toolName: "set_goal",
+      sentinel: "created",
+      successMessage: "Goal created",
+      errorMessage: "Failed to create goal",
+    },
+    {
+      toolName: "update_goal_progress",
+      sentinel: "updated",
+      successMessage: "Goal progress updated",
+      errorMessage: "Failed to update goal progress",
+    },
+    {
+      toolName: "resolve_injury",
+      sentinel: "resolved",
+      successMessage: "Injury resolved",
+      errorMessage: "Failed to resolve injury",
+    },
+  ])(
+    "$toolName requires the exact $sentinel boolean sentinel",
+    ({ toolName, sentinel, successMessage, errorMessage }) => {
+      expect(extractBannerProps(toolName, { [sentinel]: true })).toEqual({
+        variant: "success",
+        message: successMessage,
+      });
+      expect(extractBannerProps(toolName, { [sentinel]: false })).toEqual({
+        variant: "error",
+        message: errorMessage,
+      });
+      expect(extractBannerProps(toolName, { [sentinel]: "true" })).toBeNull();
+      expect(extractBannerProps(toolName, { ok: true })).toBeNull();
+    },
+  );
 
   describe("unknown tools", () => {
     it("returns null for read-only tools", () => {

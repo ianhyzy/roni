@@ -2,17 +2,61 @@ import { v } from "convex/values";
 import { paginationOptsValidator } from "convex/server";
 import {
   createThread as agentCreateThread,
-  listUIMessages,
+  listMessages as listAgentMessages,
+  type MessageDoc,
   syncStreams,
+  toUIMessages,
   vStreamArgs,
 } from "@convex-dev/agent";
-import { action, mutation, query } from "./_generated/server";
+import { action, mutation, query, type QueryCtx } from "./_generated/server";
 import { components, internal } from "./_generated/api";
 import { getEffectiveUserId } from "./lib/auth";
 import { buildCoachAgentForStorageOnly } from "./ai/coach";
 import { rateLimiter } from "./rateLimits";
 import { sanitizeTimezone } from "./ai/timeDecay";
 import { assertThreadOwnership } from "./chatHelpers";
+import { RETRYING_MESSAGE_ERROR } from "./ai/resilienceReporting";
+import { isApprovalStepReady } from "./chatApproval";
+
+const RETRY_LEASE_SCAN_PAGE_SIZE = 50;
+
+async function getActiveRetryingOrders(
+  ctx: Pick<QueryCtx, "runQuery">,
+  threadId: string,
+): Promise<Set<number>> {
+  const retryingOrders = new Set<number>();
+  let cursor: string | null = null;
+  let activeOrder: number | undefined;
+
+  while (true) {
+    const result = await listAgentMessages(ctx, components.agent, {
+      threadId,
+      paginationOpts: { cursor, numItems: RETRY_LEASE_SCAN_PAGE_SIZE },
+      statuses: ["success"],
+    });
+    if (activeOrder === undefined) activeOrder = result.page[0]?.order;
+    if (activeOrder === undefined) break;
+    const currentOrder = activeOrder;
+
+    for (const message of result.page) {
+      if (message.order === currentOrder && message.error === RETRYING_MESSAGE_ERROR) {
+        retryingOrders.add(currentOrder);
+      }
+    }
+
+    if (
+      result.isDone ||
+      result.page.some((message: MessageDoc) => message.order < currentOrder) ||
+      !result.continueCursor ||
+      result.continueCursor === cursor
+    ) {
+      break;
+    }
+    cursor = result.continueCursor;
+  }
+
+  return retryingOrders;
+}
 
 export const generateImageUploadUrl = mutation({
   args: {},
@@ -134,15 +178,38 @@ export const listMessages = query({
     }
     await assertThreadOwnership(ctx, args.threadId, userId);
 
-    const paginated = await listUIMessages(ctx, components.agent, {
+    const rawMessages = await listAgentMessages(ctx, components.agent, {
       threadId: args.threadId,
       paginationOpts: args.paginationOpts,
+    });
+    const retryingOrders = await getActiveRetryingOrders(ctx, args.threadId);
+    const visibleMessages = rawMessages.page.filter(
+      (message) =>
+        !(
+          message.status === "failed" &&
+          (message.error === RETRYING_MESSAGE_ERROR || message.finishReason === "error")
+        ),
+    );
+    const page = toUIMessages(visibleMessages).map((message) => {
+      const isRetrying = retryingOrders.has(message.order);
+      if (!isRetrying) return message;
+      const metadata =
+        message.metadata && typeof message.metadata === "object" && !Array.isArray(message.metadata)
+          ? message.metadata
+          : {};
+      return {
+        ...message,
+        metadata: {
+          ...metadata,
+          roniTurn: { phase: "retrying" as const },
+        },
+      };
     });
     const streams = await syncStreams(ctx, components.agent, {
       threadId: args.threadId,
       streamArgs: args.streamArgs,
     });
-    return { ...paginated, streams };
+    return { ...rawMessages, page, streams };
   },
 });
 
@@ -152,8 +219,9 @@ export const respondToToolApproval = mutation({
     approvalId: v.string(),
     approved: v.boolean(),
     reason: v.optional(v.string()),
+    userTimezone: v.optional(v.string()),
   },
-  handler: async (ctx, { threadId, approvalId, approved, reason }) => {
+  handler: async (ctx, { threadId, approvalId, approved, reason, userTimezone: rawTz }) => {
     const userId = await getEffectiveUserId(ctx);
     if (!userId) throw new Error("Not authenticated");
     await assertThreadOwnership(ctx, threadId, userId);
@@ -163,7 +231,7 @@ export const respondToToolApproval = mutation({
     // language model, so we use buildCoachAgentForStorageOnly here, which
     // satisfies the Agent constructor with the server provider but does
     // not (and must not) be used to make any LLM call. The actual LLM
-    // continuation happens in continueAfterApproval below, which resolves
+    // continuation happens in the scheduled continueAfterApproval action, which resolves
     // the user's BYOK key the normal way.
     const storageAgent = buildCoachAgentForStorageOnly();
 
@@ -181,7 +249,20 @@ export const respondToToolApproval = mutation({
         reason,
       }));
     }
-    return { messageId };
+    const approvalMessages = await storageAgent.listMessages(ctx, {
+      threadId,
+      paginationOpts: { cursor: null, numItems: 100 },
+    });
+    const continuationScheduled = isApprovalStepReady(approvalMessages.page, messageId);
+    if (continuationScheduled) {
+      await ctx.scheduler.runAfter(0, internal.chatProcessing.continueAfterApproval, {
+        threadId,
+        messageId,
+        userId,
+        userTimezone: sanitizeTimezone(rawTz),
+      });
+    }
+    return { messageId, continuationScheduled };
   },
 });
 

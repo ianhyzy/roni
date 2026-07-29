@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useAction, useMutation } from "convex/react";
+import { useMutation } from "convex/react";
 import { api } from "../../../convex/_generated/api";
 import { Button } from "@/components/ui/button";
 import { useAnalytics } from "@/lib/analytics";
@@ -26,7 +26,6 @@ interface ToolApprovalCardProps {
 export function ToolApprovalCard({ toolName, approvalId, threadId }: ToolApprovalCardProps) {
   const [status, setStatus] = useState<"pending" | "approving" | "denying" | "done">("pending");
   const respond = useMutation(api.chat.respondToToolApproval);
-  const continueAgent = useAction(api.chatProcessing.continueAfterApproval);
   const { track } = useAnalytics();
   const [shownTime] = useState(() => Date.now());
 
@@ -40,8 +39,12 @@ export function ToolApprovalCard({ toolName, approvalId, threadId }: ToolApprova
   const handleResponse = async (approved: boolean) => {
     setStatus(approved ? "approving" : "denying");
     try {
-      const { messageId } = await respond({ threadId, approvalId, approved });
-      await continueAgent({ threadId, messageId, userTimezone: getBrowserTimezone() });
+      const { continuationScheduled } = await respond({
+        threadId,
+        approvalId,
+        approved,
+        userTimezone: getBrowserTimezone(),
+      });
       if (approved) {
         track("tool_approved", {
           tool_name: toolName,
@@ -51,7 +54,13 @@ export function ToolApprovalCard({ toolName, approvalId, threadId }: ToolApprova
         track("tool_denied", { tool_name: toolName });
       }
       setStatus("done");
-      toast.success(approved ? "Action approved" : "Action denied");
+      toast.success(
+        continuationScheduled
+          ? approved
+            ? "Action approved"
+            : "Action denied"
+          : "Response saved — answer the remaining approvals",
+      );
     } catch (err) {
       console.error("Approval failed:", err);
       setStatus("pending");

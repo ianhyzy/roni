@@ -137,9 +137,9 @@ export const advanceTrainingBlockTool = createTool({
     const userId = requireUserId(ctx);
     const result = (await ctx.runMutation(internal.coach.periodization.advanceWeek, {
       userId: userId as Id<"users">,
-    })) as { transitioned: boolean; newBlock: Doc<"trainingBlocks"> | null };
+    })) as { advanced: boolean; transitioned: boolean; newBlock: Doc<"trainingBlocks"> | null };
     return {
-      advanced: true,
+      advanced: result.advanced,
       transitioned: result.transitioned,
       newBlock: result.newBlock
         ? { type: result.newBlock.blockType, label: result.newBlock.label }

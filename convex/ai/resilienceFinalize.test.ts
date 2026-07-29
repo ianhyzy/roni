@@ -28,6 +28,13 @@ describe("getFinalizeCodeForError", () => {
     expect(finalizeCode).toBe("unknown_error");
   });
 
+  it("does not persist a custom error name", () => {
+    const error = new Error("provider body containing a secret");
+    error.name = "leaked-api-key";
+
+    expect(getFinalizeCodeForError(error)).toBe("unexpected_error");
+  });
+
   it("maps provider_response_failed to provider_overload finalize code", () => {
     // provider_response_failed is the synthetic error thrown when finishReason:"error"
     // resolves without a thrown exception. After being classified as transient, if all

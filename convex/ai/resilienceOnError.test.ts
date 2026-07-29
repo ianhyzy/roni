@@ -38,6 +38,7 @@ function baseStreamWithRetryArgs(provider: ProviderId) {
   return {
     primaryModelName: "test-model",
     threadId: "thread-1",
+    promptMessageId: "prompt-1",
     userId: "user-1",
     prompt: "hello",
     isByok: false,
@@ -45,6 +46,43 @@ function baseStreamWithRetryArgs(provider: ProviderId) {
     source: "chat" as const,
     environment: "dev" as const,
   };
+}
+
+interface FakeAgentMessage {
+  _id: string;
+  _creationTime?: number;
+  threadId: string;
+  order: number;
+  status: "pending" | "success" | "failed";
+  error?: string;
+}
+
+function makeTurnCtx(initialMessages: FakeAgentMessage[]) {
+  const messages = initialMessages.map((message) => ({ ...message }));
+  const runQuery = vi.fn(
+    async (
+      _reference: unknown,
+      args: { messageIds?: string[]; statuses?: Array<FakeAgentMessage["status"]> },
+    ) => {
+      if (args.messageIds) {
+        return [{ _id: "prompt-1", threadId: "thread-1", order: 1, status: "success" }];
+      }
+      return {
+        page: args.statuses
+          ? messages.filter((message) => args.statuses?.includes(message.status))
+          : messages,
+        isDone: true,
+        continueCursor: "",
+      };
+    },
+  );
+  const runMutation = vi.fn(
+    async (_reference: unknown, args: { messageId: string; patch: Partial<FakeAgentMessage> }) => {
+      const message = messages.find((candidate) => candidate._id === args.messageId);
+      if (message) Object.assign(message, args.patch);
+    },
+  );
+  return { runMutation, runQuery };
 }
 
 describe("onError pre-emptive finalization", () => {
@@ -56,7 +94,7 @@ describe("onError pre-emptive finalization", () => {
     );
   });
 
-  it("patches pending messages with provider_overload for Gemini stream errors", async () => {
+  it("atomically marks Gemini transient stream failures as retrying", async () => {
     const highDemandError = new Error(
       "This model is currently experiencing high demand. Spikes in demand are usually temporary.",
     );
@@ -69,10 +107,9 @@ describe("onError pre-emptive finalization", () => {
     const agent = {
       continueThread: vi.fn(async () => ({ thread: { streamText } })),
     } as unknown as Agent;
-    const runQuery = vi.fn(async () => ({
-      page: [{ _id: "pending-msg", status: "pending" }],
-    }));
-    const runMutation = vi.fn(async () => undefined);
+    const { runQuery, runMutation } = makeTurnCtx([
+      { _id: "pending-turn-a", threadId: "thread-1", order: 1, status: "pending" },
+    ]);
 
     await streamWithRetry({ runQuery, runMutation, runAction: vi.fn() } as unknown as ActionCtx, {
       primaryAgent: agent,
@@ -83,16 +120,10 @@ describe("onError pre-emptive finalization", () => {
     expect(runMutation).toHaveBeenCalledWith(
       components.agent.messages.updateMessage,
       expect.objectContaining({
-        messageId: "pending-msg",
-        patch: { status: "failed", error: "provider_overload" },
+        messageId: "pending-turn-a",
+        patch: { status: "failed", error: "transient_retry" },
       }),
     );
-    expect(runQuery).toHaveBeenCalledWith(components.agent.messages.listMessagesByThreadId, {
-      threadId: "thread-1",
-      paginationOpts: { cursor: null, numItems: 50 },
-      order: "desc",
-      statuses: ["pending"],
-    });
   });
 
   it("does not expose raw provider error text in the finalization code", async () => {
@@ -107,10 +138,9 @@ describe("onError pre-emptive finalization", () => {
     const agent = {
       continueThread: vi.fn(async () => ({ thread: { streamText } })),
     } as unknown as Agent;
-    const runQuery = vi.fn(async () => ({
-      page: [{ _id: "msg-1", status: "pending" }],
-    }));
-    const runMutation = vi.fn(async () => undefined);
+    const { runQuery, runMutation } = makeTurnCtx([
+      { _id: "msg-1", threadId: "thread-1", order: 1, status: "pending" },
+    ]);
 
     await streamWithRetry({ runQuery, runMutation, runAction: vi.fn() } as unknown as ActionCtx, {
       primaryAgent: agent,
@@ -121,7 +151,7 @@ describe("onError pre-emptive finalization", () => {
     expect(runMutation).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({
-        patch: { status: "failed", error: "provider_overload" },
+        patch: { status: "failed", error: "transient_retry" },
       }),
     );
     expect(runMutation).not.toHaveBeenCalledWith(
@@ -132,7 +162,7 @@ describe("onError pre-emptive finalization", () => {
     );
   });
 
-  it("finalizes with provider_overload for Claude overload errors as well", async () => {
+  it("atomically marks Claude overload failures as retrying", async () => {
     const overloadError = new Error("Service overloaded. Please try again later.");
     const streamText = vi.fn(
       async (options: { onError?: (args: { error: unknown }) => Promise<void> }) => {
@@ -143,10 +173,9 @@ describe("onError pre-emptive finalization", () => {
     const agent = {
       continueThread: vi.fn(async () => ({ thread: { streamText } })),
     } as unknown as Agent;
-    const runQuery = vi.fn(async () => ({
-      page: [{ _id: "pending-claude", status: "pending" }],
-    }));
-    const runMutation = vi.fn(async () => undefined);
+    const { runQuery, runMutation } = makeTurnCtx([
+      { _id: "pending-claude", threadId: "thread-1", order: 1, status: "pending" },
+    ]);
 
     await streamWithRetry({ runQuery, runMutation, runAction: vi.fn() } as unknown as ActionCtx, {
       primaryAgent: agent,
@@ -158,15 +187,14 @@ describe("onError pre-emptive finalization", () => {
       expect.anything(),
       expect.objectContaining({
         messageId: "pending-claude",
-        patch: { status: "failed", error: "provider_overload" },
+        patch: { status: "failed", error: "transient_retry" },
       }),
     );
   });
 
-  it("does not finalize when onError is not called (happy path)", async () => {
+  it("does not fail a message when onError is not called", async () => {
     const { agent } = makeSuccessAgent();
-    const runQuery = vi.fn(async () => ({ page: [] }));
-    const runMutation = vi.fn(async () => undefined);
+    const { runQuery, runMutation } = makeTurnCtx([]);
 
     const accumulator = await streamWithRetry(
       { runQuery, runMutation, runAction: vi.fn() } as unknown as ActionCtx,
@@ -179,8 +207,8 @@ describe("onError pre-emptive finalization", () => {
 
     expect(accumulator.toRow().finishReason).not.toBe("error");
     expect(runMutation).not.toHaveBeenCalledWith(
-      components.agent.messages.updateMessage,
       expect.anything(),
+      expect.objectContaining({ patch: expect.objectContaining({ status: "failed" }) }),
     );
   });
 
@@ -197,10 +225,9 @@ describe("onError pre-emptive finalization", () => {
     const agent = {
       continueThread: vi.fn(async () => ({ thread: { streamText } })),
     } as unknown as Agent;
-    const runQuery = vi.fn(async () => ({
-      page: [{ _id: "pending-msg", status: "pending" }],
-    }));
-    const runMutation = vi.fn(async () => undefined);
+    const { runQuery, runMutation } = makeTurnCtx([
+      { _id: "pending-msg", threadId: "thread-1", order: 1, status: "pending" },
+    ]);
 
     await streamWithRetry({ runQuery, runMutation, runAction: vi.fn() } as unknown as ActionCtx, {
       primaryAgent: agent,
@@ -212,16 +239,12 @@ describe("onError pre-emptive finalization", () => {
       expect.anything(),
       expect.objectContaining({
         messageId: "pending-msg",
-        patch: { status: "failed", error: "provider_overload" },
+        patch: { status: "failed", error: "transient_retry" },
       }),
     );
   });
 
-  it("finalizes with network code for ECONNRESET stream errors", async () => {
-    // ECONNRESET is a TCP-level connection reset from the provider. Before the fix,
-    // isTransientError returned false for ECONNRESET, so the error was terminal and
-    // the finalize code was "Error" (the error's .name). After the fix, it is
-    // classified as transient/network so the finalize code is "network".
+  it("atomically marks ECONNRESET stream errors as retrying", async () => {
     const econnresetError = new Error("Cannot connect to API: read ECONNRESET");
     const streamText = vi.fn(
       async (options: { onError?: (args: { error: unknown }) => Promise<void> }) => {
@@ -232,10 +255,9 @@ describe("onError pre-emptive finalization", () => {
     const agent = {
       continueThread: vi.fn(async () => ({ thread: { streamText } })),
     } as unknown as Agent;
-    const runQuery = vi.fn(async () => ({
-      page: [{ _id: "pending-econnreset", status: "pending" }],
-    }));
-    const runMutation = vi.fn(async () => undefined);
+    const { runQuery, runMutation } = makeTurnCtx([
+      { _id: "pending-econnreset", threadId: "thread-1", order: 1, status: "pending" },
+    ]);
 
     await streamWithRetry({ runQuery, runMutation, runAction: vi.fn() } as unknown as ActionCtx, {
       primaryAgent: agent,
@@ -247,12 +269,12 @@ describe("onError pre-emptive finalization", () => {
       expect.anything(),
       expect.objectContaining({
         messageId: "pending-econnreset",
-        patch: { status: "failed", error: "network" },
+        patch: { status: "failed", error: "transient_retry" },
       }),
     );
   });
 
-  it("ignores already-terminal messages when onError fires", async () => {
+  it("persists a retry lease on the prompt without demoting terminal steps", async () => {
     const highDemandError = new Error(
       "This model is currently experiencing high demand. Spikes in demand are usually temporary.",
     );
@@ -265,13 +287,11 @@ describe("onError pre-emptive finalization", () => {
     const agent = {
       continueThread: vi.fn(async () => ({ thread: { streamText } })),
     } as unknown as Agent;
-    const runQuery = vi.fn(async () => ({
-      page: [
-        { _id: "success-msg", status: "success" },
-        { _id: "failed-msg", status: "failed" },
-      ],
-    }));
-    const runMutation = vi.fn(async () => undefined);
+    const { runQuery, runMutation } = makeTurnCtx([
+      { _id: "prompt-1", threadId: "thread-1", order: 1, status: "success" },
+      { _id: "success-msg", threadId: "thread-1", order: 1, status: "success" },
+      { _id: "failed-msg", threadId: "thread-1", order: 1, status: "failed" },
+    ]);
 
     await streamWithRetry({ runQuery, runMutation, runAction: vi.fn() } as unknown as ActionCtx, {
       primaryAgent: agent,
@@ -279,9 +299,19 @@ describe("onError pre-emptive finalization", () => {
       ...baseStreamWithRetryArgs("gemini"),
     });
 
+    expect(runMutation).toHaveBeenCalledWith(
+      components.agent.messages.updateMessage,
+      expect.objectContaining({
+        messageId: "prompt-1",
+        patch: { error: "transient_retry" },
+      }),
+    );
     expect(runMutation).not.toHaveBeenCalledWith(
       components.agent.messages.updateMessage,
-      expect.anything(),
+      expect.objectContaining({
+        messageId: "success-msg",
+        patch: expect.objectContaining({ status: "failed" }),
+      }),
     );
   });
 });

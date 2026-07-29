@@ -87,4 +87,21 @@ describe("MessageList", () => {
     expect(screen.getAllByTestId("chat-message")).toHaveLength(1);
     expect(screen.queryByText("two:solo")).not.toBeInTheDocument();
   });
+
+  it("hides an empty failed row while its retry lease is active", () => {
+    const messages = [
+      createMessage({
+        key: "retrying",
+        metadata: { roniTurn: { phase: "retrying" } },
+        parts: [],
+        role: "assistant",
+        status: "failed",
+        text: "",
+      }),
+    ];
+
+    render(<MessageList messages={messages} threadId="thread-1" />);
+
+    expect(screen.queryByTestId("chat-message")).not.toBeInTheDocument();
+  });
 });

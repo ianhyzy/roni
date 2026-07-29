@@ -5,6 +5,7 @@ import type { Id } from "../_generated/dataModel";
 import type { ActionCtx } from "../_generated/server";
 import { estimateAttemptCostUsd } from "./circuitBreakerCore";
 import type { ProviderId } from "./providers";
+import { getFinalizeCodeForError, sanitizeErrorCode } from "./resilienceReporting";
 import type { AttemptUsageSnapshot, RunAccumulator } from "./runTelemetry";
 
 const reservePrimaryAttemptRef = makeFunctionReference<
@@ -72,6 +73,7 @@ interface CircuitBreakerFlowArgs {
   retryDelayMs: number;
   runAttempt: (agent: Agent) => Promise<AttemptOutcome>;
   finalizePending: (reason: string) => Promise<void>;
+  markRetrying: () => Promise<void>;
   recordTerminalError: (error: unknown) => Promise<void>;
 }
 
@@ -89,9 +91,22 @@ export async function runWithPrimaryCircuitBreaker(args: CircuitBreakerFlowArgs)
     retryDelayMs,
     runAttempt,
     finalizePending,
+    markRetrying,
     recordTerminalError,
   } = args;
   const breakerUserId = userId as Id<"users">;
+
+  const scheduleNotification = async (notification: {
+    source: string;
+    message: string;
+    userId?: string;
+  }): Promise<void> => {
+    try {
+      await ctx.scheduler.runAfter(0, internal.discord.notifyError, notification);
+    } catch {
+      // Alerting is optional and must never cancel the user's retry or fallback.
+    }
+  };
 
   const notifyBreakerOpened = async (details: {
     openReason: "error_threshold" | "cost_threshold" | "half_open_failure";
@@ -100,7 +115,7 @@ export async function runWithPrimaryCircuitBreaker(args: CircuitBreakerFlowArgs)
     primaryErrorClass: string;
     fallbackOutcome: FallbackOutcome;
   }) => {
-    await ctx.runAction(internal.discord.notifyError, {
+    await scheduleNotification({
       source: "aiCircuitBreaker",
       message: [
         `Opened ${provider} circuit breaker (${details.openReason}) after ${details.recentFailures} failed primary attempts and $${details.recentFailedCostUsd.toFixed(2)} of failed spend in the last 60s`,
@@ -117,7 +132,7 @@ export async function runWithPrimaryCircuitBreaker(args: CircuitBreakerFlowArgs)
     openReason: "error_threshold" | "cost_threshold" | "half_open_failure";
     fallbackOutcome: CompletedFallbackOutcome;
   }) => {
-    await ctx.runAction(internal.discord.notifyError, {
+    await scheduleNotification({
       source: "aiCircuitBreaker",
       message: [
         `Fallback completed for ${provider} circuit breaker (${details.openReason})`,
@@ -168,7 +183,7 @@ export async function runWithPrimaryCircuitBreaker(args: CircuitBreakerFlowArgs)
       return { status: "failed", errorClass: errorClassName(final.error) };
     }
     if (final.success) return { status: "succeeded" };
-    return { status: "failed", errorClass: final.errorClass };
+    return { status: "failed", errorClass: sanitizeErrorCode(final.errorClass) };
   };
 
   const routeDecision: {
@@ -205,20 +220,21 @@ export async function runWithPrimaryCircuitBreaker(args: CircuitBreakerFlowArgs)
           model: finalUsage.modelId ?? primaryModelName,
         });
       } else {
+        const terminalErrorClass = sanitizeErrorCode(firstAttempt.errorClass);
         const failure = await ctx.runMutation(recordPrimaryAttemptFailureRef, {
           provider,
           runId,
           userId: breakerUserId,
           threadId,
           model: finalUsage.modelId ?? primaryModelName,
-          errorClass: firstAttempt.errorClass,
+          errorClass: terminalErrorClass,
         });
         if (failure.opened && failure.openReason) {
           await notifyBreakerOpened({
             openReason: failure.openReason,
             recentFailures: failure.recentFailures,
             recentFailedCostUsd: failure.recentFailedCostUsd,
-            primaryErrorClass: firstAttempt.errorClass,
+            primaryErrorClass: terminalErrorClass,
             fallbackOutcome: {
               status: "not_attempted",
               reason: "terminal_primary_failure",
@@ -236,6 +252,7 @@ export async function runWithPrimaryCircuitBreaker(args: CircuitBreakerFlowArgs)
   });
   if (firstFailure.opened) {
     await finalizePending("transient_retry");
+    await markRetrying();
     accumulator.markFallback("circuit_open");
     const fallbackOutcome = await runFallbackAttempt();
     if (firstFailure.openReason) {
@@ -251,6 +268,7 @@ export async function runWithPrimaryCircuitBreaker(args: CircuitBreakerFlowArgs)
   }
 
   await finalizePending("transient_retry");
+  await markRetrying();
   accumulator.markRetry();
   await delay(retryDelayMs);
 
@@ -263,6 +281,7 @@ export async function runWithPrimaryCircuitBreaker(args: CircuitBreakerFlowArgs)
     snapshot: secondAttemptSnapshot,
   });
   await finalizePending("transient_retry");
+  await markRetrying();
   accumulator.markRetry();
   accumulator.markFallback(secondFailure.opened ? "circuit_open" : "transient_exhaustion");
 
@@ -292,8 +311,7 @@ function formatFallbackOutcome(outcome: FallbackOutcome): string {
 }
 
 function errorClassName(error: unknown): string {
-  if (error instanceof Error) return error.name;
-  return "Unknown";
+  return getFinalizeCodeForError(error);
 }
 
 function delay(ms: number): Promise<void> {

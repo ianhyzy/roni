@@ -10,6 +10,19 @@ export interface PendingImage {
   readonly previewUrl: string;
 }
 
+function readStorageId(payload: unknown): string {
+  if (
+    typeof payload === "object" &&
+    payload !== null &&
+    "storageId" in payload &&
+    typeof payload.storageId === "string" &&
+    payload.storageId.length > 0
+  ) {
+    return payload.storageId;
+  }
+  throw new Error("Upload failed: invalid storage response");
+}
+
 interface UseImageUploadReturn {
   readonly pendingImages: readonly PendingImage[];
   readonly addImages: (files: FileList) => string | null;
@@ -25,6 +38,7 @@ export function useImageUpload(): UseImageUploadReturn {
 
   // Track all created object URLs for cleanup on unmount
   const createdUrlsRef = useRef<Set<string>>(new Set());
+  const uploadedIdsRef = useRef<Map<string, string>>(new Map());
 
   useEffect(() => {
     const urls = createdUrlsRef.current;
@@ -75,6 +89,7 @@ export function useImageUpload(): UseImageUploadReturn {
       if (removed) {
         URL.revokeObjectURL(removed.previewUrl);
         createdUrlsRef.current.delete(removed.previewUrl);
+        uploadedIdsRef.current.delete(removed.previewUrl);
       }
       return prev.filter((_, i) => i !== index);
     });
@@ -85,6 +100,7 @@ export function useImageUpload(): UseImageUploadReturn {
       for (const img of prev) {
         URL.revokeObjectURL(img.previewUrl);
         createdUrlsRef.current.delete(img.previewUrl);
+        uploadedIdsRef.current.delete(img.previewUrl);
       }
       return [];
     });
@@ -98,7 +114,13 @@ export function useImageUpload(): UseImageUploadReturn {
       try {
         const storageIds: string[] = [];
 
-        for (const { file } of pendingImages) {
+        for (const { file, previewUrl } of pendingImages) {
+          const cachedStorageId = uploadedIdsRef.current.get(previewUrl);
+          if (cachedStorageId) {
+            storageIds.push(cachedStorageId);
+            continue;
+          }
+
           const uploadUrl = await generateUploadUrl();
           const response = await fetch(uploadUrl, {
             method: "POST",
@@ -110,9 +132,8 @@ export function useImageUpload(): UseImageUploadReturn {
             throw new Error(`Upload failed: ${response.statusText}`);
           }
 
-          const { storageId } = (await response.json()) as {
-            storageId: string;
-          };
+          const storageId = readStorageId(await response.json());
+          uploadedIdsRef.current.set(previewUrl, storageId);
           storageIds.push(storageId);
         }
 

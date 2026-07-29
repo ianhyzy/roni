@@ -1,5 +1,17 @@
-import { describe, expect, it } from "vitest";
-import { getScheduledFailureContent, shouldNotifyScheduledFailure } from "./chatHelpers";
+import { saveMessage } from "@convex-dev/agent";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { components } from "./_generated/api";
+import type { ActionCtx } from "./_generated/server";
+import {
+  getScheduledFailureContent,
+  persistScheduledFailure,
+  shouldNotifyScheduledFailure,
+} from "./chatHelpers";
+
+vi.mock("@convex-dev/agent", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@convex-dev/agent")>()),
+  saveMessage: vi.fn(async () => undefined),
+}));
 
 describe("getScheduledFailureContent", () => {
   it("returns the missing-key message for BYOK-required users", () => {
@@ -101,5 +113,58 @@ describe("shouldNotifyScheduledFailure", () => {
     expect(
       shouldNotifyScheduledFailure(Object.assign(new Error("Unavailable"), { status: 503 })),
     ).toBe(false);
+  });
+});
+
+describe("persistScheduledFailure", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("anchors the fallback response to the failed turn", async () => {
+    await persistScheduledFailure({
+      ctx: { runAction: vi.fn() } as unknown as ActionCtx,
+      threadId: "thread-1",
+      promptMessageId: "prompt-1",
+      userId: "user-1",
+      error: new Error("byok_key_missing"),
+      provider: "gemini",
+      source: "chatProcessing.processMessage",
+    });
+
+    expect(saveMessage).toHaveBeenCalledWith(
+      expect.anything(),
+      components.agent,
+      expect.objectContaining({
+        threadId: "thread-1",
+        promptMessageId: "prompt-1",
+        userId: "user-1",
+      }),
+    );
+  });
+
+  it("does not fail a durable terminal response when alert scheduling is unavailable", async () => {
+    const runAfter = vi.fn(async () => {
+      throw new Error("scheduler unavailable");
+    });
+
+    await expect(
+      persistScheduledFailure({
+        ctx: { scheduler: { runAfter } } as unknown as ActionCtx,
+        threadId: "thread-1",
+        promptMessageId: "prompt-1",
+        userId: "user-1",
+        error: new Error("database blew up"),
+        provider: "gemini",
+        source: "chatProcessing.processMessage",
+      }),
+    ).resolves.toBeUndefined();
+
+    expect(saveMessage).toHaveBeenCalled();
+    expect(runAfter).toHaveBeenCalledWith(0, expect.anything(), {
+      source: "chatProcessing.processMessage",
+      message: "unexpected_scheduled_failure",
+      userId: "user-1",
+    });
   });
 });

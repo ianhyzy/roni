@@ -1,10 +1,34 @@
 "use client";
 
+import { AlertTriangle } from "lucide-react";
 import { WeekPlanCard } from "./WeekPlanCard";
 import { ActionConfirmationBanner } from "./ActionConfirmationBanner";
 import { extractBannerProps } from "./bannerExtractors";
-import { weekPlanPresentationSchema } from "../../../convex/ai/schemas";
-import type { WeekPlanPresentation } from "../../../convex/ai/schemas";
+import { programWeekOutputSchema, weekPlanPresentationSchema } from "../../../convex/ai/schemas";
+
+export const SPECIAL_RENDERER_TOOL_NAMES = ["program_week"] as const;
+export const STATE_CHANGING_TOOL_NAMES = [
+  "create_workout",
+  "delete_workout",
+  "program_week",
+  "delete_week_plan",
+  "approve_week_plan",
+  "swap_exercise",
+  "add_exercise",
+  "set_warmup_block",
+  "move_session",
+  "adjust_session_duration",
+  "rebuild_day",
+  "record_feedback",
+  "start_training_block",
+  "advance_training_block",
+  "set_goal",
+  "update_goal_progress",
+  "report_injury",
+  "resolve_injury",
+] as const;
+
+const STATE_CHANGING_TOOLS: ReadonlySet<string> = new Set(STATE_CHANGING_TOOL_NAMES);
 
 const TOOL_MESSAGES: Record<string, { running: string; done: string }> = {
   search_exercises: {
@@ -95,62 +119,60 @@ export function ToolCallIndicator({ toolName, state, output }: ToolCallIndicator
 
   const isRunning = state === "input-streaming" || state === "input-available";
   const isDone = state === "output-available";
+  const unconfirmedResult = (
+    <span
+      className="inline-flex items-center gap-1.5 rounded-md bg-amber-500/10 px-2.5 py-1 text-xs text-amber-700 dark:text-amber-300"
+      role="status"
+    >
+      <AlertTriangle className="size-3.5 shrink-0" aria-hidden="true" />
+      This change could not be confirmed.
+    </span>
+  );
+
+  if (state === "output-error") {
+    return (
+      <span
+        className="inline-flex items-center gap-1.5 rounded-md bg-destructive/10 px-2.5 py-1 text-xs text-destructive"
+        role="alert"
+      >
+        <AlertTriangle className="size-3.5 shrink-0" aria-hidden="true" />
+        Roni couldn&apos;t complete this step.
+      </span>
+    );
+  }
 
   // Special case: program_week shows WeekPlanCard when done
   if (toolName === "program_week" && isDone && output) {
-    const data = output as Record<string, unknown>;
-    const summary =
-      data?.success && typeof data.summary === "object" && data.summary !== null
-        ? (data.summary as Record<string, unknown>)
-        : null;
+    const outputResult = programWeekOutputSchema.safeParse(output);
+    if (!outputResult.success) return unconfirmedResult;
 
-    if (summary) {
-      const splitResult = weekPlanPresentationSchema.shape.split.safeParse(summary.preferredSplit);
-      if (!splitResult.success) return null;
+    const summary = outputResult.data.summary;
+    const planResult = weekPlanPresentationSchema.safeParse({
+      weekStartDate: summary.weekStartDate,
+      split: summary.preferredSplit,
+      days: summary.days.map((day) => ({
+        dayName: day.dayName,
+        sessionType: day.sessionType,
+        targetMuscles: [
+          ...new Set(day.exercises.flatMap((exercise) => exercise.muscleGroups)),
+        ].join(", "),
+        durationMinutes: day.estimatedDuration,
+        exercises: day.exercises.map((exercise) => ({
+          name: exercise.name,
+          sets: exercise.sets,
+          reps: exercise.reps,
+          duration: exercise.durationSeconds ?? exercise.duration,
+          targetWeight: exercise.targetWeight,
+          lastWeight: exercise.lastWeight,
+          note:
+            [exercise.suggestedTarget, exercise.lastTime].filter(Boolean).join(" | ") || undefined,
+        })),
+      })),
+      summary: `${summary.preferredSplit.toUpperCase()} split - ${summary.days.length} training days`,
+    });
+    if (!planResult.success) return unconfirmedResult;
 
-      const days = Array.isArray(summary.days) ? summary.days : [];
-      const plan: WeekPlanPresentation = {
-        weekStartDate: String(summary.weekStartDate ?? ""),
-        split: splitResult.data,
-        days: days.map((day: Record<string, unknown>) => {
-          const exercises = Array.isArray(day.exercises) ? day.exercises : [];
-          return {
-            dayName: String(day.dayName ?? ""),
-            sessionType: String(day.sessionType ?? ""),
-            targetMuscles: [
-              ...new Set(
-                exercises.flatMap((ex: Record<string, unknown>) =>
-                  Array.isArray(ex.muscleGroups) ? ex.muscleGroups : [],
-                ),
-              ),
-            ].join(", "),
-            durationMinutes: Number(day.estimatedDuration ?? 0),
-            exercises: exercises.map((ex: Record<string, unknown>) => {
-              const reps = typeof ex.reps === "number" ? ex.reps : undefined;
-              const duration =
-                typeof ex.durationSeconds === "number"
-                  ? ex.durationSeconds
-                  : typeof ex.duration === "number"
-                    ? ex.duration
-                    : undefined;
-
-              return {
-                name: String(ex.name ?? ""),
-                sets: Number(ex.sets ?? 0),
-                reps,
-                duration,
-                targetWeight: typeof ex.targetWeight === "number" ? ex.targetWeight : undefined,
-                lastWeight: typeof ex.lastWeight === "number" ? ex.lastWeight : undefined,
-                note: [ex.suggestedTarget, ex.lastTime].filter(Boolean).join(" | ") || undefined,
-              };
-            }),
-          };
-        }),
-        summary: `${String(summary.preferredSplit).toUpperCase()} split - ${days.length} training days`,
-      };
-
-      return <WeekPlanCard plan={plan} />;
-    }
+    return <WeekPlanCard plan={planResult.data} />;
   }
 
   // State-changing tools: show confirmation banner when done
@@ -159,6 +181,7 @@ export function ToolCallIndicator({ toolName, state, output }: ToolCallIndicator
     if (bannerProps) {
       return <ActionConfirmationBanner {...bannerProps} />;
     }
+    if (STATE_CHANGING_TOOLS.has(toolName)) return unconfirmedResult;
   }
 
   // Unified chip layout for both running and done

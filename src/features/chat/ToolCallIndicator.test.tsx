@@ -1,6 +1,11 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { ToolCallIndicator } from "./ToolCallIndicator";
+import {
+  SPECIAL_RENDERER_TOOL_NAMES,
+  STATE_CHANGING_TOOL_NAMES,
+  ToolCallIndicator,
+} from "./ToolCallIndicator";
+import { ACTION_BANNER_TOOL_NAMES } from "./bannerExtractors";
 
 type MockWeekPlan = {
   summary: string;
@@ -22,7 +27,38 @@ vi.mock("./WeekPlanCard", () => ({
   ),
 }));
 
+const validProgramWeekDay = {
+  dayIndex: 0,
+  dayName: "Monday",
+  sessionType: "push",
+  estimatedDuration: 45,
+  exercises: [{ name: "Bench Press", muscleGroups: ["Chest"], sets: 3, reps: 10 }],
+};
+
+function createProgramWeekOutput(
+  overrides: { weekStartDate?: unknown; preferredSplit?: unknown; days?: unknown[] } = {},
+) {
+  return {
+    success: true,
+    summary: {
+      weekStartDate: overrides.weekStartDate ?? "2026-04-13",
+      preferredSplit: overrides.preferredSplit ?? "ppl",
+      days: overrides.days ?? [validProgramWeekDay],
+    },
+  };
+}
+
 describe("ToolCallIndicator", () => {
+  it("covers every state-changing tool with a banner extractor or special renderer", () => {
+    const coveredToolNames = [...ACTION_BANNER_TOOL_NAMES, ...SPECIAL_RENDERER_TOOL_NAMES];
+
+    expect(new Set(coveredToolNames)).toEqual(new Set(STATE_CHANGING_TOOL_NAMES));
+    expect(new Set(coveredToolNames).size).toBe(coveredToolNames.length);
+    expect(new Set(STATE_CHANGING_TOOL_NAMES).size).toBe(STATE_CHANGING_TOOL_NAMES.length);
+    expect(STATE_CHANGING_TOOL_NAMES).toHaveLength(18);
+    expect(SPECIAL_RENDERER_TOOL_NAMES).toEqual(["program_week"]);
+  });
+
   it("renders running chip for a state-changing tool in progress", () => {
     render(<ToolCallIndicator toolName="approve_week_plan" state="input-available" />);
 
@@ -72,7 +108,24 @@ describe("ToolCallIndicator", () => {
     expect(screen.getByText("Exercise swapped")).toBeInTheDocument();
   });
 
-  it("falls back to chip when output shape is unexpected", () => {
+  it.each([
+    ["add_exercise", { success: true }, "Exercise added"],
+    ["set_warmup_block", { success: true }, "Warmup updated"],
+    ["rebuild_day", { success: true }, "Workout rebuilt"],
+    ["record_feedback", { recorded: true }, "Feedback recorded"],
+    ["report_injury", { recorded: true }, "Injury recorded"],
+    ["start_training_block", { started: true }, "Training block started"],
+    ["advance_training_block", { advanced: true }, "Training block advanced"],
+    ["set_goal", { created: true }, "Goal created"],
+    ["update_goal_progress", { updated: true }, "Goal progress updated"],
+    ["resolve_injury", { resolved: true }, "Injury resolved"],
+  ])("renders a truthful confirmation for %s", (toolName, output, message) => {
+    render(<ToolCallIndicator toolName={toolName} state="output-available" output={output} />);
+
+    expect(screen.getByText(message)).toBeInTheDocument();
+  });
+
+  it("does not claim success when a state-changing output is unexpected", () => {
     render(
       <ToolCallIndicator
         toolName="approve_week_plan"
@@ -81,7 +134,29 @@ describe("ToolCallIndicator", () => {
       />,
     );
 
-    expect(screen.getByText("Workouts pushed to Tonal")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("This change could not be confirmed.");
+    expect(screen.queryByText("Workouts pushed to Tonal")).not.toBeInTheDocument();
+  });
+
+  it("shows a generic error without exposing tool error details", () => {
+    render(
+      <ToolCallIndicator
+        toolName="approve_week_plan"
+        state="output-error"
+        output="provider-key-secret"
+      />,
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Roni couldn't complete this step.");
+    expect(screen.queryByText("provider-key-secret")).not.toBeInTheDocument();
+  });
+
+  it("requires confirmation for state-changing tools without a custom banner", () => {
+    render(
+      <ToolCallIndicator toolName="set_goal" state="output-available" output={{ ok: true }} />,
+    );
+
+    expect(screen.getByRole("status")).toHaveTextContent("This change could not be confirmed.");
   });
 
   it("renders chip for read-only tools", () => {
@@ -91,56 +166,46 @@ describe("ToolCallIndicator", () => {
   });
 
   it("still renders WeekPlanCard for program_week", () => {
-    const output = {
-      success: true,
-      summary: {
-        weekStartDate: "2026-04-14",
-        preferredSplit: "ppl",
-        days: [
-          {
-            dayName: "Monday",
-            sessionType: "Push",
-            estimatedDuration: 45,
-            exercises: [{ name: "Bench Press", muscleGroups: ["Chest"], sets: 3, reps: 10 }],
-          },
-        ],
-      },
-    };
-
-    render(<ToolCallIndicator toolName="program_week" state="output-available" output={output} />);
+    render(
+      <ToolCallIndicator
+        toolName="program_week"
+        state="output-available"
+        output={createProgramWeekOutput()}
+      />,
+    );
 
     expect(screen.getByTestId("week-plan-card")).toBeInTheDocument();
     expect(screen.getByText(/PPL split/)).toBeInTheDocument();
   });
 
-  it("preserves duration-based exercises from program_week output", () => {
-    const output = {
-      success: true,
-      summary: {
-        weekStartDate: "2026-04-14",
-        preferredSplit: "ppl",
-        days: [
-          {
-            dayName: "Monday",
-            sessionType: "Push",
-            estimatedDuration: 45,
-            exercises: [
+  it.each(["durationSeconds", "duration"])(
+    "preserves %s exercises from program_week output",
+    (durationField) => {
+      render(
+        <ToolCallIndicator
+          toolName="program_week"
+          state="output-available"
+          output={createProgramWeekOutput({
+            days: [
               {
-                name: "Plank",
-                muscleGroups: ["Core"],
-                sets: 3,
-                durationSeconds: 45,
+                ...validProgramWeekDay,
+                exercises: [
+                  {
+                    name: "Plank",
+                    muscleGroups: ["Core"],
+                    sets: 3,
+                    [durationField]: 45,
+                  },
+                ],
               },
             ],
-          },
-        ],
-      },
-    };
+          })}
+        />,
+      );
 
-    render(<ToolCallIndicator toolName="program_week" state="output-available" output={output} />);
-
-    expect(screen.getByText(/Plank duration:45 reps:none/)).toBeInTheDocument();
-  });
+      expect(screen.getByText(/Plank duration:45 reps:none/)).toBeInTheDocument();
+    },
+  );
 
   it("returns null for unknown state", () => {
     const { container } = render(
@@ -150,22 +215,74 @@ describe("ToolCallIndicator", () => {
     expect(container.firstChild).toBeNull();
   });
 
-  it("returns null for program_week with an invalid split value", () => {
-    const { container } = render(
-      <ToolCallIndicator
-        toolName="program_week"
-        state="output-available"
-        output={{
-          success: true,
-          summary: {
-            weekStartDate: "2026-04-14",
-            preferredSplit: "invalid_split",
-            days: [],
+  it.each([
+    {
+      name: "invalid calendar date",
+      output: createProgramWeekOutput({ weekStartDate: "2026-02-30" }),
+    },
+    {
+      name: "invalid split",
+      output: createProgramWeekOutput({ preferredSplit: "invalid_split" }),
+    },
+    {
+      name: "invalid day name",
+      output: createProgramWeekOutput({ days: [{ ...validProgramWeekDay, dayName: "Funday" }] }),
+    },
+    {
+      name: "mismatched day index",
+      output: createProgramWeekOutput({ days: [{ ...validProgramWeekDay, dayIndex: 1 }] }),
+    },
+    {
+      name: "invalid session type",
+      output: createProgramWeekOutput({ days: [{ ...validProgramWeekDay, sessionType: "Push" }] }),
+    },
+    {
+      name: "invalid session duration",
+      output: createProgramWeekOutput({
+        days: [{ ...validProgramWeekDay, estimatedDuration: 20 }],
+      }),
+    },
+    {
+      name: "zero training days",
+      output: createProgramWeekOutput({ days: [] }),
+    },
+    {
+      name: "malformed exercise",
+      output: createProgramWeekOutput({
+        days: [
+          {
+            ...validProgramWeekDay,
+            exercises: [{ ...validProgramWeekDay.exercises[0], sets: "3" }],
           },
-        }}
-      />,
-    );
+        ],
+      }),
+    },
+    {
+      name: "exercise with both reps and duration",
+      output: createProgramWeekOutput({
+        days: [
+          {
+            ...validProgramWeekDay,
+            exercises: [{ ...validProgramWeekDay.exercises[0], durationSeconds: 45 }],
+          },
+        ],
+      }),
+    },
+    {
+      name: "exercise with neither reps nor duration",
+      output: createProgramWeekOutput({
+        days: [
+          {
+            ...validProgramWeekDay,
+            exercises: [{ name: "Plank", muscleGroups: ["Core"], sets: 3 }],
+          },
+        ],
+      }),
+    },
+  ])("shows an unconfirmed result for a $name", ({ output }) => {
+    render(<ToolCallIndicator toolName="program_week" state="output-available" output={output} />);
 
-    expect(container.firstChild).toBeNull();
+    expect(screen.getByRole("status")).toHaveTextContent("This change could not be confirmed.");
+    expect(screen.queryByTestId("week-plan-card")).not.toBeInTheDocument();
   });
 });

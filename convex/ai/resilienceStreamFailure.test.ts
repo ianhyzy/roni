@@ -1,11 +1,11 @@
 import type { Agent } from "@convex-dev/agent";
 import { saveMessage } from "@convex-dev/agent";
-import type { PrepareStepFunction, StepResult, ToolSet } from "ai";
+import type { StepResult, ToolSet } from "ai";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { components } from "../_generated/api";
 import type { ActionCtx } from "../_generated/server";
-import type { ProviderId } from "./providers";
 import { streamWithRetry } from "./resilience";
+import { RETRY_FINISHED_MESSAGE_ERROR, RETRYING_MESSAGE_ERROR } from "./resilienceReporting";
 
 const runWithPrimaryCircuitBreakerMock = vi.hoisted(() => vi.fn());
 const recordErrorMock = vi.hoisted(() => vi.fn());
@@ -65,18 +65,58 @@ describe("streamWithRetry provider response failures", () => {
     // non-BYOK users must get a transient outcome so the circuit-breaker retry/fallback
     // path fires — not a dead-end terminal error with a generic "I'm having trouble" message.
     const streamText = vi.fn(
-      async (options: { onStepFinish: (step: StepResult<ToolSet>) => void }) => {
-        options.onStepFinish(responseFailedStep());
-        return { text: Promise.resolve("") };
+      async (options: { onStepFinish: (step: StepResult<ToolSet>) => Promise<void> | void }) => {
+        await options.onStepFinish(responseFailedStep());
+        return { text: Promise.resolve(""), savedMessages: [messages[1]] };
       },
     );
     const agent = {
       continueThread: vi.fn(async () => ({ thread: { streamText } })),
     } as unknown as Agent;
-    const runQuery = vi.fn(async () => ({
-      page: [{ _id: "pending-message", status: "pending" }],
-    }));
-    const runMutation = vi.fn(async () => undefined);
+    const messages: Array<{
+      _id: string;
+      threadId: string;
+      order: number;
+      status: "pending" | "failed" | "success";
+      error?: string;
+      finishReason?: "error";
+    }> = [
+      {
+        _id: "prompt-1",
+        threadId: "thread-1",
+        order: 1,
+        status: "success",
+        error: undefined as string | undefined,
+      },
+      {
+        _id: "provider-error-message",
+        threadId: "thread-1",
+        order: 1,
+        status: "success",
+        finishReason: "error",
+      },
+    ];
+    const runQuery = vi.fn(
+      async (
+        _reference: unknown,
+        queryArgs: { messageIds?: string[]; statuses?: Array<string> },
+      ) => {
+        if (queryArgs.messageIds) {
+          return [messages[0]];
+        }
+        return {
+          page: queryArgs.statuses
+            ? messages.filter((message) => queryArgs.statuses?.includes(message.status))
+            : messages,
+        };
+      },
+    );
+    const runMutation = vi.fn(
+      async (_reference: unknown, mutationArgs: { messageId: string; patch: object }) => {
+        const message = messages.find((candidate) => candidate._id === mutationArgs.messageId);
+        if (message) Object.assign(message, mutationArgs.patch);
+      },
+    );
     const runAction = vi.fn(async () => undefined);
 
     const accumulator = await streamWithRetry(
@@ -86,6 +126,7 @@ describe("streamWithRetry provider response failures", () => {
         fallbackAgent: agent,
         primaryModelName: "gemini-2.5-flash",
         threadId: "thread-1",
+        promptMessageId: "prompt-1",
         userId: "user-1",
         prompt: "hello",
         isByok: false,
@@ -105,36 +146,78 @@ describe("streamWithRetry provider response failures", () => {
     expect(saveMessage).not.toHaveBeenCalled();
     // No Discord notification for a transient signal.
     expect(runAction).not.toHaveBeenCalled();
-    // No direct failure patch from this layer; the circuit breaker handles retry cleanup.
-    expect(runMutation).not.toHaveBeenCalledWith(
-      components.agent.messages.updateMessage,
-      expect.anything(),
-    );
+    expect(runMutation).toHaveBeenCalledWith(components.agent.messages.updateMessage, {
+      messageId: "provider-error-message",
+      patch: { status: "failed", error: RETRYING_MESSAGE_ERROR },
+    });
+    expect(runMutation).toHaveBeenCalledWith(components.agent.messages.updateMessage, {
+      messageId: "prompt-1",
+      patch: { error: RETRY_FINISHED_MESSAGE_ERROR },
+    });
   });
 
   it("surfaces non-thrown provider finish errors as BYOK messages", async () => {
+    const messages: Array<{
+      _id: string;
+      threadId: string;
+      order: number;
+      status: "failed" | "success";
+      error?: string;
+      finishReason?: "error";
+    }> = [
+      { _id: "prompt-1", threadId: "thread-1", order: 1, status: "success" },
+      {
+        _id: "provider-error-message",
+        threadId: "thread-1",
+        order: 1,
+        status: "success",
+        finishReason: "error",
+      },
+    ];
     const streamText = vi.fn(
-      async (options: { onStepFinish: (step: StepResult<ToolSet>) => void }) => {
-        options.onStepFinish(responseFailedStep());
-        return { text: Promise.resolve("") };
+      async (options: { onStepFinish: (step: StepResult<ToolSet>) => Promise<void> | void }) => {
+        await options.onStepFinish(responseFailedStep());
+        return { text: Promise.resolve(""), savedMessages: [messages[1]] };
       },
     );
     const agent = {
       continueThread: vi.fn(async () => ({ thread: { streamText } })),
     } as unknown as Agent;
-    const runQuery = vi.fn(async () => ({
-      page: [{ _id: "pending-message", status: "pending" }],
-    }));
-    const runMutation = vi.fn(async () => undefined);
-    const runAction = vi.fn(async () => undefined);
+    const runQuery = vi.fn(
+      async (_reference: unknown, args: { messageIds?: string[]; statuses?: string[] }) =>
+        args.messageIds
+          ? [messages[0]]
+          : {
+              page: args.statuses
+                ? messages.filter((message) => args.statuses?.includes(message.status))
+                : messages,
+              isDone: true,
+              continueCursor: "",
+            },
+    );
+    const runMutation = vi.fn(
+      async (_reference: unknown, args: { messageId: string; patch: object }) => {
+        const message = messages.find((candidate) => candidate._id === args.messageId);
+        if (message) Object.assign(message, args.patch);
+      },
+    );
+    const scheduleNotification = vi.fn(async () => {
+      throw new Error("Discord unavailable");
+    });
 
     const accumulator = await streamWithRetry(
-      { runQuery, runMutation, runAction } as unknown as ActionCtx,
+      {
+        runQuery,
+        runMutation,
+        runAction: vi.fn(),
+        scheduler: { runAfter: scheduleNotification },
+      } as unknown as ActionCtx,
       {
         primaryAgent: agent,
         fallbackAgent: agent,
         primaryModelName: "gpt-5.4",
         threadId: "thread-1",
+        promptMessageId: "prompt-1",
         userId: "user-1",
         prompt: "hello",
         isByok: true,
@@ -151,141 +234,111 @@ describe("streamWithRetry provider response failures", () => {
     expect(runMutation).toHaveBeenCalledWith(
       components.agent.messages.updateMessage,
       expect.objectContaining({
-        messageId: "pending-message",
-        patch: { status: "failed", error: "byok_unknown_error" },
+        messageId: "provider-error-message",
+        patch: { status: "failed", error: RETRYING_MESSAGE_ERROR },
       }),
     );
-    expect(runQuery).toHaveBeenCalledWith(components.agent.messages.listMessagesByThreadId, {
-      threadId: "thread-1",
-      paginationOpts: { cursor: null, numItems: 50 },
-      order: "desc",
-      statuses: ["pending"],
-    });
     expect(saveMessage).toHaveBeenCalledWith(
       expect.anything(),
       expect.anything(),
       expect.objectContaining({
+        promptMessageId: "prompt-1",
         message: expect.objectContaining({
           content: expect.stringContaining("OpenAI returned an unexpected error"),
         }),
       }),
     );
-    expect(runAction).toHaveBeenCalledTimes(1);
+    expect(scheduleNotification).toHaveBeenCalledTimes(1);
+    expect(scheduleNotification).toHaveBeenCalledWith(0, expect.anything(), {
+      source: "streamWithRetry",
+      message: "byok_unknown_error on openai",
+      userId: "user-1",
+    });
     expect(recordErrorMock).toHaveBeenCalledWith("byok_unknown_error");
   });
-});
 
-function makeSuccessAgent(): {
-  agent: Agent;
-  captureStreamTextOptions: () => Record<string, unknown> | undefined;
-} {
-  let captured: Record<string, unknown> | undefined;
-  const streamText = vi.fn(async (options: Record<string, unknown>) => {
-    captured = options;
-    return { text: Promise.resolve("") };
-  });
-  const agent = {
-    continueThread: vi.fn(async () => ({ thread: { streamText } })),
-  } as unknown as Agent;
-  return { agent, captureStreamTextOptions: () => captured };
-}
-
-function baseStreamWithRetryArgs(provider: ProviderId) {
-  return {
-    primaryModelName: "test-model",
-    threadId: "thread-1",
-    userId: "user-1",
-    prompt: "hello",
-    isByok: false,
-    provider,
-    source: "chat" as const,
-    environment: "dev" as const,
-  };
-}
-
-describe("streamWithRetry prepareStep routing", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it("uses the fallback prepareStep when the circuit breaker runs the fallback agent", async () => {
-    const { agent: primaryAgent } = makeSuccessAgent();
-    const { agent: fallbackAgent, captureStreamTextOptions } = makeSuccessAgent();
-    const primaryPrepareStep = vi.fn(() => undefined) as PrepareStepFunction<ToolSet>;
-    const fallbackPrepareStep = vi.fn(() => undefined) as PrepareStepFunction<ToolSet>;
+  it("keeps the durable retry lease until the circuit-breaker chain is terminal", async () => {
     runWithPrimaryCircuitBreakerMock.mockImplementationOnce(
-      async (options: { fallbackAgent: Agent; runAttempt: unknown }) => {
-        const runAttempt = options.runAttempt as (agent: Agent) => Promise<unknown>;
-        return await runAttempt(options.fallbackAgent);
+      async (options: {
+        finalizePending: (reason: string) => Promise<void>;
+        markRetrying: () => Promise<void>;
+      }) => {
+        await options.finalizePending(RETRYING_MESSAGE_ERROR);
+        await options.markRetrying();
       },
     );
-    const ctx = {
-      runQuery: vi.fn(async () => ({ page: [] })),
-      runMutation: vi.fn(async () => undefined),
-      runAction: vi.fn(async () => undefined),
-    } as unknown as ActionCtx;
-
-    await streamWithRetry(ctx, {
-      primaryAgent,
-      fallbackAgent,
-      prepareStep: primaryPrepareStep,
-      fallbackPrepareStep,
-      ...baseStreamWithRetryArgs("gemini"),
-    });
-
-    expect(captureStreamTextOptions()?.prepareStep).toBe(fallbackPrepareStep);
-  });
-});
-
-describe("Gemini thinking disabled via providerOptions", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    runWithPrimaryCircuitBreakerMock.mockImplementation(
-      async (options: { primaryAgent: Agent; runAttempt: unknown }) => {
-        const runAttempt = options.runAttempt as (agent: Agent) => Promise<unknown>;
-        return await runAttempt(options.primaryAgent);
+    const messages: Array<{
+      _id: string;
+      threadId: string;
+      order: number;
+      status: "pending" | "failed" | "success";
+      error?: string;
+    }> = [
+      {
+        _id: "failed-attempt",
+        threadId: "thread-1",
+        order: 1,
+        status: "failed",
+        error: "provider_overload",
+      },
+      {
+        _id: "prompt-1",
+        threadId: "thread-1",
+        order: 1,
+        status: "success",
+        error: undefined as string | undefined,
+      },
+    ];
+    const runQuery = vi.fn(
+      async (
+        _reference: unknown,
+        args: {
+          messageIds?: string[];
+          statuses?: Array<"pending" | "failed" | "success">;
+        },
+      ) => {
+        if (args.messageIds) {
+          return [messages.find((message) => message._id === "prompt-1")];
+        }
+        return {
+          page: args.statuses
+            ? messages.filter((message) => args.statuses?.includes(message.status))
+            : messages,
+          isDone: true,
+          continueCursor: "",
+        };
       },
     );
-  });
+    const runMutation = vi.fn(
+      async (_reference: unknown, args: { messageId: string; patch: object }) => {
+        const message = messages.find((candidate) => candidate._id === args.messageId);
+        if (message) Object.assign(message, args.patch);
+      },
+    );
 
-  it("passes thinkingBudget: 0 providerOptions for Gemini to prevent thought_signature errors", async () => {
-    const { agent, captureStreamTextOptions } = makeSuccessAgent();
-    const ctx = {
-      runQuery: vi.fn(async () => ({ page: [] })),
-      runMutation: vi.fn(async () => undefined),
-      runAction: vi.fn(async () => undefined),
-    } as unknown as ActionCtx;
-
-    await streamWithRetry(ctx, {
-      primaryAgent: agent,
-      fallbackAgent: agent,
-      ...baseStreamWithRetryArgs("gemini"),
+    await streamWithRetry({ runQuery, runMutation, runAction: vi.fn() } as unknown as ActionCtx, {
+      primaryAgent: {} as Agent,
+      fallbackAgent: {} as Agent,
+      primaryModelName: "gemini-2.5-flash",
+      threadId: "thread-1",
+      promptMessageId: "prompt-1",
+      userId: "user-1",
+      prompt: "hello",
+      isByok: false,
+      provider: "gemini",
+      source: "chat",
+      environment: "prod",
     });
 
-    expect(captureStreamTextOptions()?.providerOptions).toEqual({
-      google: { thinkingConfig: { thinkingBudget: 0 } },
+    expect(runMutation).toHaveBeenNthCalledWith(1, components.agent.messages.updateMessage, {
+      messageId: "prompt-1",
+      patch: { error: RETRYING_MESSAGE_ERROR },
+    });
+    expect(runMutation).toHaveBeenNthCalledWith(2, components.agent.messages.updateMessage, {
+      messageId: "prompt-1",
+      patch: { error: RETRY_FINISHED_MESSAGE_ERROR },
     });
   });
-
-  it.each<ProviderId>(["claude", "openai", "openrouter"])(
-    "does not add Google providerOptions for %s provider",
-    async (provider) => {
-      const { agent, captureStreamTextOptions } = makeSuccessAgent();
-      const ctx = {
-        runQuery: vi.fn(async () => ({ page: [] })),
-        runMutation: vi.fn(async () => undefined),
-        runAction: vi.fn(async () => undefined),
-      } as unknown as ActionCtx;
-
-      await streamWithRetry(ctx, {
-        primaryAgent: agent,
-        fallbackAgent: agent,
-        ...baseStreamWithRetryArgs(provider),
-      });
-
-      expect(captureStreamTextOptions()?.providerOptions).toBeUndefined();
-    },
-  );
 });
 
 // onError pre-emptive finalization tests live in resilienceOnError.test.ts

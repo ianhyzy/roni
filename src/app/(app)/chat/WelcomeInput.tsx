@@ -53,13 +53,13 @@ export function WelcomeInput({
           return uploadUrl;
         });
         imageStorageIds = ids as Id<"_storage">[];
-        clearAll();
       }
 
       await sendMessage({
         prompt: trimmed || "What do you see in these images?",
         ...(imageStorageIds && imageStorageIds.length > 0 && { imageStorageIds }),
       });
+      if (imageStorageIds?.length) clearAll();
       track("message_sent", {
         message_length: trimmed.length,
         has_images: imageCount > 0,

@@ -1,6 +1,6 @@
 "use node";
 
-import type { Agent } from "@convex-dev/agent";
+import type { Agent, MessageDoc } from "@convex-dev/agent";
 import type { ModelMessage } from "@ai-sdk/provider-utils";
 import { saveMessage } from "@convex-dev/agent";
 import { stepCountIs } from "ai";
@@ -17,8 +17,13 @@ import { classifyByokError } from "./byokErrors";
 import { runInRunSpan } from "./otel";
 import { isQuotaError, isTransientError } from "./transientErrors";
 import {
+  type AgentTurnRef,
+  clearTurnRetrying,
   getFinalizeCodeForError,
+  markTurnRetrying,
+  RETRYING_MESSAGE_ERROR,
   safeFinalizePending,
+  safeMarkFailedTurnMessagesAsSuperseded,
   safeReportError,
   safeTryReportByok,
 } from "./resilienceReporting";
@@ -38,7 +43,7 @@ interface StreamWithRetryArgs {
   threadId: string;
   userId: string;
   prompt?: string | Array<ModelMessage>;
-  promptMessageId?: string;
+  promptMessageId: string;
   isByok: boolean;
   provider: ProviderId;
   source: "chat" | "approval_continuation";
@@ -52,7 +57,6 @@ interface StreamWithRetryArgs {
 }
 
 type PromptArgs =
-  | { prompt: string | Array<ModelMessage>; maxOutputTokens: number }
   | { promptMessageId: string; maxOutputTokens: number }
   | { promptMessageId: string; prompt: Array<ModelMessage>; maxOutputTokens: number };
 
@@ -86,15 +90,15 @@ export async function streamWithRetry(
     processingStartedAt,
     retrievalEnabled,
   } = args;
-  const promptArgs: PromptArgs = args.promptMessageId
-    ? args.prompt !== undefined
+  const turnRef: AgentTurnRef = { threadId, promptMessageId: args.promptMessageId };
+  const promptArgs: PromptArgs =
+    args.prompt !== undefined
       ? {
           promptMessageId: args.promptMessageId,
           prompt: args.prompt as Array<ModelMessage>,
           maxOutputTokens: MAX_OUTPUT_TOKENS,
         }
-      : { promptMessageId: args.promptMessageId, maxOutputTokens: MAX_OUTPUT_TOKENS }
-    : { prompt: args.prompt!, maxOutputTokens: MAX_OUTPUT_TOKENS };
+      : { promptMessageId: args.promptMessageId, maxOutputTokens: MAX_OUTPUT_TOKENS };
 
   return runInRunSpan(
     {
@@ -139,7 +143,11 @@ export async function streamWithRetry(
       };
       const accumulator = new RunAccumulator(accInit);
 
-      const errorReport = { threadId, userId, isByok, provider };
+      const errorReport = { ...turnRef, userId, isByok, provider };
+      let hasRetryMarker = false;
+      await markTurnRetrying(ctx, turnRef);
+      hasRetryMarker = true;
+      const finalizeTurnPending = (reason: string) => safeFinalizePending(ctx, turnRef, reason);
 
       const runAttempt = async (agent: Agent): Promise<AttemptOutcome> => {
         const attemptPrepareStep =
@@ -149,6 +157,7 @@ export async function streamWithRetry(
             ctx,
             agent,
             promptArgs,
+            turnRef,
             prepareStep: attemptPrepareStep,
             telemetry,
             accumulator,
@@ -168,6 +177,10 @@ export async function streamWithRetry(
             await safeReportError(ctx, { ...errorReport, error });
             return { done: true, success: false, errorClass: cls };
           }
+          await finalizeTurnPending(RETRYING_MESSAGE_ERROR);
+          await safeMarkFailedTurnMessagesAsSuperseded(ctx, turnRef);
+          await markTurnRetrying(ctx, turnRef);
+          hasRetryMarker = true;
           return { done: false, error };
         }
       };
@@ -184,7 +197,11 @@ export async function streamWithRetry(
         accumulator,
         retryDelayMs: RETRY_DELAY_MS,
         runAttempt,
-        finalizePending: (reason) => safeFinalizePending(ctx, threadId, reason),
+        finalizePending: finalizeTurnPending,
+        markRetrying: async () => {
+          await markTurnRetrying(ctx, turnRef);
+          hasRetryMarker = true;
+        },
         recordTerminalError: async (error) => {
           const cls = errorClassName(error);
           accumulator.setTerminalErrorClass(cls);
@@ -192,14 +209,14 @@ export async function streamWithRetry(
           await safeReportError(ctx, { ...errorReport, error });
         },
       });
+      if (hasRetryMarker) await clearTurnRetrying(ctx, turnRef);
       return accumulator;
     },
   );
 }
 
 function errorClassName(error: unknown): string {
-  if (error instanceof Error) return error.name;
-  return "Unknown";
+  return getFinalizeCodeForError(error);
 }
 
 interface TelemetryArgs {
@@ -219,6 +236,7 @@ interface AttemptStreamOptions {
   ctx: ActionCtx;
   agent: Agent;
   promptArgs: PromptArgs;
+  turnRef: AgentTurnRef;
   prepareStep?: PrepareStepFunction<ToolSet>;
   telemetry: TelemetryArgs;
   accumulator: RunAccumulator;
@@ -228,11 +246,13 @@ async function attemptStream({
   ctx,
   agent,
   promptArgs,
+  turnRef,
   prepareStep,
   telemetry,
   accumulator,
 }: AttemptStreamOptions): Promise<void> {
   const { threadId, userId } = telemetry;
+  const finalizeTurnPending = (reason: string) => safeFinalizePending(ctx, turnRef, reason);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort("Stream timeout"), ATTEMPT_TIMEOUT_MS);
   let budgetTrip: BudgetCapTrip | undefined;
@@ -266,7 +286,7 @@ async function attemptStream({
             // Telemetry must never fail the LLM turn.
           }
         },
-        onStepFinish: (step: StepResult<ToolSet>) => {
+        onStepFinish: async (step: StepResult<ToolSet>) => {
           try {
             accumulator.onStepFinish(step);
           } catch {
@@ -287,11 +307,12 @@ async function attemptStream({
           // with a sanitized finalize code here prevents the agent library from
           // encountering the error-event delta when its mutation runs, because
           // a message that is already "failed" skips further delta processing.
-          await safeFinalizePending(ctx, threadId, getFinalizeCodeForError(error));
+          await finalizeTurnPending(getAttemptFinalizeCode(error, telemetry.isByok));
         },
       },
       STREAM_OPTIONS,
     );
+    await failSavedProviderErrorMessages(ctx, result.savedMessages ?? []);
     // Await the full text. If the stream delivers an error event, @convex-dev/agent@0.6.1
     // may throw from its internal finalizeMessage mutation before our onError pre-emption
     // completes. Catching here ensures the pending message is always finalized and the
@@ -299,7 +320,7 @@ async function attemptStream({
     try {
       await result.text;
     } catch (streamError) {
-      await safeFinalizePending(ctx, threadId, getFinalizeCodeForError(streamError));
+      await finalizeTurnPending(getAttemptFinalizeCode(streamError, telemetry.isByok));
       throw streamError;
     }
     if (accumulator.toRow().finishReason === "error") throw new Error("provider_response_failed");
@@ -319,6 +340,27 @@ async function attemptStream({
   } finally {
     clearTimeout(timeout);
   }
+}
+
+async function failSavedProviderErrorMessages(
+  ctx: ActionCtx,
+  savedMessages: readonly MessageDoc[],
+): Promise<void> {
+  for (const message of savedMessages) {
+    if (message.finishReason !== "error" || message.status === "failed") continue;
+    await ctx.runMutation(components.agent.messages.updateMessage, {
+      messageId: message._id,
+      patch: { status: "failed", error: RETRYING_MESSAGE_ERROR },
+    });
+  }
+}
+
+function getAttemptFinalizeCode(error: unknown, isByok: boolean): string {
+  const isRetryable =
+    !isQuotaError(error) &&
+    isTransientError(error) &&
+    (!isByok || classifyByokError(error) === null);
+  return isRetryable ? RETRYING_MESSAGE_ERROR : getFinalizeCodeForError(error);
 }
 
 // Raw inputs/outputs go to Phoenix Cloud for conversation capture. BYOK keys

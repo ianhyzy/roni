@@ -1,5 +1,165 @@
-import { describe, expect, it } from "vitest";
+/// <reference types="vite/client" />
+import { saveMessage } from "@convex-dev/agent";
+import { convexTest } from "convex-test";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { internal } from "./_generated/api";
 import { classifyPromptIntent, selectCoachTierRoute } from "./chatProcessing";
+import schema from "./schema";
+
+const checkDailyBudgetMock = vi.hoisted(() => vi.fn());
+const clearTurnRetryingMock = vi.hoisted(() => vi.fn(async () => undefined));
+const assertThreadOwnershipMock = vi.hoisted(() => vi.fn(async () => undefined));
+const resolveUserProviderConfigMock = vi.hoisted(() => vi.fn());
+const streamWithRetryMock = vi.hoisted(() => vi.fn());
+
+vi.mock("@convex-dev/agent", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@convex-dev/agent")>()),
+  saveMessage: vi.fn(async () => ({ messageId: "prompt-1" })),
+}));
+
+vi.mock("./ai/budget", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./ai/budget")>()),
+  checkDailyBudget: checkDailyBudgetMock,
+}));
+
+vi.mock("./ai/resilience", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./ai/resilience")>()),
+  streamWithRetry: streamWithRetryMock,
+}));
+
+vi.mock("./ai/resilienceReporting", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./ai/resilienceReporting")>()),
+  clearTurnRetrying: clearTurnRetryingMock,
+}));
+
+vi.mock("./chatHelpers", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./chatHelpers")>()),
+  assertThreadOwnership: assertThreadOwnershipMock,
+  resolveUserProviderConfig: resolveUserProviderConfigMock,
+}));
+
+const modules = import.meta.glob("./**/*.*s");
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
+
+describe("processMessage", () => {
+  it("persists and anchors the prompt before stopping an over-budget turn", async () => {
+    checkDailyBudgetMock.mockResolvedValue(true);
+    const t = convexTest(schema, modules);
+    const userId = await t.run(async (ctx) => ctx.db.insert("users", {}));
+
+    await t.action(internal.chatProcessing.processMessage, {
+      threadId: "thread-1",
+      userId,
+      prompt: "Hello",
+    });
+
+    expect(saveMessage).toHaveBeenCalledTimes(1);
+    expect(saveMessage).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({
+        threadId: "thread-1",
+        userId,
+        message: { role: "user", content: "Hello" },
+      }),
+    );
+    expect(checkDailyBudgetMock).toHaveBeenCalledWith(
+      expect.anything(),
+      userId,
+      "thread-1",
+      "prompt-1",
+    );
+    expect(vi.mocked(saveMessage).mock.invocationCallOrder[0]).toBeLessThan(
+      checkDailyBudgetMock.mock.invocationCallOrder[0],
+    );
+    expect(streamWithRetryMock).not.toHaveBeenCalled();
+  });
+
+  it("anchors budget-check failures to the persisted prompt", async () => {
+    checkDailyBudgetMock.mockRejectedValue(new Error("budget query failed"));
+    const t = convexTest(schema, modules);
+    const userId = await t.run(async (ctx) => ctx.db.insert("users", {}));
+
+    await t.action(internal.chatProcessing.processMessage, {
+      threadId: "thread-1",
+      userId,
+      prompt: "Hello",
+    });
+
+    expect(saveMessage).toHaveBeenCalledTimes(2);
+    expect(saveMessage).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({
+        threadId: "thread-1",
+        promptMessageId: "prompt-1",
+        userId,
+        message: expect.objectContaining({ role: "assistant" }),
+      }),
+    );
+    expect(streamWithRetryMock).not.toHaveBeenCalled();
+    expect(clearTurnRetryingMock).toHaveBeenCalledWith(expect.anything(), {
+      threadId: "thread-1",
+      promptMessageId: "prompt-1",
+    });
+  });
+
+  it("clears the retry lease even when terminal response persistence fails", async () => {
+    checkDailyBudgetMock.mockRejectedValue(new Error("budget query failed"));
+    const defaultSaveMessage = vi.mocked(saveMessage).getMockImplementation();
+    if (!defaultSaveMessage) throw new Error("saveMessage mock is not configured");
+    vi.mocked(saveMessage)
+      .mockImplementationOnce(defaultSaveMessage)
+      .mockRejectedValueOnce(new Error("message persistence failed"));
+    const t = convexTest(schema, modules);
+    const userId = await t.run(async (ctx) => ctx.db.insert("users", {}));
+
+    await expect(
+      t.action(internal.chatProcessing.processMessage, {
+        threadId: "thread-1",
+        userId,
+        prompt: "Hello",
+      }),
+    ).rejects.toThrow("message persistence failed");
+
+    expect(clearTurnRetryingMock).toHaveBeenCalledWith(expect.anything(), {
+      threadId: "thread-1",
+      promptMessageId: "prompt-1",
+    });
+  });
+});
+
+describe("continueAfterApproval", () => {
+  it("clears the anchored retry lease after a continuation failure", async () => {
+    resolveUserProviderConfigMock.mockRejectedValueOnce(new Error("provider resolution failed"));
+    const t = convexTest(schema, modules);
+    const userId = await t.run(async (ctx) => ctx.db.insert("users", {}));
+
+    await t.action(internal.chatProcessing.continueAfterApproval, {
+      threadId: "thread-1",
+      messageId: "approval-message-1",
+      userId,
+    });
+
+    expect(assertThreadOwnershipMock).toHaveBeenCalledWith(expect.anything(), "thread-1", userId);
+    expect(clearTurnRetryingMock).toHaveBeenCalledWith(expect.anything(), {
+      threadId: "thread-1",
+      promptMessageId: "approval-message-1",
+    });
+    expect(saveMessage).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({
+        threadId: "thread-1",
+        promptMessageId: "approval-message-1",
+        userId,
+      }),
+    );
+  });
+});
 
 describe("classifyPromptIntent", () => {
   const chars = (length: number) => "x".repeat(length);

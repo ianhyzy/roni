@@ -8,6 +8,7 @@ import { MarkdownContent } from "./MarkdownContent";
 import { ToolApprovalCard } from "./ToolApprovalCard";
 import { ToolCallIndicator } from "./ToolCallIndicator";
 import { WeekPlanCard } from "./WeekPlanCard";
+import { hasRetryLease } from "./chatTurnState";
 import { weekPlanPresentationSchema } from "../../../convex/ai/schemas";
 
 function formatTime(timestamp: number): string {
@@ -74,6 +75,8 @@ interface ChatMessageProps {
 export function ChatMessage({ message, isGrouped, threadId }: ChatMessageProps) {
   const isUser = message.role === "user";
   const isStreaming = message.status === "streaming";
+  const hasResponseText = message.text.trim().length > 0;
+  const isRetrying = hasRetryLease(message);
 
   // User messages: right-aligned bubble
   if (isUser) {
@@ -142,18 +145,6 @@ export function ChatMessage({ message, isGrouped, threadId }: ChatMessageProps) 
       )}
 
       <div className="sm:pl-8">
-        {message.status === "failed" && !message.text.trim() && (
-          <div
-            role="alert"
-            className="flex items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/10 px-3 py-2.5 text-sm text-destructive"
-          >
-            <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-            <span>
-              Something went wrong generating a response. Check your AI provider&apos;s usage and
-              limits, or try again.
-            </span>
-          </div>
-        )}
         {message.parts.map((part, i) => {
           if (part.type === "text") {
             const text = part.text;
@@ -216,6 +207,19 @@ export function ChatMessage({ message, isGrouped, threadId }: ChatMessageProps) 
 
           return null;
         })}
+        {message.status === "failed" && !isRetrying && (
+          <div
+            role="alert"
+            className={`flex items-start gap-2 rounded-xl border border-destructive/30 bg-destructive/10 px-3 py-2.5 text-sm text-destructive ${hasResponseText ? "mt-2" : ""}`}
+          >
+            <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+            <span>
+              {hasResponseText
+                ? "Roni's response was interrupted before it finished."
+                : "Roni couldn't finish this response. Please try again."}
+            </span>
+          </div>
+        )}
 
         {/* Tool calls */}
         {(() => {

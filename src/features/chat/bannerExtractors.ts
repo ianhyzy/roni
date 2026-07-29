@@ -10,45 +10,103 @@ const approveWeekPlan: Extractor = (output) => {
   if (typeof output.error === "string") {
     return { variant: "error", message: output.error };
   }
-  if (typeof output.pushed === "number" && typeof output.failed === "number") {
-    if (output.failed > 0) {
+
+  const hasCounts =
+    Number.isInteger(output.pushed) &&
+    Number.isInteger(output.failed) &&
+    Number(output.pushed) >= 0 &&
+    Number(output.failed) >= 0;
+
+  if (output.success === false) {
+    if (hasCounts && Number(output.failed) > 0) {
       return { variant: "error", message: `${output.pushed} pushed, ${output.failed} failed` };
     }
-    return { variant: "success", message: `${output.pushed} workouts pushed to Tonal` };
+    return { variant: "error", message: "Failed to push workouts to Tonal" };
   }
-  return null;
+
+  if (output.success !== true || !hasCounts) return null;
+  if (Number(output.failed) > 0) {
+    return { variant: "error", message: `${output.pushed} pushed, ${output.failed} failed` };
+  }
+  return { variant: "success", message: `${output.pushed} workouts pushed to Tonal` };
 };
 
-function successBoolean(successMsg: string, errorMsg: string): Extractor {
+function booleanSentinel(field: string, successMsg: string, errorMsg: string): Extractor {
   return (output) => {
     if (!isRecord(output)) return null;
-    if (output.success === true) return { variant: "success", message: successMsg };
-    if (output.success === false) return { variant: "error", message: errorMsg };
+    if (output[field] === true) return { variant: "success", message: successMsg };
+    if (output[field] === false) return { variant: "error", message: errorMsg };
     return null;
   };
+}
+
+function successBoolean(successMsg: string, errorMsg: string): Extractor {
+  return booleanSentinel("success", successMsg, errorMsg);
 }
 
 function deletedBoolean(successMsg: string, errorMsg: string): Extractor {
-  return (output) => {
-    if (!isRecord(output)) return null;
-    if (output.deleted === true) return { variant: "success", message: successMsg };
-    if (output.deleted === false) return { variant: "error", message: errorMsg };
-    return null;
-  };
+  return booleanSentinel("deleted", successMsg, errorMsg);
 }
 
-const ACTION_EXTRACTORS: Record<string, Extractor> = {
+export const ACTION_BANNER_TOOL_NAMES = [
+  "approve_week_plan",
+  "create_workout",
+  "delete_workout",
+  "delete_week_plan",
+  "swap_exercise",
+  "add_exercise",
+  "set_warmup_block",
+  "move_session",
+  "adjust_session_duration",
+  "rebuild_day",
+  "record_feedback",
+  "start_training_block",
+  "advance_training_block",
+  "set_goal",
+  "update_goal_progress",
+  "report_injury",
+  "resolve_injury",
+] as const;
+
+type ActionBannerToolName = (typeof ACTION_BANNER_TOOL_NAMES)[number];
+
+function isActionBannerToolName(toolName: string): toolName is ActionBannerToolName {
+  return ACTION_BANNER_TOOL_NAMES.some((name) => name === toolName);
+}
+
+const ACTION_EXTRACTORS: Record<ActionBannerToolName, Extractor> = {
   approve_week_plan: approveWeekPlan,
   create_workout: successBoolean("Workout created", "Failed to create workout"),
   delete_workout: deletedBoolean("Workout deleted", "Failed to delete workout"),
   delete_week_plan: deletedBoolean("Week plan deleted", "Failed to delete week plan"),
   swap_exercise: successBoolean("Exercise swapped", "Failed to swap exercise"),
+  add_exercise: successBoolean("Exercise added", "Failed to add exercise"),
+  set_warmup_block: successBoolean("Warmup updated", "Failed to update warmup"),
   move_session: successBoolean("Session moved", "Failed to move session"),
   adjust_session_duration: successBoolean("Session adjusted", "Failed to adjust session"),
+  rebuild_day: successBoolean("Workout rebuilt", "Failed to rebuild workout"),
+  record_feedback: booleanSentinel("recorded", "Feedback recorded", "Failed to record feedback"),
+  start_training_block: booleanSentinel(
+    "started",
+    "Training block started",
+    "Failed to start training block",
+  ),
+  advance_training_block: booleanSentinel(
+    "advanced",
+    "Training block advanced",
+    "Failed to advance training block",
+  ),
+  set_goal: booleanSentinel("created", "Goal created", "Failed to create goal"),
+  update_goal_progress: booleanSentinel(
+    "updated",
+    "Goal progress updated",
+    "Failed to update goal progress",
+  ),
+  report_injury: booleanSentinel("recorded", "Injury recorded", "Failed to record injury"),
+  resolve_injury: booleanSentinel("resolved", "Injury resolved", "Failed to resolve injury"),
 };
 
 export function extractBannerProps(toolName: string, output: unknown): BannerProps | null {
-  const extractor = ACTION_EXTRACTORS[toolName];
-  if (!extractor) return null;
-  return extractor(output);
+  if (!isActionBannerToolName(toolName)) return null;
+  return ACTION_EXTRACTORS[toolName](output);
 }

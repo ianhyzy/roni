@@ -3,6 +3,7 @@
 import type { UIMessage } from "@convex-dev/agent/react";
 import { ChatMessage } from "./ChatMessage";
 import { DateDivider } from "./DateDivider";
+import { hasRetryLease } from "./chatTurnState";
 
 function isDifferentDay(a: number, b: number | null): boolean {
   if (!b) return true;
@@ -24,20 +25,21 @@ export function MessageList({
   userInitial?: string;
   threadId: string;
 }) {
+  const visibleMessages = messages.filter((message) => {
+    const hasToolParts = message.parts.some((part) => part.type === "dynamic-tool");
+    const isRetrying = hasRetryLease(message);
+    return !(
+      message.role === "assistant" &&
+      !message.text.trim() &&
+      !hasToolParts &&
+      (message.status !== "failed" || isRetrying)
+    );
+  });
+
   return (
     <>
-      {messages.map((message, i) => {
-        // Hide empty assistant messages (no text, no tool calls) unless failed
-        const hasToolParts = message.parts.some((p) => p.type === "dynamic-tool");
-        if (
-          message.role === "assistant" &&
-          !message.text.trim() &&
-          !hasToolParts &&
-          message.status !== "failed"
-        )
-          return null;
-
-        const prev = i > 0 ? messages[i - 1] : null;
+      {visibleMessages.map((message, i) => {
+        const prev = i > 0 ? visibleMessages[i - 1] : null;
         const showDateDivider = isDifferentDay(message._creationTime, prev?._creationTime ?? null);
         // Group consecutive messages from the same role (unless separated by a date)
         const isGrouped = !showDateDivider && prev?.role === message.role;

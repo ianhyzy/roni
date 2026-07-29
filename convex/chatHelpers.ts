@@ -145,6 +145,7 @@ export function shouldNotifyScheduledFailure(error: unknown): boolean {
 export async function persistScheduledFailure(args: {
   ctx: ActionCtx;
   threadId: string;
+  promptMessageId: string;
   userId: string;
   error: unknown;
   provider?: ProviderId;
@@ -152,18 +153,22 @@ export async function persistScheduledFailure(args: {
 }): Promise<void> {
   await saveMessage(args.ctx, components.agent, {
     threadId: args.threadId,
+    promptMessageId: args.promptMessageId,
     userId: args.userId,
     message: { role: "assistant", content: getScheduledFailureContent(args.error, args.provider) },
   });
 
   if (!shouldNotifyScheduledFailure(args.error)) return;
 
-  const reason = args.error instanceof Error ? args.error.message : String(args.error);
-  await args.ctx.runAction(internal.discord.notifyError, {
-    source: args.source,
-    message: reason,
-    userId: args.userId,
-  });
+  try {
+    await args.ctx.scheduler.runAfter(0, internal.discord.notifyError, {
+      source: args.source,
+      message: "unexpected_scheduled_failure",
+      userId: args.userId,
+    });
+  } catch {
+    // A terminal chat response is already durable; optional alerting must not strand the turn.
+  }
 }
 
 export async function buildPrompt(

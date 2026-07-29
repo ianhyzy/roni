@@ -146,7 +146,7 @@ export const advanceWeek = internalMutation({
       .withIndex("by_userId_status", (q) => q.eq("userId", args.userId).eq("status", "active"))
       .collect();
     const active = blocks[0];
-    if (!active) return { transitioned: false, newBlock: null };
+    if (!active) return { advanced: false, transitioned: false, newBlock: null };
 
     if (active.weekNumber >= active.totalWeeks) {
       // Block complete
@@ -167,7 +167,7 @@ export const advanceWeek = internalMutation({
           status: "active",
           createdAt: Date.now(),
         });
-        return { transitioned: true, newBlock: await ctx.db.get(deloadId) };
+        return { advanced: true, transitioned: true, newBlock: await ctx.db.get(deloadId) };
       }
       if (active.blockType === "deload") {
         const buildingId = await ctx.db.insert("trainingBlocks", {
@@ -180,14 +180,14 @@ export const advanceWeek = internalMutation({
           status: "active",
           createdAt: Date.now(),
         });
-        return { transitioned: true, newBlock: await ctx.db.get(buildingId) };
+        return { advanced: true, transitioned: true, newBlock: await ctx.db.get(buildingId) };
       }
-      return { transitioned: true, newBlock: null };
+      return { advanced: true, transitioned: true, newBlock: null };
     }
 
     // Just increment the week
     await ctx.db.patch(active._id, { weekNumber: active.weekNumber + 1 });
-    return { transitioned: false, newBlock: null };
+    return { advanced: true, transitioned: false, newBlock: null };
   },
 });
 

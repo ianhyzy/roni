@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery } from "convex/react";
 import { useUIMessages } from "@convex-dev/agent/react";
 import { toUIMessages, vMessageDoc } from "@convex-dev/agent";
@@ -10,21 +10,22 @@ import { api } from "../../../convex/_generated/api";
 import { MessageList } from "./MessageList";
 import { ChatInput } from "./ChatInput";
 import { ThinkingIndicator } from "./ThinkingIndicator";
+import {
+  deriveCoachTurnState,
+  getApprovalContinuationKey,
+  MAX_ACTIVE_TURN_AGE_MS,
+} from "./chatTurnState";
 import { ChevronDown, ChevronUp } from "lucide-react";
 
-interface ChatThreadProps {
-  userInitial?: string;
-  threadId: string;
-}
+type ChatThreadProps = { userInitial?: string; threadId: string };
+type PendingSubmission = { afterOrder: number; message: UIMessage };
+type ApprovalObservation = { key: string; startedAt: number };
 
-/**
- * Fake UIMessage shown instantly while waiting for the server to confirm.
- * Cleared once the real message appears in the query results.
- */
 function makePendingMessage(text: string): UIMessage {
+  const createdAt = Date.now();
   return {
-    key: `pending-${Date.now()}`,
-    _creationTime: Date.now(),
+    key: `pending-${createdAt}`,
+    _creationTime: createdAt,
     order: Number.MAX_SAFE_INTEGER,
     stepOrder: 0,
     status: "pending",
@@ -36,7 +37,6 @@ function makePendingMessage(text: string): UIMessage {
 
 export function ChatThread({ userInitial, threadId }: ChatThreadProps) {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const bottomRef = useRef<HTMLDivElement>(null);
   const {
     results: currentMessages,
     status,
@@ -44,7 +44,7 @@ export function ChatThread({ userInitial, threadId }: ChatThreadProps) {
   } = useUIMessages(api.chat.listMessages, { threadId }, { initialNumItems: 20, stream: true });
 
   const [historicalMessages, setHistoricalMessages] = useState<UIMessage[]>([]);
-  const [pendingText, setPendingText] = useState<string | null>(null);
+  const [pendingSubmission, setPendingSubmission] = useState<PendingSubmission | null>(null);
   const history = useQuery(api.threads.listConversationHistory, {
     beforeThreadId: threadId,
   });
@@ -60,36 +60,69 @@ export function ChatThread({ userInitial, threadId }: ChatThreadProps) {
     }
   };
 
-  // Show a local pending message until the server confirms it.
-  // No cleanup needed — once serverHasPending is true, we just stop appending.
   const serverMessages = [...historicalMessages, ...(currentMessages ?? [])];
-  const serverHasPending = pendingText
-    ? serverMessages.some((m) => m.role === "user" && m.text === pendingText)
+  const pendingMessage = pendingSubmission?.message ?? null;
+  const serverHasPending = pendingSubmission
+    ? (currentMessages ?? []).some(
+        (message) =>
+          message.role === "user" &&
+          message.text === pendingSubmission.message.text &&
+          message.order > pendingSubmission.afterOrder,
+      )
     : false;
 
-  // Stable reference so React doesn't remount between pending and server message
-  const pendingMessage = useMemo(
-    () => (pendingText ? makePendingMessage(pendingText) : null),
-    [pendingText],
-  );
+  useEffect(() => {
+    if (!serverHasPending) return;
+    const timer = window.setTimeout(() => setPendingSubmission(null), 0);
+    return () => window.clearTimeout(timer);
+  }, [serverHasPending]);
 
   const allMessages =
     pendingMessage && !serverHasPending ? [...serverMessages, pendingMessage] : serverMessages;
+  const visiblePendingMessage = pendingMessage && !serverHasPending ? pendingMessage : null;
+  const [now, setNow] = useState(() => Date.now());
+  const approvalContinuationKey = getApprovalContinuationKey(currentMessages ?? []);
+  const [approvalObservation, setApprovalObservation] = useState<ApprovalObservation | null>(null);
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setApprovalObservation((current) => {
+        if (!approvalContinuationKey) return null;
+        if (current?.key === approvalContinuationKey) return current;
+        return { key: approvalContinuationKey, startedAt: Date.now() };
+      });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [approvalContinuationKey]);
+  const approvalContinuationStartedAt =
+    approvalObservation?.key === approvalContinuationKey ? approvalObservation.startedAt : null;
+  const turnState = deriveCoachTurnState({
+    messages: currentMessages ?? [],
+    pendingMessage: visiblePendingMessage,
+    now,
+    approvalContinuationStartedAt,
+  });
+  const isTurnActive =
+    turnState.status === "submitting" ||
+    turnState.status === "working" ||
+    turnState.status === "awaiting-approval" ||
+    turnState.status === "retrying";
+  const showThinking =
+    (turnState.status === "working" || turnState.status === "retrying") &&
+    turnState.activity === "preparing";
+  const stateRefreshAt =
+    turnState.status === "submitting" ||
+    turnState.status === "working" ||
+    turnState.status === "retrying"
+      ? turnState.startedAt + MAX_ACTIVE_TURN_AGE_MS
+      : null;
 
-  const isStreaming = (currentMessages ?? []).some((m) => m.status === "streaming");
-  const lastMessage = allMessages[allMessages.length - 1];
+  useEffect(() => {
+    if (stateRefreshAt === null) return;
+    const delay = Math.max(0, stateRefreshAt - Date.now() + 1);
+    const timer = window.setTimeout(() => setNow(Date.now()), delay);
+    return () => window.clearTimeout(timer);
+  }, [stateRefreshAt]);
 
-  // Show thinking dots until the coach produces visible text.
-  const [mountTime] = useState(() => Date.now());
-  const STALE_MS = 2 * 60 * 1000;
-
-  const lastIsRecentUser =
-    lastMessage?.role === "user" && lastMessage._creationTime > mountTime - STALE_MS;
-  const lastIsAssistantWithoutText = lastMessage?.role === "assistant" && !lastMessage.text.trim();
-  const lastIsFailed = lastMessage?.status === "failed";
-  const isThinking = !lastIsFailed && (lastIsRecentUser || lastIsAssistantWithoutText);
-
-  // Track whether the user has scrolled away from the bottom.
   const [showScrollButton, setShowScrollButton] = useState(false);
   const NEAR_BOTTOM_THRESHOLD = 150;
 
@@ -105,7 +138,6 @@ export function ChatThread({ userInitial, threadId }: ChatThreadProps) {
     el.scrollTo({ top: el.scrollHeight, behavior });
   }, []);
 
-  // Update FAB visibility on scroll.
   useEffect(() => {
     const el = scrollContainerRef.current;
     if (!el) return;
@@ -114,7 +146,6 @@ export function ChatThread({ userInitial, threadId }: ChatThreadProps) {
     return () => el.removeEventListener("scroll", handleScroll);
   }, [isNearBottom]);
 
-  // Scroll to bottom on initial mount.
   const hasMountScrolled = useRef(false);
   useEffect(() => {
     if (hasMountScrolled.current || !currentMessages?.length) return;
@@ -122,23 +153,20 @@ export function ChatThread({ userInitial, threadId }: ChatThreadProps) {
     scrollToBottom("instant");
   }, [currentMessages, scrollToBottom]);
 
-  // Auto-scroll during streaming / thinking — only if already near the bottom.
-  // Prevents yanking user up during the pending→server swap or while reading history.
   const serverMessageCount = serverMessages.length;
   useEffect(() => {
-    if (isNearBottom()) {
-      scrollToBottom("smooth");
-    }
-  }, [serverMessageCount, isStreaming, isThinking, isNearBottom, scrollToBottom]);
+    if (isNearBottom()) scrollToBottom("smooth");
+  }, [serverMessageCount, isTurnActive, showThinking, isNearBottom, scrollToBottom]);
 
-  // Always scroll to bottom when the user sends a message.
   const handleSend = (text: string) => {
-    setPendingText(text);
+    setPendingSubmission({
+      afterOrder: currentMessages?.at(-1)?.order ?? -1,
+      message: makePendingMessage(text),
+    });
     scrollToBottom("smooth");
   };
 
-  const canLoadMoreHistory =
-    history !== undefined && history.hasMore && historicalMessages.length === 0;
+  const canLoadMoreHistory = history?.hasMore && historicalMessages.length === 0;
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -169,8 +197,21 @@ export function ChatThread({ userInitial, threadId }: ChatThreadProps) {
           <div role="log" aria-live="polite" aria-label="Chat messages">
             <MessageList messages={allMessages} userInitial={userInitial} threadId={threadId} />
           </div>
-          {isThinking && <ThinkingIndicator />}
-          <div ref={bottomRef} className="h-4" />
+          {turnState.status === "submitting" && (
+            <p role="status" className="px-4 pt-2 text-xs text-muted-foreground sm:px-6">
+              Sending message...
+            </p>
+          )}
+          {showThinking && <ThinkingIndicator startedAt={turnState.startedAt} />}
+          {turnState.status === "failed" && turnState.reason === "expired" && (
+            <div
+              role="alert"
+              className="mx-4 mt-3 rounded-xl border border-destructive/30 bg-destructive/10 px-3 py-2.5 text-sm text-destructive sm:mx-6"
+            >
+              Roni&apos;s response did not finish. You can send another message.
+            </div>
+          )}
+          <div className="h-4" />
         </div>
       </div>
       <div className="relative shrink-0 border-t border-border/50 p-3 sm:p-4">
@@ -184,7 +225,12 @@ export function ChatThread({ userInitial, threadId }: ChatThreadProps) {
             Latest
           </button>
         )}
-        <ChatInput threadId={threadId} disabled={isStreaming} onSend={handleSend} />
+        <ChatInput
+          threadId={threadId}
+          disabled={isTurnActive}
+          onSend={handleSend}
+          onSendError={() => setPendingSubmission(null)}
+        />
       </div>
     </div>
   );

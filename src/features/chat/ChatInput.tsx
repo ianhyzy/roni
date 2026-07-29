@@ -25,9 +25,10 @@ interface ChatInputProps {
   threadId: string;
   disabled?: boolean;
   onSend?: (text: string) => void;
+  onSendError?: () => void;
 }
 
-export function ChatInput({ threadId, disabled, onSend }: ChatInputProps) {
+export function ChatInput({ threadId, disabled, onSend, onSendError }: ChatInputProps) {
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -55,11 +56,12 @@ export function ChatInput({ threadId, disabled, onSend }: ChatInputProps) {
     const trimmed = input.trim();
     if (!trimmed && pendingImages.length === 0) return;
     if (sending) return;
+    const prompt = trimmed || "What do you see in these images?";
 
     setSending(true);
     setInput("");
     if (textareaRef.current) textareaRef.current.style.height = "auto";
-    onSend?.(trimmed);
+    onSend?.(prompt);
 
     try {
       // Upload images first if any are attached
@@ -71,15 +73,15 @@ export function ChatInput({ threadId, disabled, onSend }: ChatInputProps) {
         });
         // Convex upload endpoint returns branded Id<"_storage"> values at runtime
         imageStorageIds = ids as Id<"_storage">[];
-        clearAll();
       }
 
       await sendMessage({
-        prompt: trimmed || "What do you see in these images?",
+        prompt,
         threadId,
         userTimezone: getBrowserTimezone(),
         ...(imageStorageIds && imageStorageIds.length > 0 && { imageStorageIds }),
       });
+      if (imageStorageIds?.length) clearAll();
       setByokError(null);
       track("message_sent", {
         message_length: trimmed.length,
@@ -87,6 +89,7 @@ export function ChatInput({ threadId, disabled, onSend }: ChatInputProps) {
         image_count: pendingImages.length,
       });
     } catch (err) {
+      onSendError?.();
       setInput(trimmed);
       console.error("Failed to send message:", err);
 
@@ -117,6 +120,7 @@ export function ChatInput({ threadId, disabled, onSend }: ChatInputProps) {
     sendMessage,
     threadId,
     onSend,
+    onSendError,
     uploadAll,
     generateUploadUrl,
     clearAll,
