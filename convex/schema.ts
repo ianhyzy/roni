@@ -636,6 +636,8 @@ export default defineSchema({
     workoutType: v.string(),
     tonalWorkoutId: v.optional(v.string()),
     syncedAt: v.number(),
+    /** Absent rows predate safe finalization and must remain retry-eligible. */
+    performanceSyncComplete: v.optional(v.literal(true)),
   })
     .index("by_userId_activityId", ["userId", "activityId"])
     .index("by_userId_date", ["userId", "date"]),

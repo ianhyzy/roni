@@ -47,6 +47,7 @@ function chunk<T>(items: readonly T[], size: number): T[][] {
 /**
  * Persist synced workouts and performances in bounded mutation batches so a
  * large incremental backlog never overruns a single transaction's limits.
+ * Workouts are finalized last so they cannot hide interrupted performance work.
  * Empty inputs issue no writes.
  */
 export async function persistSyncedActivities(
@@ -55,16 +56,16 @@ export async function persistSyncedActivities(
   payloads: { workouts: WorkoutPayload[]; performances: PerformancePayload[] },
 ): Promise<void> {
   const { workouts, performances } = payloads;
-  for (const workoutChunk of chunk(workouts, PERSIST_CHUNK_SIZE)) {
-    await ctx.runMutation(internal.tonal.historySyncMutations.persistCompletedWorkouts, {
-      userId,
-      workouts: workoutChunk,
-    });
-  }
   for (const performanceChunk of chunk(performances, PERSIST_CHUNK_SIZE)) {
     await ctx.runMutation(internal.tonal.historySyncMutations.persistExercisePerformance, {
       userId,
       performances: performanceChunk,
+    });
+  }
+  for (const workoutChunk of chunk(workouts, PERSIST_CHUNK_SIZE)) {
+    await ctx.runMutation(internal.tonal.historySyncMutations.persistCompletedWorkouts, {
+      userId,
+      workouts: workoutChunk,
     });
   }
 }
@@ -108,16 +109,11 @@ async function processOneActivity(
   const workout = activityToWorkoutPayload(activity);
   const { activityId } = activity;
 
-  let detail: WorkoutActivityDetail | null = null;
-  try {
-    detail = (await ctx.runAction(internal.tonal.proxy.fetchWorkoutDetail, {
-      userId,
-      activityId,
-    })) as WorkoutActivityDetail | null;
-  } catch (err) {
-    console.error(`[historySync] Detail fetch failed for ${activityId}`, err);
-  }
-  if (!detail) return { workout, performances: [] };
+  const detail = (await ctx.runAction(internal.tonal.proxy.fetchWorkoutDetail, {
+    userId,
+    activityId,
+  })) as WorkoutActivityDetail | null;
+  if (!detail) throw new Error(`Workout detail unavailable for activity ${activityId}`);
 
   // Fetch formatted summary for per-movement totalVolume (optional).
   // totalVolume is a work-based metric (not weight x reps); kept for volume display.
@@ -173,12 +169,9 @@ async function fetchAndBuildPayloads(
       batch.map((a) => processOneActivity(ctx, userId, a, straightBarIds)),
     );
     for (const result of results) {
-      if (result.status === "fulfilled") {
-        workouts.push(result.value.workout);
-        performances.push(...result.value.performances);
-      } else {
-        console.error("[historySync] Activity processing failed", result.reason);
-      }
+      if (result.status === "rejected") throw result.reason;
+      workouts.push(result.value.workout);
+      performances.push(...result.value.performances);
     }
   }
   return { workouts, performances };

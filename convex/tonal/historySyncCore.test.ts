@@ -113,4 +113,25 @@ describe("persistSyncedActivities", () => {
 
     expect(chunkSizesFor(runMutation, "workouts")).toEqual([10]);
   });
+
+  test("does not mark workouts complete when a later performance chunk fails", async () => {
+    let performanceChunks = 0;
+    const runMutation = vi.fn(async (_ref: unknown, args: unknown) => {
+      if ((args as { performances?: PerformancePayload[] }).performances) {
+        performanceChunks++;
+        if (performanceChunks === 2) throw new Error("performance persistence failed");
+      }
+    });
+    const ctx = { runMutation } as unknown as ActionCtx;
+
+    await expect(
+      persistSyncedActivities(ctx, TEST_USER_ID, {
+        workouts: buildWorkouts(1),
+        performances: buildPerformances(MAX_CHUNK + 1),
+      }),
+    ).rejects.toThrow("performance persistence failed");
+
+    expect(chunkSizesFor(runMutation, "performances")).toEqual([MAX_CHUNK, 1]);
+    expect(chunkSizesFor(runMutation, "workouts")).toEqual([]);
+  });
 });

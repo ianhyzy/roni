@@ -58,7 +58,7 @@ export const snapshotValidator = v.object({
 // Query
 // ---------------------------------------------------------------------------
 
-/** Return the set of activityIds that already exist in completedWorkouts. */
+/** Return activityIds whose performance sync has been finalized. */
 export const getExistingActivityIds = internalQuery({
   args: { userId: v.id("users"), activityIds: v.array(v.string()) },
   handler: async (ctx, { userId, activityIds }) => {
@@ -70,7 +70,7 @@ export const getExistingActivityIds = internalQuery({
           q.eq("userId", userId).eq("activityId", activityId),
         )
         .first();
-      if (doc) existing.push(activityId);
+      if (doc?.performanceSyncComplete === true) existing.push(activityId);
     }
     return existing;
   },
@@ -133,7 +133,7 @@ export const refreshCompletedWorkoutMetadata = internalMutation({
   },
 });
 
-/** Insert new completed workouts (skips duplicates by activityId). */
+/** Finalize workouts, inserting new rows and upgrading legacy partial rows. */
 export const persistCompletedWorkouts = internalMutation({
   args: { userId: v.id("users"), workouts: v.array(workoutValidator) },
   handler: async (ctx, { userId, workouts }) => {
@@ -146,8 +146,22 @@ export const persistCompletedWorkouts = internalMutation({
           q.eq("userId", userId).eq("activityId", w.activityId),
         )
         .first();
-      if (exists) continue;
-      await ctx.db.insert("completedWorkouts", { userId, ...w, syncedAt: Date.now() });
+      if (exists) {
+        if (exists.performanceSyncComplete !== true) {
+          await ctx.db.patch(exists._id, {
+            ...buildMetadataPatch(exists, w),
+            performanceSyncComplete: true,
+            syncedAt: Date.now(),
+          });
+        }
+        continue;
+      }
+      await ctx.db.insert("completedWorkouts", {
+        userId,
+        ...w,
+        syncedAt: Date.now(),
+        performanceSyncComplete: true,
+      });
       inserted++;
     }
     return inserted;
