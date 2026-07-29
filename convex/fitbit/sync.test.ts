@@ -20,8 +20,8 @@ describe("buildFitbitSyncFilters", () => {
     expect(buildFitbitSyncFilters("2026-07-01")).toEqual({
       exercise: 'exercise.interval.civil_start_time >= "2026-07-01"',
       sleep: 'sleep.interval.civil_end_time >= "2026-07-01"',
-      "daily-resting-heart-rate": 'dailyRestingHeartRate.date >= "2026-07-01"',
-      "daily-heart-rate-variability": 'dailyHeartRateVariability.date >= "2026-07-01"',
+      "daily-resting-heart-rate": 'daily_resting_heart_rate.date >= "2026-07-01"',
+      "daily-heart-rate-variability": 'daily_heart_rate_variability.date >= "2026-07-01"',
     });
   });
 

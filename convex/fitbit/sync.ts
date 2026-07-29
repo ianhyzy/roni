@@ -34,8 +34,8 @@ export function buildFitbitSyncFilters(startDate: string): Record<FitbitDataType
   return {
     exercise: `exercise.interval.civil_start_time >= "${startDate}"`,
     sleep: `sleep.interval.civil_end_time >= "${startDate}"`,
-    "daily-resting-heart-rate": `dailyRestingHeartRate.date >= "${startDate}"`,
-    "daily-heart-rate-variability": `dailyHeartRateVariability.date >= "${startDate}"`,
+    "daily-resting-heart-rate": `daily_resting_heart_rate.date >= "${startDate}"`,
+    "daily-heart-rate-variability": `daily_heart_rate_variability.date >= "${startDate}"`,
   };
 }
 
