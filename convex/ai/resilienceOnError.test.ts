@@ -1,4 +1,5 @@
 import type { Agent } from "@convex-dev/agent";
+import { APICallError } from "@ai-sdk/provider";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { components } from "../_generated/api";
 import type { ActionCtx } from "../_generated/server";
@@ -124,6 +125,80 @@ describe("onError pre-emptive finalization", () => {
         patch: { status: "failed", error: "transient_retry" },
       }),
     );
+  });
+
+  it("preserves provider classification when the UI stream masks the error", async () => {
+    const providerError = new APICallError({
+      message: "Anthropic is temporarily overloaded",
+      url: "https://api.anthropic.test/v1/messages",
+      requestBodyValues: {},
+      statusCode: 529,
+      isRetryable: true,
+    });
+    const streamText = vi.fn(
+      async (options: { onError?: (args: { error: unknown }) => Promise<void> }) => {
+        await options.onError?.({ error: providerError });
+        throw new Error("An error occurred.");
+      },
+    );
+    const agent = {
+      continueThread: vi.fn(async () => ({ thread: { streamText } })),
+    } as unknown as Agent;
+    const { runQuery, runMutation } = makeTurnCtx([
+      { _id: "pending-claude", threadId: "thread-1", order: 1, status: "pending" },
+    ]);
+    let primaryOutcome: unknown;
+    runWithPrimaryCircuitBreakerMock.mockImplementationOnce(
+      async (options: { primaryAgent: Agent; runAttempt: (agent: Agent) => Promise<unknown> }) => {
+        primaryOutcome = await options.runAttempt(options.primaryAgent);
+      },
+    );
+
+    const accumulator = await streamWithRetry(
+      { runQuery, runMutation, runAction: vi.fn() } as unknown as ActionCtx,
+      {
+        primaryAgent: agent,
+        fallbackAgent: agent,
+        ...baseStreamWithRetryArgs("claude"),
+      },
+    );
+
+    expect(primaryOutcome).toEqual({ done: false, error: providerError });
+    expect(accumulator.toRow().terminalErrorClass).toBeUndefined();
+    expect(recordErrorMock).not.toHaveBeenCalled();
+    expect(JSON.stringify(runMutation.mock.calls)).not.toContain(providerError.message);
+  });
+
+  it("keeps unrelated stream failures terminal after provider onError", async () => {
+    const providerError = Object.assign(new Error("Anthropic overloaded"), { status: 529 });
+    const streamError = new Error("Agent finalization failed");
+    const streamText = vi.fn(
+      async (options: { onError?: (args: { error: unknown }) => Promise<void> }) => {
+        await options.onError?.({ error: providerError });
+        throw streamError;
+      },
+    );
+    const agent = {
+      continueThread: vi.fn(async () => ({ thread: { streamText } })),
+    } as unknown as Agent;
+    const { runQuery, runMutation } = makeTurnCtx([
+      { _id: "pending-terminal", threadId: "thread-1", order: 1, status: "pending" },
+    ]);
+    let primaryOutcome: unknown;
+    runWithPrimaryCircuitBreakerMock.mockImplementationOnce(
+      async (options: { primaryAgent: Agent; runAttempt: (agent: Agent) => Promise<unknown> }) => {
+        primaryOutcome = await options.runAttempt(options.primaryAgent);
+      },
+    );
+
+    const accumulator = await streamWithRetry(
+      { runQuery, runMutation, runAction: vi.fn() } as unknown as ActionCtx,
+      { primaryAgent: agent, fallbackAgent: agent, ...baseStreamWithRetryArgs("claude") },
+    );
+
+    expect(primaryOutcome).toEqual({ done: true, success: false, errorClass: "Error" });
+    expect(accumulator.toRow().terminalErrorClass).toBe("Error");
+    expect(recordErrorMock).toHaveBeenCalledWith("Error");
   });
 
   it("does not expose raw provider error text in the finalization code", async () => {

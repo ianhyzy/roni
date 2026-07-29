@@ -31,6 +31,7 @@ import {
 export { getFinalizeCodeForError } from "./resilienceReporting";
 const BUDGET_CAP_MESSAGE =
   "This is getting expensive on your API key, so I'm simplifying here. Ask a narrower follow-up if you want me to keep going.";
+const MASKED_UI_STREAM_ERROR = "An error occurred.";
 const MAX_OUTPUT_TOKENS = 4096;
 const RETRY_DELAY_MS = 3000;
 
@@ -257,6 +258,10 @@ async function attemptStream({
   const timeout = setTimeout(() => controller.abort("Stream timeout"), ATTEMPT_TIMEOUT_MS);
   let budgetTrip: BudgetCapTrip | undefined;
   let reportedProviderError: unknown;
+  const preferReportedProviderError = (error: unknown): unknown =>
+    error instanceof Error && error.message === MASKED_UI_STREAM_ERROR
+      ? (reportedProviderError ?? error)
+      : error;
   try {
     const { thread } = await agent.continueThread(ctx, { threadId, userId });
     const stopWhen = telemetry.isByok
@@ -267,7 +272,7 @@ async function attemptStream({
           }),
         ]
       : stepCountIs(COACH_MAX_STEPS);
-    const result = await thread.streamText(
+    const streamPromise = thread.streamText(
       {
         ...promptArgs,
         abortSignal: controller.signal,
@@ -303,27 +308,25 @@ async function attemptStream({
         },
         onError: async ({ error }: { error: unknown }) => {
           reportedProviderError ??= error;
-          // @convex-dev/agent@0.6.1 does not catch stream error events in its
-          // internal finalizeMessage mutation — the raw provider error propagates
-          // as an unhandled exception that Convex reports to Sentry. Pre-empting
-          // with a sanitized finalize code here prevents the agent library from
-          // encountering the error-event delta when its mutation runs, because
-          // a message that is already "failed" skips further delta processing.
+          // Pre-empt the agent library's unhandled error-event delta with a safe code.
           await finalizeTurnPending(getAttemptFinalizeCode(error, telemetry.isByok));
         },
       },
       STREAM_OPTIONS,
     );
+    const result = await streamPromise.catch(async (streamError: unknown) => {
+      const error = preferReportedProviderError(streamError);
+      await finalizeTurnPending(getAttemptFinalizeCode(error, telemetry.isByok));
+      throw error;
+    });
     await failSavedProviderErrorMessages(ctx, result.savedMessages ?? []);
-    // Await the full text. If the stream delivers an error event, @convex-dev/agent@0.6.1
-    // may throw from its internal finalizeMessage mutation before our onError pre-emption
-    // completes. Catching here ensures the pending message is always finalized and the
-    // error reaches the circuit-breaker retry path with a clean thread state.
+    // Await the full text so every error reaches the retry path with a clean thread state.
     try {
       await result.text;
     } catch (streamError) {
-      await finalizeTurnPending(getAttemptFinalizeCode(streamError, telemetry.isByok));
-      throw streamError;
+      const error = preferReportedProviderError(streamError);
+      await finalizeTurnPending(getAttemptFinalizeCode(error, telemetry.isByok));
+      throw error;
     }
     if (accumulator.toRow().finishReason === "error") {
       throw reportedProviderError ?? new Error("provider_response_failed");
