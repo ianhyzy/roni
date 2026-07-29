@@ -1,4 +1,5 @@
 type AppOriginEnv = {
+  FITBIT_GOOGLE_OAUTH_POST_REDIRECT_URL?: string;
   GARMIN_OAUTH_POST_REDIRECT_URL?: string;
   NODE_ENV?: string;
   SITE_URL?: string;
@@ -23,6 +24,16 @@ function resolveVercelOrigin(env: AppOriginEnv): string | null {
   }
 }
 
+function resolveConfiguredOrigin(value: string | undefined): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.origin : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Resolve the Next.js app origin (e.g. `http://localhost:3000`) from
  * configured post-oauth redirect URLs.
@@ -30,12 +41,8 @@ function resolveVercelOrigin(env: AppOriginEnv): string | null {
 export function resolveAppOrigin(env: AppOriginEnv = process.env): string {
   const redirects = [env.GARMIN_OAUTH_POST_REDIRECT_URL, env.SITE_URL];
   for (const redirect of redirects) {
-    if (!redirect) continue;
-    try {
-      return new URL(redirect).origin;
-    } catch {
-      // Try the next configured URL.
-    }
+    const origin = resolveConfiguredOrigin(redirect);
+    if (origin) return origin;
   }
 
   const vercelOrigin = resolveVercelOrigin(env);
@@ -43,6 +50,25 @@ export function resolveAppOrigin(env: AppOriginEnv = process.env): string {
 
   if (isProductionEnv(env)) {
     throw new Error("GARMIN_OAUTH_POST_REDIRECT_URL, SITE_URL, or VERCEL_URL must be configured");
+  }
+
+  return LOCAL_DEV_APP_ORIGIN;
+}
+
+export function resolveFitbitAppOrigin(env: AppOriginEnv = process.env): string {
+  const redirects = [env.FITBIT_GOOGLE_OAUTH_POST_REDIRECT_URL, env.SITE_URL];
+  for (const redirect of redirects) {
+    const origin = resolveConfiguredOrigin(redirect);
+    if (origin) return origin;
+  }
+
+  const vercelOrigin = resolveVercelOrigin(env);
+  if (vercelOrigin) return vercelOrigin;
+
+  if (isProductionEnv(env)) {
+    throw new Error(
+      "FITBIT_GOOGLE_OAUTH_POST_REDIRECT_URL, SITE_URL, or VERCEL_URL must be configured",
+    );
   }
 
   return LOCAL_DEV_APP_ORIGIN;

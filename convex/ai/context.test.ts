@@ -162,6 +162,7 @@ describe("buildTrainingSnapshot", () => {
       exerciseExclusions: [],
       externalActivities: [],
       garminWellness: [],
+      fitbitWellness: [],
       memoryFacts: [],
     };
   }
@@ -279,6 +280,7 @@ describe("buildTrainingSnapshot", () => {
                 bodyBatteryHighestValue: 54,
               },
             ],
+            fitbitWellness: [],
           };
         }
         if (queryName === weekPlansName) return null;
@@ -292,6 +294,46 @@ describe("buildTrainingSnapshot", () => {
     expect(snapshot).toContain("sleep 6h");
     expect(snapshot).toContain("HRV 44ms");
     expect(snapshot).toContain("body battery 18-54");
+  });
+
+  it("includes recent Fitbit recovery signals in the coach snapshot", async () => {
+    const ctx = {
+      runQuery: async (query: unknown) => {
+        const queryName = getFunctionName(query as never);
+        if (queryName === gatherSnapshotInputsName) {
+          return {
+            ...emptyInputs(),
+            profile: {
+              profileData: {
+                firstName: "Alice",
+                lastName: "Lifter",
+                heightInches: 66,
+                weightPounds: 150,
+                level: "intermediate",
+                workoutsPerWeek: 4,
+              },
+            },
+            fitbitWellness: [
+              {
+                calendarDate: "2026-04-24",
+                sleepDurationSeconds: 6.5 * 60 * 60,
+                restingHeartRate: 57,
+                averageHrvMilliseconds: 43.5,
+              },
+            ],
+          };
+        }
+        if (queryName === weekPlansName) return null;
+        return [];
+      },
+    };
+
+    const snapshot = await buildTrainingSnapshot(ctx as never, "user-1");
+
+    expect(snapshot).toContain("Fitbit Recovery Signals");
+    expect(snapshot).toContain("sleep 6.5h");
+    expect(snapshot).toContain("RHR 57");
+    expect(snapshot).toContain("HRV 43.5ms");
   });
 
   it("includes exact exercise exclusions in the coach snapshot", async () => {

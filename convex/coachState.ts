@@ -2,23 +2,25 @@ import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { internalQuery, type QueryCtx } from "./_generated/server";
 import { GARMIN_WELLNESS_SNAPSHOT_ROW_LIMIT } from "./ai/garminWellnessSnapshot";
+import { FITBIT_WELLNESS_SNAPSHOT_ROW_LIMIT } from "./ai/fitbitWellnessSnapshot";
 import { MAX_EXCLUDED_EXERCISES } from "./exerciseExclusions";
 import { isDeletionInProgress } from "./lib/auth";
 import { MAX_RECENT_WELLNESS_DAILY_ROWS } from "./garmin/wellnessDaily";
+import { MAX_RECENT_FITBIT_WELLNESS_ROWS } from "./fitbit/wellnessDaily";
 import { MAX_INJECTED_MEMORY_FACTS } from "./userMemoryFacts";
 
-// Limits mirror the per-source internal queries that gatherSnapshotInputs
-// replaces. Keeping them here avoids cross-file drift when snapshot rendering
-// changes its expected counts.
+// Keep the aggregated snapshot query within the bounded per-source read limits.
 const RECENT_COMPLETED_WORKOUTS_LIMIT = 20;
 const RECENT_FEEDBACK_LIMIT = 5;
 const RECENT_EXTERNAL_ACTIVITIES_LIMIT = 20;
-// Match the previous call-site computation in buildTrainingSnapshot so the
-// formatter (which slices at GARMIN_WELLNESS_SNAPSHOT_ROW_LIMIT) doesn't pay
-// for rows it then discards. Capped by the table's hard upper bound.
+// Avoid reading wellness rows the formatter will immediately discard.
 const GARMIN_WELLNESS_LIMIT = Math.min(
   GARMIN_WELLNESS_SNAPSHOT_ROW_LIMIT,
   MAX_RECENT_WELLNESS_DAILY_ROWS,
+);
+const FITBIT_WELLNESS_LIMIT = Math.min(
+  FITBIT_WELLNESS_SNAPSHOT_ROW_LIMIT,
+  MAX_RECENT_FITBIT_WELLNESS_ROWS,
 );
 
 export interface SnapshotInputs {
@@ -34,16 +36,11 @@ export interface SnapshotInputs {
   exerciseExclusions: ReadonlyArray<Doc<"exerciseExclusions">>;
   externalActivities: ReadonlyArray<Doc<"externalActivities">>;
   garminWellness: ReadonlyArray<Doc<"garminWellnessDaily">>;
+  fitbitWellness: ReadonlyArray<Doc<"fitbitWellnessDaily">>;
   memoryFacts?: ReadonlyArray<Doc<"userMemoryFacts">>;
 }
 
-/**
- * Per-source resilience helper. If `read` rejects, log the error tagged with
- * `sourceName` and return `fallback`, so a single sub-domain failure inside
- * `gatherSnapshotInputs` does not poison the other reads but is still
- * visible in Convex logs for triage. Exported for direct unit testing of the
- * rejection path.
- */
+/** Keep one failed snapshot source from poisoning the other reads. */
 export async function safe<T>(read: () => Promise<T>, fallback: T, sourceName: string): Promise<T> {
   try {
     return await read();
@@ -53,16 +50,7 @@ export async function safe<T>(read: () => Promise<T>, fallback: T, sourceName: s
   }
 }
 
-/**
- * Single internal query that performs all reads buildTrainingSnapshot
- * previously fanned out across separate runQuery calls. Inlining lets
- * `ctx.db.query` reads count under one function invocation instead of 10 —
- * see ADR 0001 §0 (Alt-A) for the cost rationale.
- *
- * Per-source try/catch preserves the today-shape graceful degradation: if any
- * one sub-domain read fails, that field is `[]` or `null` and the rest still
- * returns.
- */
+/** Aggregate snapshot reads into one invocation while preserving per-source fallback. */
 export const gatherSnapshotInputs = internalQuery({
   args: { userId: v.id("users") },
   handler: async (ctx, { userId }): Promise<SnapshotInputs> => {
@@ -80,10 +68,22 @@ export const gatherSnapshotInputs = internalQuery({
         exerciseExclusions: [],
         externalActivities: [],
         garminWellness: [],
+        fitbitWellness: [],
         memoryFacts: [],
       };
     }
     const profile = await safe(() => readUserProfile(ctx, userId), null, "profile");
+    const fitbitConnection = await safe<Doc<"fitbitConnections"> | null>(
+      () =>
+        ctx.db
+          .query("fitbitConnections")
+          .withIndex("by_userId", (q) => q.eq("userId", userId))
+          .unique(),
+      null,
+      "fitbitConnection",
+    );
+    const activeFitbitGeneration =
+      fitbitConnection?.status === "active" ? fitbitConnection.generation : null;
 
     const [
       scores,
@@ -96,6 +96,7 @@ export const gatherSnapshotInputs = internalQuery({
       exerciseExclusions,
       externalActivities,
       garminWellness,
+      fitbitWellness,
       memoryFacts,
     ] = await Promise.all([
       safe<Doc<"currentStrengthScores">[]>(
@@ -156,12 +157,7 @@ export const gatherSnapshotInputs = internalQuery({
         "exerciseExclusions",
       ),
       safe<Doc<"externalActivities">[]>(
-        () =>
-          ctx.db
-            .query("externalActivities")
-            .withIndex("by_userId_beginTime", (q) => q.eq("userId", userId))
-            .order("desc")
-            .take(RECENT_EXTERNAL_ACTIVITIES_LIMIT),
+        () => readRecentExternalActivities(ctx, userId, activeFitbitGeneration),
         [],
         "externalActivities",
       ),
@@ -174,6 +170,20 @@ export const gatherSnapshotInputs = internalQuery({
             .take(GARMIN_WELLNESS_LIMIT),
         [],
         "garminWellness",
+      ),
+      safe<Doc<"fitbitWellnessDaily">[]>(
+        () =>
+          activeFitbitGeneration
+            ? ctx.db
+                .query("fitbitWellnessDaily")
+                .withIndex("by_userId_and_generation_and_calendarDate", (q) =>
+                  q.eq("userId", userId).eq("generation", activeFitbitGeneration),
+                )
+                .order("desc")
+                .take(FITBIT_WELLNESS_LIMIT)
+            : Promise.resolve([]),
+        [],
+        "fitbitWellness",
       ),
       safe<Doc<"userMemoryFacts">[]>(
         () =>
@@ -200,6 +210,7 @@ export const gatherSnapshotInputs = internalQuery({
       exerciseExclusions,
       externalActivities,
       garminWellness,
+      fitbitWellness,
       memoryFacts,
     };
   },
@@ -228,6 +239,37 @@ async function readRecentCompletedWorkouts(
     .order("desc")
     .take(RECENT_COMPLETED_WORKOUTS_LIMIT * 3);
   return rows.filter((r) => r.title !== "").slice(0, RECENT_COMPLETED_WORKOUTS_LIMIT);
+}
+
+async function readRecentExternalActivities(
+  ctx: QueryCtx,
+  userId: Id<"users">,
+  activeFitbitGeneration: string | null,
+): Promise<Doc<"externalActivities">[]> {
+  const withoutDirectFitbit = ctx.db
+    .query("externalActivities")
+    .withIndex("by_userId_and_fitbitConnectionGeneration_and_beginTime", (q) =>
+      q.eq("userId", userId).eq("fitbitConnectionGeneration", undefined),
+    )
+    .order("desc")
+    .take(RECENT_EXTERNAL_ACTIVITIES_LIMIT);
+  const currentDirectFitbit = activeFitbitGeneration
+    ? ctx.db
+        .query("externalActivities")
+        .withIndex("by_userId_and_fitbitConnectionGeneration_and_beginTime", (q) =>
+          q.eq("userId", userId).eq("fitbitConnectionGeneration", activeFitbitGeneration),
+        )
+        .order("desc")
+        .take(RECENT_EXTERNAL_ACTIVITIES_LIMIT)
+    : Promise.resolve([]);
+  const rows = await Promise.all([withoutDirectFitbit, currentDirectFitbit]);
+  return rows
+    .flat()
+    .sort(
+      (left, right) =>
+        right.beginTime.localeCompare(left.beginTime) || right._creationTime - left._creationTime,
+    )
+    .slice(0, RECENT_EXTERNAL_ACTIVITIES_LIMIT);
 }
 
 async function readActiveBlock(

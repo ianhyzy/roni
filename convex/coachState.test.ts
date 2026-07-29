@@ -179,6 +179,27 @@ describe("gatherSnapshotInputs", () => {
         bodyBatteryLowestValue: 30,
         lastIngestedAt: now,
       });
+      await ctx.db.insert("fitbitConnections", {
+        userId,
+        healthUserId: "health-user-1",
+        generation: "generation-1",
+        status: "active",
+        accessTokenEncrypted: "encrypted-access-token",
+        refreshTokenEncrypted: "encrypted-refresh-token",
+        tokenExpiresAt: now + 60_000,
+        scopes: [],
+        connectedAt: now,
+        refreshDueAt: now + 60_000,
+      });
+      await ctx.db.insert("fitbitWellnessDaily", {
+        userId,
+        generation: "generation-1",
+        calendarDate: "2026-04-23",
+        sleepDurationSeconds: 24_300,
+        restingHeartRate: 53,
+        averageHrvMilliseconds: 47.5,
+        lastIngestedAt: now,
+      });
     });
 
     const inputs = await t.query(internal.coachState.gatherSnapshotInputs, { userId });
@@ -202,6 +223,62 @@ describe("gatherSnapshotInputs", () => {
     expect(inputs.externalActivities[0].source).toBe("Apple Watch");
     expect(inputs.garminWellness).toHaveLength(1);
     expect(inputs.garminWellness[0].calendarDate).toBe("2026-04-23");
+    expect(inputs.fitbitWellness).toHaveLength(1);
+    expect(inputs.fitbitWellness[0].averageHrvMilliseconds).toBe(47.5);
+  });
+
+  test("excludes direct Fitbit data when its connection is no longer active", async () => {
+    const t = convexTest(schema, modules);
+    const userId = await createUser(t);
+    const now = 1_784_995_200_000;
+
+    await t.run(async (ctx) => {
+      await ctx.db.insert("fitbitConnections", {
+        userId,
+        healthUserId: "health-user-1",
+        generation: "generation-1",
+        status: "disconnected",
+        scopes: [],
+        connectedAt: now - 60_000,
+        disconnectedAt: now,
+        disconnectReason: "user_disconnected",
+      });
+      for (let index = 0; index < 61; index += 1) {
+        await ctx.db.insert("externalActivities", {
+          userId,
+          externalId: `google-health:direct-fitbit-workout-${index}`,
+          source: "fitbit",
+          workoutType: "running",
+          beginTime: "2026-04-23T14:00:00Z",
+          totalDuration: 1800,
+          fitbitConnectionGeneration: "generation-1",
+          syncedAt: now,
+        });
+      }
+      await ctx.db.insert("externalActivities", {
+        userId,
+        externalId: "tonal-fitbit-workout",
+        source: "fitbit",
+        workoutType: "cycling",
+        beginTime: "2026-04-22T14:00:00Z",
+        totalDuration: 1200,
+        syncedAt: now,
+      });
+      await ctx.db.insert("fitbitWellnessDaily", {
+        userId,
+        generation: "generation-1",
+        calendarDate: "2026-04-23",
+        sleepDurationSeconds: 24_300,
+        lastIngestedAt: now,
+      });
+    });
+
+    const inputs = await t.query(internal.coachState.gatherSnapshotInputs, { userId });
+
+    expect(inputs.externalActivities.map((row) => row.externalId)).toEqual([
+      "tonal-fitbit-workout",
+    ]);
+    expect(inputs.fitbitWellness).toEqual([]);
   });
 
   test("returns only the eight highest-ranked remembered preferences", async () => {
@@ -266,6 +343,7 @@ describe("gatherSnapshotInputs", () => {
     expect(inputs.exerciseExclusions).toEqual([]);
     expect(inputs.externalActivities).toEqual([]);
     expect(inputs.garminWellness).toEqual([]);
+    expect(inputs.fitbitWellness).toEqual([]);
     expect(inputs.memoryFacts).toEqual([]);
   });
 
@@ -316,6 +394,7 @@ describe("gatherSnapshotInputs", () => {
     expect(inputs.exerciseExclusions).toEqual([]);
     expect(inputs.externalActivities).toEqual([]);
     expect(inputs.garminWellness).toEqual([]);
+    expect(inputs.fitbitWellness).toEqual([]);
     expect(inputs.memoryFacts).toEqual([]);
   });
 });

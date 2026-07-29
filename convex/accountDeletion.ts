@@ -103,6 +103,10 @@ async function takeBatchForDeletion(
     case "garminOauthStates":
     case "garminWorkoutDeliveries":
     case "garminWellnessDaily":
+    case "fitbitConnections":
+    case "fitbitOauthStates":
+    case "fitbitOauthCallbackTickets":
+    case "fitbitWellnessDaily":
       return (
         await ctx.db
           .query(table)

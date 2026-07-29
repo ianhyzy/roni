@@ -14,6 +14,7 @@ function emptyInputs() {
     exerciseExclusions: [],
     externalActivities: [],
     garminWellness: [],
+    fitbitWellness: [],
     memoryFacts: [],
   };
 }

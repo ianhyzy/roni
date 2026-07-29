@@ -769,11 +769,108 @@ export default defineSchema({
     elevationGainMeters: v.optional(v.number()),
     /** Average pace in seconds per kilometer for running/cycling activities. */
     avgPaceSecondsPerKm: v.optional(v.number()),
+    /** Present only for direct Google Health imports, never Tonal-derived Fitbit rows. */
+    fitbitConnectionGeneration: v.optional(v.string()),
     syncedAt: v.number(),
   })
     .index("by_userId_externalId", ["userId", "externalId"])
     .index("by_userId_source_externalId", ["userId", "source", "externalId"])
-    .index("by_userId_beginTime", ["userId", "beginTime"]),
+    .index("by_userId_source_beginTime", ["userId", "source", "beginTime"])
+    .index("by_userId_beginTime", ["userId", "beginTime"])
+    .index("by_userId_and_fitbitConnectionGeneration_and_externalId", [
+      "userId",
+      "fitbitConnectionGeneration",
+      "externalId",
+    ])
+    .index("by_userId_and_fitbitConnectionGeneration_and_beginTime", [
+      "userId",
+      "fitbitConnectionGeneration",
+      "beginTime",
+    ]),
+
+  /**
+   * Google Health OAuth credentials for one Fitbit account. The table uses a
+   * discriminated union so disconnected documents cannot retain credentials.
+   */
+  fitbitConnections: defineTable(
+    v.union(
+      v.object({
+        userId: v.id("users"),
+        healthUserId: v.string(),
+        generation: v.string(),
+        status: v.literal("active"),
+        accessTokenEncrypted: v.string(),
+        refreshTokenEncrypted: v.string(),
+        tokenExpiresAt: v.number(),
+        scopes: v.array(v.string()),
+        connectedAt: v.number(),
+        refreshDueAt: v.number(),
+        lastSyncAttemptAt: v.optional(v.number()),
+        lastSyncedAt: v.optional(v.number()),
+        lastSyncError: v.optional(v.string()),
+      }),
+      v.object({
+        userId: v.id("users"),
+        healthUserId: v.string(),
+        generation: v.string(),
+        status: v.literal("disconnected"),
+        scopes: v.array(v.string()),
+        connectedAt: v.number(),
+        disconnectedAt: v.number(),
+        disconnectReason: v.union(
+          v.literal("user_disconnected"),
+          v.literal("permission_revoked"),
+          v.literal("token_invalid"),
+        ),
+      }),
+    ),
+  )
+    .index("by_userId", ["userId"])
+    .index("by_healthUserId_and_status", ["healthUserId", "status"])
+    .index("by_status_and_refreshDueAt", ["status", "refreshDueAt"]),
+
+  /** Hashed, single-use OAuth state bound to the initiating Roni user. */
+  fitbitOauthStates: defineTable({
+    userId: v.id("users"),
+    stateHash: v.string(),
+    createdAt: v.number(),
+    expiresAt: v.number(),
+  })
+    .index("by_stateHash", ["stateHash"])
+    .index("by_expiresAt", ["expiresAt"])
+    .index("by_userId", ["userId"]),
+
+  /** Encrypted authorization code behind a hashed, single-use browser ticket. */
+  fitbitOauthCallbackTickets: defineTable({
+    userId: v.id("users"),
+    ticketHash: v.string(),
+    authorizationCodeEncrypted: v.string(),
+    createdAt: v.number(),
+    expiresAt: v.number(),
+  })
+    .index("by_ticketHash", ["ticketHash"])
+    .index("by_expiresAt", ["expiresAt"])
+    .index("by_userId", ["userId"]),
+
+  /** Fitbit-only daily recovery rollup from Google Health API v4. */
+  fitbitWellnessDaily: defineTable({
+    userId: v.id("users"),
+    generation: v.string(),
+    calendarDate: v.string(),
+    sleepDurationSeconds: v.optional(v.number()),
+    deepSleepSeconds: v.optional(v.number()),
+    lightSleepSeconds: v.optional(v.number()),
+    remSleepSeconds: v.optional(v.number()),
+    awakeSeconds: v.optional(v.number()),
+    sleepStartTime: v.optional(v.string()),
+    sleepEndTime: v.optional(v.string()),
+    restingHeartRate: v.optional(v.number()),
+    averageHrvMilliseconds: v.optional(v.number()),
+    lastIngestedAt: v.number(),
+  })
+    .index("by_userId", ["userId"])
+    .index("by_userId_and_calendarDate", ["userId", "calendarDate"])
+    .index("by_userId_and_generation_and_calendarDate", ["userId", "generation", "calendarDate"]),
 
   /** Pre-generated workout library entries for SEO and inspiration. */
   libraryWorkouts: defineTable({

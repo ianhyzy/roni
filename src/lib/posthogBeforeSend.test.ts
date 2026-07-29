@@ -267,6 +267,67 @@ describe("posthogBeforeSend", () => {
     expect(result).toBe(event);
   });
 
+  it("redacts every sensitive OAuth key from URL properties without leaking values", () => {
+    const event = makeEvent({
+      event: "$pageview",
+      properties: {
+        $current_url:
+          "https://roni.coach/fitbit/callback?code=code-secret&state=state-secret&ticket=ticket-secret&oauth_token=token-secret&oauth_verifier=verifier-secret&safe=kept#status",
+      },
+    });
+
+    const result = posthogBeforeSend(event);
+
+    expect(result?.properties.$current_url).toBe(
+      "https://roni.coach/fitbit/callback?code=[REDACTED]&state=[REDACTED]&ticket=[REDACTED]&oauth_token=[REDACTED]&oauth_verifier=[REDACTED]&safe=kept#status",
+    );
+    expect(JSON.stringify(result)).not.toContain("code-secret");
+    expect(JSON.stringify(result)).not.toContain("state-secret");
+    expect(JSON.stringify(result)).not.toContain("ticket-secret");
+    expect(JSON.stringify(result)).not.toContain("token-secret");
+    expect(JSON.stringify(result)).not.toContain("verifier-secret");
+  });
+
+  it("sanitizes relative and nested URL-like properties, including percent-encoded underscores", () => {
+    const event = makeEvent({
+      event: "$autocapture",
+      properties: {
+        $pathname: "/fitbit/callback?ticket=opaque%2Bticket",
+        $elements: [
+          {
+            attr__href: "/oauth/callback?oauth%5Ftoken=token-value&oauth%5fverifier=verifier-value",
+          },
+        ],
+      },
+      $set_once: {
+        $initial_current_url: "https://roni.coach/callback?STATE=initial-state",
+      },
+    });
+
+    const result = posthogBeforeSend(event);
+
+    expect(result?.properties.$pathname).toBe("/fitbit/callback?ticket=[REDACTED]");
+    expect(result?.properties.$elements).toEqual([
+      {
+        attr__href: "/oauth/callback?oauth%5Ftoken=[REDACTED]&oauth%5fverifier=[REDACTED]",
+      },
+    ]);
+    expect(result?.$set_once?.$initial_current_url).toBe(
+      "https://roni.coach/callback?STATE=[REDACTED]",
+    );
+  });
+
+  it("preserves safe URL parameters", () => {
+    const event = makeEvent({
+      event: "$pageview",
+      properties: { $current_url: "https://roni.coach/settings?fitbit=connected" },
+    });
+
+    const result = posthogBeforeSend(event);
+
+    expect(result).toBe(event);
+  });
+
   it("passes through null events unchanged", () => {
     const result = posthogBeforeSend(null);
 

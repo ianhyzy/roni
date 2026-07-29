@@ -5,6 +5,7 @@
 import * as Sentry from "@sentry/nextjs";
 import posthog from "posthog-js";
 import { getSentryRuntimeConfig } from "@/lib/deployment";
+import { redactOAuthSecrets } from "@/lib/oauthQueryRedaction";
 import { sentryBeforeSend } from "@/lib/sentryBeforeSend";
 import { posthogBeforeSend } from "@/lib/posthogBeforeSend";
 
@@ -43,6 +44,7 @@ if (sentryConfig) {
     enableLogs: false,
     sendDefaultPii: false,
     beforeSend: sentryBeforeSend,
+    beforeSendTransaction: redactOAuthSecrets,
   });
 }
 

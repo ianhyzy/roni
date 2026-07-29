@@ -1,4 +1,5 @@
 import type { CaptureResult } from "posthog-js";
+import { redactOAuthSecrets } from "@/lib/oauthQueryRedaction";
 
 // Substrings of error messages that PostHog should drop before sending. They
 // fall into three buckets:
@@ -56,6 +57,23 @@ const SUPPRESSED_MESSAGE_SUBSTRINGS: readonly string[] = [
   "credits are depleted",
 ];
 
+function sanitizePosthogEvent(event: CaptureResult): CaptureResult {
+  const properties = redactOAuthSecrets(event.properties);
+  const set = redactOAuthSecrets(event.$set);
+  const setOnce = redactOAuthSecrets(event.$set_once);
+
+  if (properties === event.properties && set === event.$set && setOnce === event.$set_once) {
+    return event;
+  }
+
+  return {
+    ...event,
+    properties,
+    $set: set,
+    $set_once: setOnce,
+  };
+}
+
 function getStringProp(props: Record<string, unknown>, key: string): string | undefined {
   const value = props[key];
   return typeof value === "string" ? value : undefined;
@@ -107,5 +125,6 @@ export function shouldDropPosthogEvent(event: CaptureResult | null): boolean {
 }
 
 export function posthogBeforeSend(event: CaptureResult | null): CaptureResult | null {
-  return shouldDropPosthogEvent(event) ? null : event;
+  if (!event || shouldDropPosthogEvent(event)) return null;
+  return sanitizePosthogEvent(event);
 }

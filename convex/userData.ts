@@ -58,6 +58,14 @@ export const USER_DATA_TABLES = [
     jsonExportKey: "garminWellnessDaily",
   },
   { table: "garminWebhookEvents", delete: "garminWebhookEventsBatch", jsonExportKey: null },
+  { table: "fitbitConnections", delete: "byUserIdBatch", jsonExportKey: null },
+  { table: "fitbitOauthStates", delete: "byUserIdBatch", jsonExportKey: null },
+  { table: "fitbitOauthCallbackTickets", delete: "byUserIdBatch", jsonExportKey: null },
+  {
+    table: "fitbitWellnessDaily",
+    delete: "byUserIdBatch",
+    jsonExportKey: "fitbitWellnessDaily",
+  },
 ] as const;
 
 type UserDataEntry = (typeof USER_DATA_TABLES)[number];

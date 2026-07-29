@@ -161,6 +161,61 @@ describe("persistExternalActivities", () => {
     expect(rows[0].totalCalories).toBe(401);
   });
 
+  test("adopts a matching Fitbit row stored under the legacy other source", async () => {
+    const t = convexTest(schema, modules);
+    const userId = await createUser(t);
+    await t.run(async (ctx) => {
+      await ctx.db.insert("externalActivities", {
+        userId,
+        ...baseActivity,
+        source: EXTERNAL_ACTIVITY_SOURCES.OTHER,
+        syncedAt: 1000,
+      });
+    });
+
+    await t.mutation(internal.tonal.historySyncMutations.persistExternalActivities, {
+      userId,
+      activities: [{ ...baseActivity, source: EXTERNAL_ACTIVITY_SOURCES.FITBIT }],
+    });
+
+    const rows = await t.run(async (ctx) =>
+      ctx.db
+        .query("externalActivities")
+        .withIndex("by_userId_externalId", (q) => q.eq("userId", userId).eq("externalId", "ext-1"))
+        .collect(),
+    );
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ source: EXTERNAL_ACTIVITY_SOURCES.FITBIT });
+  });
+
+  test("keeps a colliding other-source activity when provider fields differ", async () => {
+    const t = convexTest(schema, modules);
+    const userId = await createUser(t);
+    await t.mutation(internal.tonal.historySyncMutations.persistExternalActivities, {
+      userId,
+      activities: [{ ...baseActivity, source: EXTERNAL_ACTIVITY_SOURCES.OTHER }],
+    });
+
+    await t.mutation(internal.tonal.historySyncMutations.persistExternalActivities, {
+      userId,
+      activities: [
+        {
+          ...baseActivity,
+          source: EXTERNAL_ACTIVITY_SOURCES.FITBIT,
+          totalCalories: 401,
+        },
+      ],
+    });
+
+    const rows = await t.run(async (ctx) =>
+      ctx.db
+        .query("externalActivities")
+        .withIndex("by_userId_externalId", (q) => q.eq("userId", userId).eq("externalId", "ext-1"))
+        .collect(),
+    );
+    expect(rows.map((row) => row.source).sort()).toEqual(["fitbit", "other"]);
+  });
+
   test("updates Garmin-specific activity fields on resend", async () => {
     const t = convexTest(schema, modules);
     const userId = await createUser(t);

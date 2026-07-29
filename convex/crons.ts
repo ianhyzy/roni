@@ -68,6 +68,15 @@ if (cronsEnabled()) {
     { hours: 6 },
     internal.garmin.webhookEvents.sweepExpired,
   );
+
+  crons.interval("sync-fitbit-data", { hours: 1 }, internal.fitbit.sync.scheduleDueSyncs, {});
+
+  crons.interval(
+    "sweep-fitbit-oauth-artifacts",
+    { hours: 1 },
+    internal.fitbit.sync.sweepExpiredOauthArtifacts,
+    {},
+  );
 }
 
 export default crons;

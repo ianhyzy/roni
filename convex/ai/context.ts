@@ -17,6 +17,7 @@ import {
   trimSnapshot,
 } from "./snapshotHelpers";
 import { formatGarminWellnessLines } from "./garminWellnessSnapshot";
+import { formatFitbitWellnessLines } from "./fitbitWellnessSnapshot";
 
 // Re-export for backward compatibility (tests, other consumers)
 export { type SnapshotSection, trimSnapshot, getHrIntensityLabel, formatExternalActivityLine };
@@ -76,6 +77,7 @@ export async function buildTrainingSnapshotWithMetadata(
     exerciseExclusions,
     externalActivities,
     garminWellness,
+    fitbitWellness,
   } = inputs;
   const sections: SnapshotSection[] = [];
 
@@ -305,9 +307,11 @@ export async function buildTrainingSnapshotWithMetadata(
     sections.push({ priority: 6, lines: el });
   }
 
-  const garminWellnessLines = formatGarminWellnessLines(garminWellness);
-  if (garminWellnessLines.length > 0) {
-    sections.push({ priority: 6, lines: garminWellnessLines });
+  for (const wellnessLines of [
+    formatGarminWellnessLines(garminWellness),
+    formatFitbitWellnessLines(fitbitWellness),
+  ]) {
+    if (wellnessLines.length > 0) sections.push({ priority: 6, lines: wellnessLines });
   }
 
   // Priority 11: Performance notes

@@ -200,4 +200,21 @@ describe("sentryBeforeSend", () => {
     const hint = hintWithError("foo is not defined");
     expect(sentryBeforeSend(event, hint)).toBe(event);
   });
+
+  it("redacts OAuth secrets from captured URLs and breadcrumbs", () => {
+    const event = {
+      ...eventWithValue("ReferenceError: foo is not defined"),
+      request: { url: "https://roni.fit/fitbit/callback?ticket=secret-ticket" },
+      breadcrumbs: [
+        { data: { url: "https://example.com/#access_token=secret&state=secret-state" } },
+      ],
+    } as ErrorEvent;
+
+    const result = sentryBeforeSend(event, hintWithError("foo is not defined"));
+
+    expect(result?.request?.url).toBe("https://roni.fit/fitbit/callback?ticket=[REDACTED]");
+    expect(result?.breadcrumbs?.[0]?.data?.url).toBe(
+      "https://example.com/#access_token=[REDACTED]&state=[REDACTED]",
+    );
+  });
 });

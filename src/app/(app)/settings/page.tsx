@@ -5,9 +5,11 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery } from "convex/react";
 import { useAuthActions } from "@convex-dev/auth/react";
 import { usePageView } from "@/lib/analytics";
+import { useFitbitFeatureStatus } from "@/hooks/useFitbitFeatureStatus";
 import { api } from "../../../../convex/_generated/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { ErrorAlert } from "@/components/ErrorAlert";
 import {
   Dialog,
   DialogClose,
@@ -35,6 +37,10 @@ import {
   GarminConnectionCard,
   type GarminConnectionNotice,
 } from "@/features/settings/GarminConnectionCard";
+import {
+  FitbitConnectionCard,
+  type FitbitConnectionNotice,
+} from "@/features/settings/FitbitConnectionCard";
 import { ProviderSection } from "@/features/byok/ProviderSection";
 import { DISCORD_URL, REPO_URL } from "@/lib/urls";
 import { LogOut, MessageSquare } from "lucide-react";
@@ -58,6 +64,12 @@ function SettingsPageInner() {
   const searchParams = useSearchParams();
   const me = useQuery(api.users.getMe, {});
   const garminFeature = useQuery(api.garmin.connections.getGarminFeatureStatus, {});
+  const fitbitFeatureStatus = useFitbitFeatureStatus();
+  const fitbitFeature =
+    fitbitFeatureStatus.state.status === "success" ||
+    fitbitFeatureStatus.state.status === "refreshing"
+      ? fitbitFeatureStatus.state.data
+      : undefined;
   const [signOutOpen, setSignOutOpen] = useState(false);
 
   const handleSignOut = async () => {
@@ -92,6 +104,23 @@ function SettingsPageInner() {
               garminReason ? `: ${garminReason.replaceAll("_", " ")}` : "."
             }`,
           }
+        : undefined;
+
+  const fitbitParam = searchParams.get("fitbit");
+  const fitbitReason = searchParams.get("reason");
+  const fitbitErrorMessage =
+    fitbitReason === "access_denied"
+      ? "Fitbit connection was canceled."
+      : fitbitReason === "missing_params"
+        ? "Fitbit connection failed because the authorization response was incomplete. Please try again."
+        : fitbitReason === "oauth_error"
+          ? "Fitbit connection failed while completing authorization. Please try again."
+          : "Fitbit connection failed. Please try again.";
+  const fitbitNotice: FitbitConnectionNotice | undefined =
+    fitbitParam === "connected"
+      ? { kind: "success", message: "Fitbit connected. Your first sync is starting." }
+      : fitbitParam === "error"
+        ? { kind: "error", message: fitbitErrorMessage }
         : undefined;
 
   return (
@@ -166,6 +195,27 @@ function SettingsPageInner() {
         <section className="mb-10">
           <h2 className={SECTION_HEADING}>Garmin Connection</h2>
           <GarminConnectionCard callbackNotice={garminNotice} />
+        </section>
+      ) : null}
+
+      {/* Keep existing Fitbit connections manageable if deployment configuration changes. */}
+      {fitbitFeatureStatus.state.status === "error" ||
+      fitbitFeature?.enabled ||
+      fitbitFeature?.hasConnection ? (
+        <section className="mb-10" id="fitbit-connection">
+          <h2 className={SECTION_HEADING}>Fitbit Connection</h2>
+          {fitbitFeatureStatus.state.status === "error" ? (
+            <div className="mb-3">
+              <ErrorAlert
+                message="Could not check Fitbit availability. Existing connections are not affected."
+                onRetry={fitbitFeatureStatus.refetch}
+              />
+            </div>
+          ) : null}
+          <FitbitConnectionCard
+            configured={fitbitFeature?.enabled ?? false}
+            callbackNotice={fitbitNotice}
+          />
         </section>
       ) : null}
 

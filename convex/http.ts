@@ -7,7 +7,7 @@ import {
   garminWebhookFailureStatus,
   verifyGarminWebhookSignature,
 } from "./garmin/webhookSignature";
-import { resolveAppOrigin } from "./httpOrigin";
+import { resolveAppOrigin, resolveFitbitAppOrigin } from "./httpOrigin";
 
 const http = httpRouter();
 auth.addHttpRoutes(http);
@@ -15,6 +15,39 @@ auth.addHttpRoutes(http);
 function redirectResponse(location: string): Response {
   return new Response(null, { status: 302, headers: { Location: location } });
 }
+
+// Complete the exchange on the app origin where the authenticated session is available.
+http.route({
+  path: "/fitbit/oauth/callback",
+  method: "GET",
+  handler: httpAction(async (ctx, req) => {
+    const url = new URL(req.url);
+    const appOrigin = resolveFitbitAppOrigin();
+    const oauthError = url.searchParams.get("error");
+    if (oauthError) {
+      const reason = oauthError === "access_denied" ? "access_denied" : "oauth_error";
+      return redirectResponse(`${appOrigin}/settings?fitbit=error&reason=${reason}`);
+    }
+
+    const code = url.searchParams.get("code");
+    const state = url.searchParams.get("state");
+    if (!code?.trim() || !state?.trim()) {
+      return redirectResponse(`${appOrigin}/settings?fitbit=error&reason=missing_params`);
+    }
+
+    const result = await ctx.runAction(internal.fitbit.oauthFlow.issueFitbitCallbackTicket, {
+      code,
+      state,
+    });
+    if (!result.success) {
+      return redirectResponse(`${appOrigin}/settings?fitbit=error&reason=invalid_callback`);
+    }
+
+    const bounce = new URL("/fitbit/callback", appOrigin);
+    bounce.searchParams.set("ticket", result.ticket);
+    return redirectResponse(bounce.toString());
+  }),
+});
 
 /**
  * Garmin redirects the user's browser here at the end of the OAuth 1.0a

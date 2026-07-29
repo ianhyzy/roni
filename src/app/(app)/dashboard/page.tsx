@@ -19,8 +19,10 @@ import { RecentWorkoutsList } from "@/features/dashboard/RecentWorkoutsList";
 import { DashboardExternalActivitiesSection } from "@/features/dashboard/DashboardExternalActivitiesSection";
 import { PRHighlightsCard } from "@/features/dashboard/PRHighlightsCard";
 import { AsyncCard } from "@/components/AsyncCard";
+import { ErrorAlert } from "@/components/ErrorAlert";
 import { useActionData } from "@/hooks/useActionData";
-import { ArrowRight } from "lucide-react";
+import { useFitbitFeatureStatus } from "@/hooks/useFitbitFeatureStatus";
+import { ArrowRight, Info } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DashboardCardSkeleton } from "@/features/dashboard/DashboardCardSkeleton";
@@ -107,6 +109,16 @@ export default function DashboardPage() {
   const frequency = useQuery(api.dashboard.getTrainingFrequency);
   const externalActivities = useQuery(api.dashboard.getExternalActivities);
   const prSummary = useQuery(api.prs.getRecentPRSummary);
+  const fitbitFeatureStatus = useFitbitFeatureStatus();
+  const fitbitFeature =
+    fitbitFeatureStatus.state.status === "success" ||
+    fitbitFeatureStatus.state.status === "refreshing"
+      ? fitbitFeatureStatus.state.data
+      : undefined;
+  const fitbitStatus = useQuery(
+    api.fitbit.connections.getMyFitbitStatus,
+    fitbitFeature?.enabled ? {} : "skip",
+  );
 
   const me = useQuery(api.users.getMe);
   const firstName = me?.tonalName?.split(" ")[0] ?? "there";
@@ -162,6 +174,33 @@ export default function DashboardPage() {
           </Link>
         ))}
       </nav>
+
+      {fitbitFeatureStatus.state.status === "error" ? (
+        <div className="mb-8">
+          <ErrorAlert
+            message="Could not check Fitbit availability. Existing connections are not affected."
+            onRetry={fitbitFeatureStatus.refetch}
+          />
+        </div>
+      ) : null}
+
+      {fitbitFeature?.enabled && fitbitStatus?.state === "none" ? (
+        <Link
+          href="/settings#fitbit-connection"
+          className="mb-8 flex min-h-11 items-start gap-3 rounded-xl border border-border bg-muted/30 px-4 py-3 text-sm transition-colors duration-150 hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+        >
+          <Info className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden="true" />
+          <span className="min-w-0 flex-1">
+            <span className="font-medium text-foreground">Connect Fitbit for fuller coaching</span>
+            <span className="mt-0.5 block text-muted-foreground">
+              With your permission, Roni collects read-only Fitbit activity, sleep, resting heart
+              rate, and HRV to personalize Roni and Gemini coaching. Fitbit data is not sold or used
+              for advertising.
+            </span>
+          </span>
+          <ArrowRight className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+        </Link>
+      ) : null}
 
       {/* Dashboard grid */}
       <div className="grid gap-5 sm:grid-cols-2">

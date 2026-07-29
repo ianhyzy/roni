@@ -14,6 +14,10 @@ type GarminWorkoutDeliveryExportRow = Omit<
   Doc<"garminWorkoutDeliveries">,
   "_id" | "_creationTime" | "userId"
 >;
+type FitbitWellnessDailyExportRow = Omit<
+  Doc<"fitbitWellnessDaily">,
+  "_id" | "_creationTime" | "userId"
+>;
 
 interface ExportedData extends Record<JsonExportSectionKey | "exportedAt" | "user", unknown> {
   exportedAt: string;
@@ -94,6 +98,7 @@ interface ExportedData extends Record<JsonExportSectionKey | "exportedAt" | "use
   }[];
   garminWorkoutDeliveries: GarminWorkoutDeliveryExportRow[];
   garminWellnessDaily: GarminWellnessDailyExportRow[];
+  fitbitWellnessDaily: FitbitWellnessDailyExportRow[];
 }
 
 /** Convert a Tonal API Activity to the completedWorkouts export format. */
@@ -110,21 +115,9 @@ function activityToExportRow(a: Activity) {
   };
 }
 
-function garminWellnessDailyToExportRow(
-  row: Doc<"garminWellnessDaily">,
-): GarminWellnessDailyExportRow {
-  const {
-    _id: _unusedId,
-    _creationTime: _unusedCreationTime,
-    userId: _unusedUserId,
-    ...exportRow
-  } = row;
-  return exportRow;
-}
-
-function garminWorkoutDeliveryToExportRow(
-  row: Doc<"garminWorkoutDeliveries">,
-): GarminWorkoutDeliveryExportRow {
+function userDocumentToExportRow<
+  T extends { _id: unknown; _creationTime: number; userId: unknown },
+>(row: T): Omit<T, "_id" | "_creationTime" | "userId"> {
   const {
     _id: _unusedId,
     _creationTime: _unusedCreationTime,
@@ -263,6 +256,11 @@ export const collectUserData = internalQuery({
       .withIndex("by_userId", (q) => q.eq("userId", userId))
       .collect();
 
+    const fitbitWellnessDaily = await ctx.db
+      .query("fitbitWellnessDaily")
+      .withIndex("by_userId_and_calendarDate", (q) => q.eq("userId", userId))
+      .collect();
+
     // Build movement ID → name lookup, fetching only movements actually
     // referenced by this user's exercisePerformance rows.
     const movementIds = new Set(exercisePerformanceRows.map((ep) => ep.movementId));
@@ -383,8 +381,9 @@ export const collectUserData = internalQuery({
         createdAt: memoryFact.createdAt,
         lastReferencedAt: memoryFact.lastReferencedAt,
       })),
-      garminWorkoutDeliveries: garminWorkoutDeliveries.map(garminWorkoutDeliveryToExportRow),
-      garminWellnessDaily: garminWellnessDaily.map(garminWellnessDailyToExportRow),
+      garminWorkoutDeliveries: garminWorkoutDeliveries.map(userDocumentToExportRow),
+      garminWellnessDaily: garminWellnessDaily.map(userDocumentToExportRow),
+      fitbitWellnessDaily: fitbitWellnessDaily.map(userDocumentToExportRow),
     };
   },
 });

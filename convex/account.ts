@@ -120,6 +120,18 @@ export const deleteAccount = action({
     await ctx.runMutation(internal.accountDeletion.markDeletionInProgress, { userId });
 
     try {
+      try {
+        const revoked = await ctx.runAction(internal.fitbit.sync.revokeForAccountDeletion, {
+          userId,
+        });
+        if (!revoked) {
+          console.error("[accountDeletion] Fitbit token revocation failed", { userId });
+        }
+      } catch {
+        // Remote revocation is best-effort; local deletion must still converge.
+        console.error("[accountDeletion] Fitbit token revocation request failed", { userId });
+      }
+
       await ctx.runAction(components.agent.users.deleteAllForUserId, { userId });
 
       // Drain each table in batches of 500 to stay under the 4096 read limit

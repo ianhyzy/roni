@@ -166,6 +166,32 @@ export const rateLimiter = new RateLimiter(components.rateLimiter, {
     period: MINUTE,
     capacity: 3,
   },
+  startFitbitOAuth: {
+    kind: "token bucket",
+    rate: 5,
+    period: MINUTE,
+    capacity: 3,
+  },
+  completeFitbitOAuth: {
+    kind: "token bucket",
+    rate: 8,
+    period: MINUTE,
+    capacity: 4,
+  },
+  refreshFitbitData: {
+    kind: "token bucket",
+    rate: 6,
+    period: HOUR,
+    capacity: 3,
+  },
+  disconnectMyFitbit: {
+    kind: "token bucket",
+    rate: 5,
+    period: MINUTE,
+    capacity: 3,
+  },
+  // getFitbitFeatureStatus is intentionally exempt: it is an authenticated,
+  // read-only env + indexed-existence check cached by the client for five minutes.
   sendGarminWorkout: {
     kind: "token bucket",
     rate: 12,

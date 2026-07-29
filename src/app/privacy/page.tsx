@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 export const metadata: Metadata = {
   title: "Privacy Policy",
   description:
-    "Privacy policy for Roni. How we handle your Tonal credentials, Garmin Connect data, and account information.",
+    "Privacy policy for Roni. How we handle Tonal credentials, Garmin Connect data, Fitbit data, and account information.",
   alternates: { canonical: "/privacy" },
   robots: { index: true, follow: true },
 };
@@ -14,7 +14,7 @@ export default function PrivacyPage() {
   return (
     <div className="mx-auto max-w-2xl px-4 py-8">
       <h1 className="mb-1 text-2xl font-bold text-foreground">Privacy Policy</h1>
-      <p className="mb-8 text-sm text-muted-foreground">Last updated: April 22, 2026</p>
+      <p className="mb-8 text-sm text-muted-foreground">Last updated: July 29, 2026</p>
 
       <div className="space-y-6 text-sm leading-relaxed text-muted-foreground">
         <section>
@@ -79,12 +79,16 @@ export default function PrivacyPage() {
           <p>
             Chat conversations are processed by Google&apos;s Gemini AI model to generate coaching
             responses. Your training data is included in the AI context so the coach can give
-            personalized advice. Google&apos;s AI usage policies apply to this processing. No data
-            is used to train AI models.
+            personalized advice. When you connect Fitbit, this context may include Fitbit activity,
+            sleep, resting heart rate, and HRV summaries. Google&apos;s AI usage policies apply to
+            this processing. Roni does not train its own AI model on your data.
           </p>
           <p className="mt-2">
-            The service is hosted on Convex (database and backend) and Vercel (frontend). Error
-            monitoring is provided by Sentry. No other third parties receive your data.
+            The service is hosted on Convex (database and backend) and Vercel (frontend). PostHog
+            receives product usage analytics and account identifiers including your internal user
+            ID, email, and name when available. Sentry receives application errors and diagnostics;
+            default collection of personally identifiable information is disabled. We do not sell
+            this data or use it for advertising.
           </p>
         </section>
 
@@ -157,11 +161,50 @@ export default function PrivacyPage() {
         </section>
 
         <section>
+          <h2 className="mb-2 text-base font-semibold text-foreground">
+            Fitbit via Google Health integration
+          </h2>
+          <p>
+            Connecting Fitbit is optional. Roni uses the official Google Health API in read-only
+            mode so the AI coach can account for cross-training and recovery. Roni is not affiliated
+            with or endorsed by Google or Fitbit.
+          </p>
+          <p className="mt-2">
+            Authorization happens on Google&apos;s site. Your Google password is never sent to or
+            seen by Roni. Google returns access and refresh tokens, which Roni encrypts with
+            AES-256-GCM before storing. Roni requests read-only access to activity and fitness,
+            sleep, and health metrics and measurements; it does not request permission to write
+            health data.
+          </p>
+          <p className="mt-2">
+            Roni imports only records identified by Google Health as originating from Fitbit or the
+            legacy Fitbit Web API. The initial and recurring sync window is currently up to 30 days.
+            Stored summaries can include workout type, time, duration, distance, pace, calories,
+            average heart rate, sleep duration and stages, resting heart rate, and daily HRV. Roni
+            does not store GPS tracks or per-second heart-rate samples from Google Health.
+          </p>
+          <p className="mt-2">
+            Fitbit data flows one way into Roni and is used only to personalize coaching under the
+            same infrastructure and AI terms described above. Roni polls Google Health periodically
+            for updates and does not write workouts or other data back to Fitbit.
+          </p>
+          <p className="mt-2">
+            Disconnecting Fitbit marks the connection inactive, removes the encrypted credentials
+            from active use, asks Google to revoke Roni&apos;s grant, and starts removing data
+            imported under that connection. If Google revocation fails, Roni shows a warning and you
+            can revoke access directly in your Google account. Deleting your Roni account removes
+            stored Fitbit connection records, OAuth artifacts, activity summaries, and wellness
+            summaries; Roni also attempts to revoke an active Google grant during account deletion.
+          </p>
+        </section>
+
+        <section>
           <h2 className="mb-2 text-base font-semibold text-foreground">Data deletion</h2>
           <p>
-            You can disconnect your Tonal account and delete your Roni account at any time. All
-            associated data (conversations, feedback, goals, injuries, and cached data) is
-            permanently deleted with no retention period.
+            You can disconnect your Tonal account and delete your Roni account at any time. Account
+            deletion removes your Roni account and associated application records from active
+            storage. Revocation requests to connected providers can fail, so you can also revoke
+            access directly in each provider&apos;s account settings.
           </p>
         </section>
 

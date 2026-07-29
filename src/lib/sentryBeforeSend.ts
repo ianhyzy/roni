@@ -1,4 +1,5 @@
 import type { ErrorEvent, EventHint } from "@sentry/nextjs";
+import { redactOAuthSecrets } from "@/lib/oauthQueryRedaction";
 
 // Mirrors src/lib/posthogBeforeSend.ts. Drops are split into three buckets:
 //   1. Browser/extension noise we cannot fix (Firefox iOS Reader Mode injection,
@@ -95,5 +96,5 @@ export function shouldDropSentryEvent(event: ErrorEvent, hint: EventHint): boole
 }
 
 export function sentryBeforeSend(event: ErrorEvent, hint: EventHint): ErrorEvent | null {
-  return shouldDropSentryEvent(event, hint) ? null : event;
+  return shouldDropSentryEvent(event, hint) ? null : redactOAuthSecrets(event);
 }

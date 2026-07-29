@@ -21,6 +21,7 @@ const EMPTY_SNAPSHOT_INPUTS = {
   exerciseExclusions: [],
   externalActivities: [],
   garminWellness: [],
+  fitbitWellness: [],
 };
 
 function buildLargeSnapshotInputs() {

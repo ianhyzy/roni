@@ -22,6 +22,7 @@ const EMPTY_SNAPSHOT_INPUTS = {
   exerciseExclusions: [],
   externalActivities: [],
   garminWellness: [],
+  fitbitWellness: [],
 };
 const EMPTY_PROFILE_CTX = {
   runQuery: async (query: unknown) => {

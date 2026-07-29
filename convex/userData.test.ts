@@ -102,6 +102,39 @@ describe("USER_DATA_TABLES", () => {
     expect(data.garminWellnessDaily[0]).not.toHaveProperty("userId");
   });
 
+  test("collectUserData exports Fitbit wellness rows without credentials or Convex metadata", async () => {
+    const t = convexTest(schema, modules);
+    const userId = await t.run(async (ctx) => {
+      const id = await ctx.db.insert("users", {});
+      await ctx.db.insert("fitbitWellnessDaily", {
+        userId: id,
+        generation: "generation-1",
+        calendarDate: "2026-07-28",
+        sleepDurationSeconds: 24_300,
+        restingHeartRate: 53,
+        averageHrvMilliseconds: 47.5,
+        lastIngestedAt: 1_775_000_000_000,
+      });
+      return id;
+    });
+
+    const data = await t.query(internal.dataExport.collectUserData, { userId });
+
+    expect(data.fitbitWellnessDaily).toEqual([
+      {
+        generation: "generation-1",
+        calendarDate: "2026-07-28",
+        sleepDurationSeconds: 24_300,
+        restingHeartRate: 53,
+        averageHrvMilliseconds: 47.5,
+        lastIngestedAt: 1_775_000_000_000,
+      },
+    ]);
+    expect(data.fitbitWellnessDaily[0]).not.toHaveProperty("_id");
+    expect(data.fitbitWellnessDaily[0]).not.toHaveProperty("_creationTime");
+    expect(data.fitbitWellnessDaily[0]).not.toHaveProperty("userId");
+  });
+
   test("collectUserData exports Garmin workout deliveries without Convex metadata", async () => {
     const t = convexTest(schema, modules);
     const userId = await t.run(async (ctx) => {

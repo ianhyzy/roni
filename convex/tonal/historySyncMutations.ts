@@ -1,10 +1,4 @@
-/**
- * Persistence mutations for training history sync.
- *
- * Idempotent inserts into completedWorkouts, exercisePerformance, and
- * strengthScoreSnapshots. Each mutation skips duplicates by checking
- * the relevant index before inserting.
- */
+/** Idempotent persistence mutations for training history sync. */
 
 import { v } from "convex/values";
 import { internalMutation, internalQuery } from "../_generated/server";
@@ -16,10 +10,6 @@ import {
   normalizeExternalActivitySource,
 } from "./externalActivitySources";
 import { DEFAULT_TARGET_AREA, DEFAULT_WORKOUT_TITLE } from "./workoutMeta";
-
-// ---------------------------------------------------------------------------
-// Shared validators (exported for action payload typing)
-// ---------------------------------------------------------------------------
 
 export const workoutValidator = v.object({
   activityId: v.string(),
@@ -235,7 +225,6 @@ export const muscleReadinessValidator = v.object({
 });
 
 type MuscleReadinessPayload = typeof muscleReadinessValidator.type;
-
 export const externalActivityValidator = v.object({
   externalId: v.string(),
   workoutType: v.string(),
@@ -247,6 +236,7 @@ export const externalActivityValidator = v.object({
   maxHeartRate: v.optional(v.number()),
   source: v.union(
     v.literal(EXTERNAL_ACTIVITY_SOURCES.APPLE_HEALTH),
+    v.literal(EXTERNAL_ACTIVITY_SOURCES.FITBIT),
     v.literal(EXTERNAL_ACTIVITY_SOURCES.GARMIN),
     v.literal(EXTERNAL_ACTIVITY_SOURCES.OTHER),
   ),
@@ -296,6 +286,7 @@ function muscleReadinessMatches(
 function externalActivityMatches(
   existing: Doc<"externalActivities">,
   activity: ExternalActivityPayload,
+  requireSourceMatch = true,
 ): boolean {
   return (
     existing.workoutType === activity.workoutType &&
@@ -305,7 +296,7 @@ function externalActivityMatches(
     existing.totalCalories === activity.totalCalories &&
     existing.averageHeartRate === activity.averageHeartRate &&
     existing.maxHeartRate === activity.maxHeartRate &&
-    existing.source === activity.source &&
+    (!requireSourceMatch || existing.source === activity.source) &&
     existing.distance === activity.distance &&
     existing.elevationGainMeters === activity.elevationGainMeters &&
     existing.avgPaceSecondsPerKm === activity.avgPaceSecondsPerKm
@@ -366,7 +357,6 @@ export const clearMuscleReadiness = internalMutation({
   },
 });
 
-/** Upsert external activities by externalId (insert new, update existing). */
 export const persistExternalActivities = internalMutation({
   args: { userId: v.id("users"), activities: v.array(externalActivityValidator) },
   handler: async (ctx, { userId, activities }) => {
@@ -388,7 +378,13 @@ export const persistExternalActivities = internalMutation({
               q.eq("userId", userId).eq("externalId", a.externalId),
             )
             .take(10)
-        ).find((row) => normalizeExternalActivitySource(row.source) === a.source);
+        ).find(
+          (row) =>
+            normalizeExternalActivitySource(row.source) === a.source ||
+            (a.source === EXTERNAL_ACTIVITY_SOURCES.FITBIT &&
+              row.source === EXTERNAL_ACTIVITY_SOURCES.OTHER &&
+              externalActivityMatches(row, a, false)),
+        );
       if (existing) {
         if (externalActivityMatches(existing, a)) continue;
         await ctx.db.replace(existing._id, { userId, ...a, syncedAt: now });

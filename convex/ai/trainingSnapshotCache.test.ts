@@ -31,6 +31,7 @@ describe("getTrainingSnapshotForChat", () => {
             activeInjuries: [],
             externalActivities: [],
             garminWellness: [],
+            fitbitWellness: [],
           };
         }
         return [];
