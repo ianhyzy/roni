@@ -2,6 +2,13 @@
 
 All notable changes to this project are documented here. This file is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commits on `main`. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.11.5](https://github.com/JeffOtano/roni/compare/v0.11.4...v0.11.5) (2026-07-29)
+
+
+### Bug Fixes
+
+* make chat turns reliable and truthful ([#582](https://github.com/JeffOtano/roni/issues/582)) ([feb725e](https://github.com/JeffOtano/roni/commit/feb725e1ca13aada6b68f8030ba4898cdc9e2976))
+
 ## [0.11.4](https://github.com/JeffOtano/roni/compare/v0.11.3...v0.11.4) (2026-07-28)
 
 
