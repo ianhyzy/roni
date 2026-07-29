@@ -282,12 +282,18 @@ describe("continueAfterApproval", () => {
       toolMode: "weekly_programming",
     });
     const options = streamWithRetryMock.mock.calls[0]?.[1] as {
+      primaryAgent: { options: { contextOptions: { searchOptions?: unknown } } };
       prepareStep: (args: { steps: [] }) => { activeTools?: string[] };
       fallbackPrepareStep: (args: { steps: [] }) => { activeTools?: string[] };
+      promptMessageId: string;
+      retrievalEnabled: boolean;
     };
     expect(options.prepareStep({ steps: [] }).activeTools).not.toContain("create_workout");
     expect(options.fallbackPrepareStep({ steps: [] }).activeTools).not.toContain("create_workout");
-    expect(accumulator.setContextTiming).toHaveBeenCalledWith({ searchHits: 0, searchUsed: false });
+    expect(options.primaryAgent.options.contextOptions.searchOptions).toBeUndefined();
+    expect(options.promptMessageId).toBe("approval-message-1");
+    expect(options.retrievalEnabled).toBe(false);
+    expect(accumulator.setContextTiming).toHaveBeenCalledWith({});
   });
 
   it("clears the anchored retry lease after a continuation failure", async () => {

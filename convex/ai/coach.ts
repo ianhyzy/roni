@@ -152,16 +152,18 @@ export const coachAgentConfig = {
 };
 
 /** Build per-request agent config with timezone-aware context handler. */
+export type CoachMessageSearchMode = "cross_thread" | "thread_only" | "disabled";
+
 export interface CoachAgentConfigOptions {
   userTimezone?: string;
   provider?: ProviderId;
   modelId?: string;
-  retrievalEnabled?: boolean;
+  messageSearchMode?: CoachMessageSearchMode;
   timing?: CoachContextTiming;
 }
 
 export function makeCoachAgentConfig(options: CoachAgentConfigOptions = {}) {
-  const { userTimezone, provider, modelId, retrievalEnabled = true, timing } = options;
+  const { userTimezone, provider, modelId, messageSearchMode = "cross_thread", timing } = options;
   const budgetProvider = provider ?? "gemini";
   const budgetModelId = modelId ?? getProviderConfig(budgetProvider).primaryModel;
   const promptBudgetTokens = getPromptInputBudget(budgetProvider, budgetModelId);
@@ -169,7 +171,8 @@ export function makeCoachAgentConfig(options: CoachAgentConfigOptions = {}) {
     ...coachAgentConfig,
     contextOptions: {
       ...coachAgentConfig.contextOptions,
-      searchOtherThreads: retrievalEnabled,
+      searchOtherThreads: messageSearchMode === "cross_thread",
+      ...(messageSearchMode === "disabled" ? { searchOptions: undefined } : {}),
     },
     contextHandler: (async (ctx, args) => {
       const contextStartedAt = Date.now();
@@ -266,12 +269,12 @@ export interface ProviderAgentArgs {
   apiKey: string;
   modelOverride?: string;
   userTimezone?: string;
-  retrievalEnabled?: boolean;
+  messageSearchMode?: CoachMessageSearchMode;
   timing?: CoachContextTiming;
 }
 
 export function buildCoachAgentsForProvider(args: ProviderAgentArgs): CoachAgentPair {
-  const { provider, apiKey, modelOverride, userTimezone, retrievalEnabled, timing } = args;
+  const { provider, apiKey, modelOverride, userTimezone, messageSearchMode, timing } = args;
   const config = getProviderConfig(provider);
   const tierModelNames = buildTierRecord((tier) => getModelForTier(provider, tier, modelOverride));
   const tierModels = buildTierRecord((tier) =>
@@ -286,7 +289,7 @@ export function buildCoachAgentsForProvider(args: ProviderAgentArgs): CoachAgent
         userTimezone,
         provider,
         modelId,
-        retrievalEnabled,
+        messageSearchMode,
         timing,
       }),
     });

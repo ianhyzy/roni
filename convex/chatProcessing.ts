@@ -229,7 +229,7 @@ export const processMessage = internalAction({
       const agents = buildCoachAgentsForProvider({
         ...providerConfig,
         userTimezone,
-        retrievalEnabled,
+        messageSearchMode: retrievalEnabled ? "cross_thread" : "thread_only",
         timing: contextTiming,
       });
       const route = selectCoachTierRoute(agents, routingIntent);
@@ -325,8 +325,8 @@ export const continueAfterApproval = internalAction({
 
     let provider: ProviderId | undefined;
     let accumulator: RunAccumulator | undefined;
-    const contextTiming: CoachContextTiming = { searchHits: 0, searchUsed: false };
-    const retrievalEnabled = true;
+    const contextTiming: CoachContextTiming = {};
+    const retrievalEnabled = false;
     const processingStartedAt = Date.now();
     const startTime = Date.now();
     try {
@@ -338,7 +338,7 @@ export const continueAfterApproval = internalAction({
       const agents = buildCoachAgentsForProvider({
         ...providerConfig,
         userTimezone,
-        retrievalEnabled,
+        messageSearchMode: "disabled",
         timing: contextTiming,
       });
       const route = selectCoachTierRoute(agents, "approval_continuation");

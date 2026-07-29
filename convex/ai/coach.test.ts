@@ -153,7 +153,7 @@ describe("shouldUseCrossThreadSearch", () => {
   });
 
   it("writes the retrieval policy into per-request context options", () => {
-    const config = makeCoachAgentConfig({ retrievalEnabled: false });
+    const config = makeCoachAgentConfig({ messageSearchMode: "thread_only" });
 
     expect(config.contextOptions.searchOtherThreads).toBe(false);
   });
