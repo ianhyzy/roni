@@ -3,11 +3,20 @@ import { expect, test } from "@playwright/test";
 test("home page loads with primary calls to action", async ({ page }) => {
   const response = await page.goto("/");
   expect(response?.status()).toBe(200);
+  await expect(page).toHaveTitle("Roni — Adaptive AI coaching for Tonal owners");
 
   await expect(
-    page.getByRole("heading", { name: "AI-powered custom workouts, compatible with your Tonal" }),
+    page.getByRole("heading", {
+      name: "Your Tonal knows what you lifted. Roni knows what to do next.",
+    }),
   ).toBeVisible();
-  await expect(page.getByRole("link", { name: "See How It Works" })).toBeVisible();
+  const weeklyPlanLink = page.getByRole("link", { name: "See a week in Roni" });
+  await expect(weeklyPlanLink).toBeVisible();
+
+  await weeklyPlanLink.click();
+
+  await expect(page).toHaveURL(/\/#week$/);
+  await expect(page.locator("#week")).toBeInViewport();
 });
 
 test("login page loads with the authentication form", async ({ page }) => {

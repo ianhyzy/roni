@@ -1,71 +1,71 @@
-/** Product mockup: AI chat + strength score panels for the landing page. */
+import { Signal } from "./Signal";
+
+const WEEK_DAYS = [
+  { day: "MON", session: "Upper strength", detail: "42 min · Tonal", status: "READY" },
+  { day: "TUE", session: "Recovery", detail: "Mobility · Walk", status: "EASY" },
+  { day: "WED", session: "Lower volume", detail: "48 min · Tonal", status: "ADAPTED" },
+  { day: "FRI", session: "Full body", detail: "Coach draft", status: "REVIEW" },
+] as const;
+
 export function ProductMockup() {
   return (
-    <section className="border-t border-border px-6 py-20 sm:py-24">
-      <div className="mx-auto grid max-w-5xl gap-6 lg:grid-cols-2">
-        {/* AI Coach Chat */}
-        <div className="scroll-slide-right rounded-xl bg-card p-5 ring-1 ring-border">
-          <p className="mb-4 text-xs font-medium uppercase tracking-widest text-muted-foreground">
-            AI Coach
-          </p>
-          <div className="space-y-3 text-sm">
-            <div className="rounded-lg bg-muted px-3 py-2 text-foreground">
-              Program me a push day focused on chest
-            </div>
-            <div
-              className="rounded-lg px-3 py-2"
-              style={{ background: "oklch(0.78 0.154 195 / 10%)" }}
-            >
-              <p className="mb-2 font-medium" style={{ color: "oklch(0.78 0.154 195)" }}>
-                Coach
-              </p>
-              <p className="text-muted-foreground">
-                Your chest is fully recovered and triceps had 48h rest. Here&#39;s a push session
-                with progressive overload from last week:
-              </p>
-              <ul className="mt-2 space-y-1 text-muted-foreground">
-                <li>Bench Press — 4x6 @ 140 lb (+5)</li>
-                <li>Incline Press — 3x10 @ 50 lb</li>
-                <li>Cable Fly — 3x12 @ 27.5 lb (+2.5)</li>
-                <li>Tricep Pushdown — 3x12 @ 42.5 lb</li>
-              </ul>
-              <p className="mt-2 text-xs" style={{ color: "oklch(0.78 0.154 195 / 70%)" }}>
-                Ready to push to your Tonal?
-              </p>
-            </div>
+    <div
+      className="relative rounded-[28px] border border-border bg-card/95 p-3 shadow-2xl shadow-black/35"
+      aria-label="Illustrative weekly plan in Roni"
+    >
+      <div className="rounded-[22px] border border-white/5 bg-background p-5 sm:p-6">
+        <div className="flex items-start justify-between gap-4 border-b border-border pb-5">
+          <div>
+            <p className="font-mono text-[11px] font-semibold uppercase tracking-[0.2em] text-primary">
+              Illustrative week
+            </p>
+            <h2 className="mt-2 text-2xl font-bold tracking-tight text-foreground">
+              Built around what changed
+            </h2>
+          </div>
+          <div className="rounded-full border border-emerald-400/25 bg-emerald-400/10 px-3 py-1 font-mono text-[10px] font-semibold uppercase tracking-wider text-emerald-300">
+            On track
           </div>
         </div>
 
-        {/* Strength Score */}
-        <div className="scroll-slide-left rounded-xl bg-card p-5 ring-1 ring-border">
-          <p className="mb-4 text-xs font-medium uppercase tracking-widest text-muted-foreground">
-            Strength Score
-          </p>
-          <div className="flex flex-col items-center py-4">
-            <span
-              className="text-6xl font-bold tracking-tight"
-              style={{ color: "oklch(0.78 0.154 195)" }}
-            >
-              847
-            </span>
-            <span className="mt-1 text-sm font-medium text-emerald-400">+12 this month</span>
+        <div className="grid gap-5 py-5 sm:grid-cols-[132px_1fr]">
+          <div className="space-y-3 border-b border-border pb-5 sm:border-b-0 sm:border-r sm:pb-0 sm:pr-5">
+            <Signal label="Tonal volume" value="−8%" tone="cyan" />
+            <Signal label="Sleep trend" value="7h 24m" tone="violet" />
+            <Signal label="Cardio load" value="Moderate" tone="green" />
           </div>
-          {/* Mini bar chart */}
-          <div className="mt-2 flex items-end justify-center gap-1.5" style={{ height: 64 }}>
-            {[32, 38, 36, 42, 44, 40, 48, 50, 46, 52, 56, 58].map((h, i) => (
+
+          <div className="space-y-2">
+            {WEEK_DAYS.map(({ day, session, detail, status }) => (
               <div
-                key={i}
-                className="w-4 rounded-sm"
-                style={{
-                  height: h,
-                  background: i === 11 ? "oklch(0.78 0.154 195)" : "oklch(0.78 0.154 195 / 30%)",
-                }}
-              />
+                key={day}
+                className="grid grid-cols-[44px_1fr_auto] items-center gap-3 rounded-xl border border-border bg-card px-3 py-3"
+              >
+                <span className="font-mono text-[10px] font-semibold tracking-wider text-muted-foreground">
+                  {day}
+                </span>
+                <div>
+                  <p className="text-sm font-semibold text-foreground">{session}</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">{detail}</p>
+                </div>
+                <span className="font-mono text-[9px] font-semibold tracking-wider text-primary">
+                  {status}
+                </span>
+              </div>
             ))}
           </div>
-          <p className="mt-3 text-center text-xs text-muted-foreground">Last 12 weeks</p>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-primary/20 bg-primary/[0.08] px-4 py-3">
+          <p className="text-sm text-foreground">
+            <span className="font-semibold">Coach:</span> Wednesday volume came down after Tuesday
+            cardio and a shorter sleep night.
+          </p>
+          <span className="font-mono text-[10px] font-semibold uppercase tracking-wider text-primary">
+            Review plan
+          </span>
         </div>
       </div>
-    </section>
+    </div>
   );
 }
