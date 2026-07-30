@@ -1,7 +1,11 @@
 import { describe, expect, it, test } from "vitest";
 import { z } from "zod";
 import { rebuildDayTool } from "./rebuildDayTool";
-import { addExerciseTool, setWarmupBlockTool } from "./weekModificationTools";
+import {
+  addExerciseTool,
+  adjustSessionDurationTool,
+  setWarmupBlockTool,
+} from "./weekModificationTools";
 
 describe("addExerciseTool input schema", () => {
   test("accepts warmUp:true as a valid argument", () => {
@@ -87,5 +91,69 @@ describe("rebuildDayTool input schema", () => {
       ],
     });
     expect(ok.success).toBe(true);
+  });
+});
+
+describe("scheduled workout edit tool errors", () => {
+  const error =
+    "Only draft workouts can be edited. Pushed or completed workouts stay on their Tonal Calendar date.";
+
+  it("returns the duration adjustment rejection", async () => {
+    const runAction = async () => ({ ok: false as const, error });
+    const tool = {
+      ...adjustSessionDurationTool,
+      ctx: {
+        userId: "user-1",
+        runQuery: async () => ({
+          _id: "week-1",
+          days: [{ sessionType: "push", workoutPlanId: "workout-1" }],
+        }),
+        runMutation: async () => null,
+        runAction,
+      },
+    };
+
+    const result = await tool.execute!(
+      { dayIndex: 0, newDurationMinutes: "45" },
+      { toolCallId: "adjust-1", messages: [] },
+    );
+
+    expect(result).toEqual({ success: false, error });
+  });
+
+  it("returns the rebuild rejection", async () => {
+    const runAction = async () => ({ ok: false as const, error });
+    const tool = {
+      ...rebuildDayTool,
+      ctx: {
+        userId: "user-1",
+        runQuery: async () => ({ _id: "week-1" }),
+        runMutation: async () => null,
+        runAction,
+      },
+    };
+
+    const result = await tool.execute!(
+      {
+        dayIndex: 0,
+        blocks: [
+          {
+            exercises: [
+              {
+                name: "Bench Press",
+                sets: 3,
+                reps: 8,
+                spotter: false,
+                eccentric: false,
+                warmUp: false,
+              },
+            ],
+          },
+        ],
+      },
+      { toolCallId: "rebuild-1", messages: [] },
+    );
+
+    expect(result).toEqual({ success: false, error });
   });
 });

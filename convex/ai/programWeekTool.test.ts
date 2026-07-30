@@ -1,6 +1,7 @@
 import type { Id } from "../_generated/dataModel";
 import type { DraftWeekSummary } from "../coach/weekProgrammingHelpers";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { makeCoachAgentConfig } from "./coach";
 import { projectProgramWeekSummary } from "./programWeekTool";
 
 function draftSummary(days: DraftWeekSummary["days"]): DraftWeekSummary {
@@ -90,5 +91,42 @@ describe("projectProgramWeekSummary", () => {
     const result = projectProgramWeekSummary(input);
 
     expect(result.days).toEqual([]);
+  });
+});
+
+describe("programWeekTool timezone binding", () => {
+  it("programs the same local week that approval will later resolve", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-03T01:00:00.000Z"));
+    try {
+      const runAction = vi.fn(async (_ref: unknown, _args: unknown) => ({
+        success: true as const,
+        weekPlanId: "week-plan-1",
+        summary: draftSummary([]),
+        degenerateDays: [],
+      }));
+      const runQuery = vi.fn(async () => null);
+      const configuredTool = makeCoachAgentConfig({
+        userTimezone: " America/Los_Angeles ",
+      }).tools.program_week;
+      const tool = {
+        ...configuredTool,
+        ctx: {
+          userId: "test-user",
+          runQuery,
+          runMutation: vi.fn(async () => null),
+          runAction,
+        },
+      };
+
+      await tool.execute!({}, { toolCallId: "call-program", messages: [] });
+
+      expect(runAction.mock.calls[0][1]).toMatchObject({
+        userId: "test-user",
+        weekStartDate: "2026-07-27",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

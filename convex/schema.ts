@@ -293,6 +293,22 @@ export default defineSchema({
     userId: v.id("users"),
     threadId: v.optional(v.string()),
     tonalWorkoutId: v.optional(v.string()),
+    tonalWorkoutSignupId: v.optional(v.string()),
+    tonalScheduledDate: v.optional(v.string()),
+    tonalSchedulingReceiptVerifiedAt: v.optional(v.number()),
+    tonalSchedulingClaim: v.optional(
+      v.object({
+        claimId: v.string(),
+        workoutId: v.string(),
+        scheduledDate: v.string(),
+        phase: v.union(
+          v.literal("checking"),
+          v.literal("reconciling"),
+          v.literal("post_authorized"),
+        ),
+        leaseExpiresAt: v.number(),
+      }),
+    ),
     source: v.optional(v.string()),
     title: v.string(),
     blocks: blockInputValidator,

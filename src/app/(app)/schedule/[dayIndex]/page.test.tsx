@@ -4,9 +4,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import ScheduleDayPage from "./page";
 import type { ScheduleData } from "../../../../../convex/schedule";
 
-const mockScheduleAction = vi.fn<() => Promise<ScheduleData | null>>();
+const mockScheduleAction =
+  vi.fn<(args: { userTimezone?: string }) => Promise<ScheduleData | null>>();
 const mockOtherAction = vi.fn();
 const mockTrack = vi.fn();
+const mockGetBrowserTimezone = vi.fn<() => string | undefined>();
 let garminFeatureThrows = false;
 type FulfilledParams = Promise<{ dayIndex: string }> & {
   status: "fulfilled";
@@ -35,6 +37,10 @@ vi.mock("convex/react", () => ({
 
 vi.mock("@/lib/analytics", () => ({
   useAnalytics: () => ({ track: mockTrack }),
+}));
+
+vi.mock("@/lib/timezone", () => ({
+  getBrowserTimezone: () => mockGetBrowserTimezone(),
 }));
 
 vi.mock("../../../../../convex/_generated/api", () => ({
@@ -89,7 +95,46 @@ describe("ScheduleDayPage", () => {
     mockScheduleAction.mockReset();
     mockOtherAction.mockReset();
     mockTrack.mockReset();
+    mockGetBrowserTimezone.mockReset();
+    mockGetBrowserTimezone.mockReturnValue("America/Denver");
     garminFeatureThrows = false;
+  });
+
+  it("loads the schedule for the browser timezone", async () => {
+    mockScheduleAction.mockResolvedValue(scheduleData);
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(mockScheduleAction).toHaveBeenCalledTimes(1);
+      expect(mockScheduleAction).toHaveBeenCalledWith({ userTimezone: "America/Denver" });
+    });
+  });
+
+  it("omits the timezone when the browser timezone is unavailable", async () => {
+    mockScheduleAction.mockResolvedValue(scheduleData);
+    mockGetBrowserTimezone.mockReturnValue(undefined);
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(mockScheduleAction).toHaveBeenCalledTimes(1);
+      expect(mockScheduleAction).toHaveBeenCalledWith({});
+    });
+  });
+
+  it("rechecks the browser timezone when retrying a failed load", async () => {
+    mockScheduleAction
+      .mockRejectedValueOnce(new Error("Schedule load failed"))
+      .mockResolvedValueOnce(scheduleData);
+    mockGetBrowserTimezone.mockReturnValueOnce(undefined).mockReturnValue("America/Denver");
+
+    renderPage();
+    fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
+
+    await waitFor(() => {
+      expect(mockScheduleAction.mock.calls).toEqual([[{}], [{ userTimezone: "America/Denver" }]]);
+    });
   });
 
   it("keeps workout details visible and logs when optional Garmin status fails", async () => {

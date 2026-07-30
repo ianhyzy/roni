@@ -26,6 +26,7 @@ import {
   DEFAULT_MAX_EXERCISES,
   DEFAULT_WARMUP_COOLDOWN,
   formatSessionTitle,
+  generateDraftWeekPlanResultValidator,
   getSessionTypesForSplit,
   getTrainingDayIndices,
   parseUserLevel,
@@ -120,6 +121,7 @@ export const generateDraftWeekPlan = internalAction({
     sessionDurationMinutes: v.optional(v.union(v.literal(30), v.literal(45), v.literal(60))),
     trainingDayIndicesOverride: v.optional(v.array(v.number())),
   },
+  returns: generateDraftWeekPlanResultValidator,
   handler: async (
     ctx,
     args,
@@ -155,10 +157,16 @@ export const generateDraftWeekPlan = internalAction({
       weekStartDate,
     });
     if (existing) {
-      await ctx.runMutation(internal.weekPlans.deleteWeekPlanInternal, {
+      const deletion = await ctx.runMutation(internal.weekPlans.deleteWeekPlanInternal, {
         userId: args.userId,
         weekPlanId: existing._id,
       });
+      if (!deletion.ok) {
+        return {
+          success: false,
+          error: `The existing week plan could not be replaced: ${deletion.error}`,
+        };
+      }
     }
 
     const data = await fetchAndComputePlanData(ctx, args.userId, preferredSplit, targetDays);

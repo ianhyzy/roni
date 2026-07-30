@@ -4,9 +4,8 @@
  * has the LLM-supplied block structure. Movement IDs are validated; rep vs
  * duration is auto-corrected against the catalog.
  *
- * If the previous day's workout was already pushed to Tonal, this action
- * does NOT auto-re-push — it leaves the new plan in `draft` status. The
- * caller (the LLM) should explicitly approve_week_plan to push.
+ * Workouts already pushed to Tonal cannot be replaced because their calendar
+ * signup remains linked to the original workout and date.
  */
 
 import { v } from "convex/values";
@@ -24,6 +23,7 @@ import {
 import { resolveMovement } from "../tonal/movementResolve";
 import { formatSessionTitle } from "./weekProgrammingHelpers";
 import type { SessionType } from "./weekProgrammingHelpers";
+import { NON_DRAFT_WORKOUT_EDIT_ERROR } from "../weekPlanHelpers";
 
 const MIN_BLOCKS = 1;
 const MAX_BLOCKS = 10;
@@ -100,6 +100,15 @@ export const rebuildDay = internalAction({
     if (day.sessionType === "rest" || day.sessionType === "recovery") {
       return { ok: false, error: "Cannot rebuild a rest or recovery day" };
     }
+    if (day.workoutPlanId) {
+      const currentWorkout = await ctx.runQuery(internal.workoutPlans.getById, {
+        planId: day.workoutPlanId,
+        userId,
+      });
+      if (!currentWorkout || currentWorkout.status !== "draft") {
+        return { ok: false, error: NON_DRAFT_WORKOUT_EDIT_ERROR };
+      }
+    }
 
     const validationError = validateRebuildDayBlocks(blocks);
     if (validationError) return { ok: false, error: validationError };
@@ -112,28 +121,15 @@ export const rebuildDay = internalAction({
     const finalTitle = title ?? formatSessionTitle(sessionType, plan.weekStartDate, dayIndex);
     const oldWorkoutPlanId = day.workoutPlanId;
 
-    const newPlanId = (await ctx.runMutation(internal.weekPlans.createDraftWorkoutInternal, {
-      userId,
-      title: finalTitle,
-      blocks: resolved.blocks,
-      estimatedDuration: day.estimatedDuration,
-    })) as Id<"workoutPlans">;
-
-    await ctx.runMutation(internal.weekPlans.linkWorkoutPlanToDayInternal, {
+    return await ctx.runMutation(internal.weekPlans.replaceDayDraftWorkoutInternal, {
       userId,
       weekPlanId,
       dayIndex,
-      workoutPlanId: newPlanId,
+      expectedWorkoutPlanId: oldWorkoutPlanId ?? null,
+      title: finalTitle,
+      blocks: resolved.blocks,
       estimatedDuration: day.estimatedDuration,
     });
-
-    if (oldWorkoutPlanId) {
-      await ctx.runMutation(internal.weekPlans.deleteDraftWorkout, {
-        workoutPlanId: oldWorkoutPlanId,
-      });
-    }
-
-    return { ok: true, workoutPlanId: newPlanId };
   },
 });
 

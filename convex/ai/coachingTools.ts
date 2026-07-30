@@ -15,6 +15,7 @@ import { internal } from "../_generated/api";
 import type { Doc, Id } from "../_generated/dataModel";
 import { requireUserId, withToolTracking } from "./helpers";
 import { computeWeeklyVolume } from "../coach/periodization";
+import { getWeekStartDateStringInTimezone } from "../weekPlanHelpers";
 
 // ---------------------------------------------------------------------------
 // 1. Post-workout feedback
@@ -320,63 +321,54 @@ export const getInjuriesTool = createTool({
 // 6. Volume tracking
 // ---------------------------------------------------------------------------
 
-export const getWeeklyVolumeTool = createTool({
-  description:
-    "Analyze current weekly training volume by muscle group against recommended set ranges. Use when the user asks about under-training, over-training, bodybuilding balance, or whether the current week has enough volume. Do not use for recent workout frequency, muscle readiness, or per-exercise performance trends. Inputs are empty; returns weekStartDate and muscle-group volume rows with weeklySets, recommended range, and status.",
-  inputSchema: z.object({}),
-  execute: withToolTracking("get_weekly_volume", async (ctx, _input, _options) => {
-    const userId = requireUserId(ctx);
-    const typedUserId = userId as Id<"users">;
+export function createGetWeeklyVolumeTool(userTimezone?: string) {
+  return createTool({
+    description:
+      "Analyze current weekly training volume by muscle group against recommended set ranges. Use when the user asks about under-training, over-training, bodybuilding balance, or whether the current week has enough volume. Do not use for recent workout frequency, muscle readiness, or per-exercise performance trends. Inputs are empty; returns weekStartDate and muscle-group volume rows with weeklySets, recommended range, and status.",
+    inputSchema: z.object({}),
+    execute: withToolTracking("get_weekly_volume", async (ctx, _input, _options) => {
+      const userId = requireUserId(ctx);
+      const typedUserId = userId as Id<"users">;
 
-    // Get current week's workout plans
-    const weekStartDate = getWeekStartDate();
-    const weekPlan = (await ctx.runQuery(internal.weekPlans.getByUserIdAndWeekStartInternal, {
-      userId: typedUserId,
-      weekStartDate,
-    })) as Doc<"weekPlans"> | null;
+      // Get current week's workout plans
+      const weekStartDate = getWeekStartDateStringInTimezone(new Date(), userTimezone);
+      const weekPlan = (await ctx.runQuery(internal.weekPlans.getByUserIdAndWeekStartInternal, {
+        userId: typedUserId,
+        weekStartDate,
+      })) as Doc<"weekPlans"> | null;
 
-    if (!weekPlan) return { message: "No week plan found for current week.", volume: [] };
+      if (!weekPlan) return { message: "No week plan found for current week.", volume: [] };
 
-    // Get workout plan blocks for each day
-    const planIds = weekPlan.days
-      .map((d) => d.workoutPlanId)
-      .filter((id): id is Id<"workoutPlans"> => id !== undefined);
+      // Get workout plan blocks for each day
+      const planIds = weekPlan.days
+        .map((d) => d.workoutPlanId)
+        .filter((id): id is Id<"workoutPlans"> => id !== undefined);
 
-    const plans = (await Promise.all(
-      [...new Set(planIds)].map((id) =>
-        ctx.runQuery(internal.workoutPlans.getById, { planId: id, userId: typedUserId }),
-      ),
-    )) as (Doc<"workoutPlans"> | null)[];
+      const plans = (await Promise.all(
+        [...new Set(planIds)].map((id) =>
+          ctx.runQuery(internal.workoutPlans.getById, { planId: id, userId: typedUserId }),
+        ),
+      )) as (Doc<"workoutPlans"> | null)[];
 
-    const weekBlocks = plans
-      .filter((p): p is Doc<"workoutPlans"> => p !== null)
-      .map((p) => p.blocks);
+      const weekBlocks = plans
+        .filter((p): p is Doc<"workoutPlans"> => p !== null)
+        .map((p) => p.blocks);
 
-    // Get catalog for muscle group mapping
-    const catalog = await ctx.runQuery(internal.tonal.movementSync.getAllMovements);
+      // Get catalog for muscle group mapping
+      const catalog = await ctx.runQuery(internal.tonal.movementSync.getAllMovements);
 
-    const volume = computeWeeklyVolume(weekBlocks, catalog);
-    return {
-      weekStartDate,
-      volume: volume.map((v) => ({
-        muscleGroup: v.muscleGroup,
-        weeklySets: v.weeklySets,
-        recommended: `${v.recommendedMin}-${v.recommendedMax}`,
-        status: v.status,
-      })),
-    };
-  }),
-});
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function getWeekStartDate(): string {
-  const now = new Date();
-  const day = now.getDay();
-  const diff = day === 0 ? -6 : 1 - day;
-  const monday = new Date(now);
-  monday.setDate(now.getDate() + diff);
-  return monday.toISOString().slice(0, 10);
+      const volume = computeWeeklyVolume(weekBlocks, catalog);
+      return {
+        weekStartDate,
+        volume: volume.map((v) => ({
+          muscleGroup: v.muscleGroup,
+          weeklySets: v.weeklySets,
+          recommended: `${v.recommendedMin}-${v.recommendedMax}`,
+          status: v.status,
+        })),
+      };
+    }),
+  });
 }
+
+export const getWeeklyVolumeTool = createGetWeeklyVolumeTool();

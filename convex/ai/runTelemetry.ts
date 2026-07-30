@@ -118,6 +118,8 @@ type ApproveWeekPlanOutput =
       success: boolean;
       pushed: number;
       failed: number;
+      schedulingFailed?: number;
+      deferred?: number;
       skipped: number;
       results: { pushDivergence?: PushDivergence | null }[];
     }
@@ -361,17 +363,21 @@ export class RunAccumulator {
         }
         continue;
       }
-
       if (result.toolName === "program_week" && isSuccessToolOutput(result.output)) {
         this.markApprovalPause();
         continue;
       }
-
       if (result.toolName === "approve_week_plan" && isApproveWeekPlanOutput(result.output)) {
         const out = result.output;
         if ("error" in out) {
           this.workoutPushOutcome = "failed";
-        } else if (out.failed > 0 || out.success === false) {
+        } else if (out.failed > 0) {
+          this.workoutPushOutcome = "failed";
+        } else if (out.pushed > 0) {
+          this.workoutPushOutcome = "pushed";
+        } else if ((out.deferred ?? 0) > 0) {
+          this.workoutPushOutcome = "none";
+        } else if (out.success === false && (out.schedulingFailed ?? 0) === 0) {
           this.workoutPushOutcome = "failed";
         } else {
           this.workoutPushOutcome = "pushed";

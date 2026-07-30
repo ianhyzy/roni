@@ -2,7 +2,7 @@ import type { ActionCtx } from "../_generated/server";
 import { internal } from "../_generated/api";
 import type { Doc, Id } from "../_generated/dataModel";
 import { detectMissedSessions, formatMissedSessionContext } from "../coach/missedSessionDetection";
-import { getWeekStartDateString } from "../weekPlanHelpers";
+import { getDateStringInTimezone, getWeekStartDateStringInTimezone } from "../weekPlanHelpers";
 import type { OwnedAccessories } from "../tonal/accessories";
 import type { SnapshotInputs } from "../coachState";
 export { getRecencyLabel } from "./timeDecay";
@@ -332,7 +332,9 @@ export async function buildTrainingSnapshotWithMetadata(
 
   // Priority 12: Missed session detection — non-critical, skip on error
   try {
-    const weekStartDate = getWeekStartDateString(new Date());
+    const now = new Date();
+    const todayDate = getDateStringInTimezone(now, userTimezone);
+    const weekStartDate = getWeekStartDateStringInTimezone(now, userTimezone);
     const weekPlan = (await ctx.runQuery(internal.weekPlans.getByUserIdAndWeekStartInternal, {
       userId: convexUserId,
       weekStartDate,
@@ -362,10 +364,8 @@ export async function buildTrainingSnapshotWithMetadata(
         activities.map((a) => a.tonalWorkoutId).filter((id): id is string => id !== undefined),
       );
 
-      const now = new Date();
-      const todayDayIndex = (now.getDay() + 6) % 7; // Mon=0..Sun=6
-      const todayDate = now.toISOString().slice(0, 10);
-
+      const localDay = new Date(`${todayDate}T00:00:00.000Z`).getUTCDay();
+      const todayDayIndex = (localDay + 6) % 7; // Mon=0..Sun=6
       const missedSummary = detectMissedSessions({
         days: weekPlan.days,
         todayDayIndex,

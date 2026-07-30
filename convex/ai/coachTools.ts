@@ -3,6 +3,7 @@ import { withAnthropicToolCache } from "./anthropicCache";
 import {
   advanceTrainingBlockTool,
   checkDeloadTool,
+  createGetWeeklyVolumeTool,
   getGoalsTool,
   getInjuriesTool,
   getRecentFeedbackTool,
@@ -16,8 +17,8 @@ import {
 } from "./coachingTools";
 import { estimateDurationTool } from "./estimationTools";
 import { estimateMessagesTokens } from "./contextWindow";
-import { programWeekTool } from "./programWeekTool";
-import { rebuildDayTool } from "./rebuildDayTool";
+import { createProgramWeekTool, programWeekTool } from "./programWeekTool";
+import { createRebuildDayTool, rebuildDayTool } from "./rebuildDayTool";
 import { analyzeVolumeStrengthTool } from "./volumeStrengthTool";
 import {
   createWorkoutTool,
@@ -33,12 +34,15 @@ import {
 import {
   addExerciseTool,
   adjustSessionDurationTool,
+  createWeekModificationTools,
   moveSessionTool,
   setWarmupBlockTool,
   swapExerciseTool,
 } from "./weekModificationTools";
 import {
-  approveWeekPlanTool,
+  createApproveWeekPlanTool,
+  createDeleteWeekPlanTool,
+  createGetWeekPlanDetailsTool,
   deleteWeekPlanTool,
   getWeekPlanDetailsTool,
   getWorkoutPerformanceTool,
@@ -60,7 +64,7 @@ const RAW_COACH_TOOLS = {
   program_week: programWeekTool,
   get_week_plan_details: getWeekPlanDetailsTool,
   delete_week_plan: deleteWeekPlanTool,
-  approve_week_plan: approveWeekPlanTool,
+  approve_week_plan: createApproveWeekPlanTool(),
   get_workout_performance: getWorkoutPerformanceTool,
   swap_exercise: swapExerciseTool,
   add_exercise: addExerciseTool,
@@ -147,7 +151,25 @@ export function selectApprovalContinuationToolMode(toolNames: readonly string[])
     : "all";
 }
 
-export const COACH_TOOLS = withAnthropicToolCache(RAW_COACH_TOOLS);
+export function buildCoachTools(userTimezone?: string): typeof RAW_COACH_TOOLS {
+  const modifications = createWeekModificationTools(userTimezone);
+  return withAnthropicToolCache({
+    ...RAW_COACH_TOOLS,
+    program_week: createProgramWeekTool(userTimezone),
+    get_week_plan_details: createGetWeekPlanDetailsTool(userTimezone),
+    delete_week_plan: createDeleteWeekPlanTool(userTimezone),
+    approve_week_plan: createApproveWeekPlanTool(userTimezone),
+    swap_exercise: modifications.swapExerciseTool,
+    add_exercise: modifications.addExerciseTool,
+    set_warmup_block: modifications.setWarmupBlockTool,
+    move_session: modifications.moveSessionTool,
+    adjust_session_duration: modifications.adjustSessionDurationTool,
+    rebuild_day: createRebuildDayTool(userTimezone),
+    get_weekly_volume: createGetWeeklyVolumeTool(userTimezone),
+  });
+}
+
+export const COACH_TOOLS = buildCoachTools();
 
 function getToolDescription(tool: unknown): string {
   if (tool === null || typeof tool !== "object" || !("description" in tool)) return "";

@@ -29,7 +29,7 @@ import {
   resolveUserProviderConfig,
   withByokErrorSanitization,
 } from "./chatHelpers";
-import { getWeekStartDateString } from "./weekPlanHelpers";
+import { getWeekStartDateStringInTimezone } from "./weekPlanHelpers";
 import { resolveRuntimeEnvironment } from "./lib/env";
 import { shouldScheduleMemoryExtraction } from "./ai/memoryFactExtraction";
 
@@ -216,7 +216,7 @@ export const processMessage = internalAction({
         internal.weekPlans.hasPendingDraftForWeekInternal,
         {
           userId,
-          weekStartDate: getWeekStartDateString(new Date()),
+          weekStartDate: getWeekStartDateStringInTimezone(new Date(), userTimezone),
         },
       );
       const toolMode = classifyCoachToolMode(prompt, hasPendingWeekDraft);
