@@ -1106,9 +1106,12 @@ an orphaned standing grant on the provider.
   failure path** (identity timeout, malformed response, persistence error) before
   discarding it, and back off (honor `Retry-After` / bounded exponential) between
   retryable revocation responses.
-- Add coverage that a callback URL is scrubbed from the Sentry `beforeSend` payload,
-  that the callback resolves to the initiating origin, and that a post-exchange
-  failure revokes the token.
+- Add coverage that a callback URL is scrubbed from _both_ Sentry hooks —
+  `beforeSend` (error events) _and_ `beforeSendTransaction` (sampled page-load
+  traces), which are separate registrations — under every tracing-enabled runtime
+  config, that the callback resolves to the initiating origin, and that a
+  post-exchange failure revokes the token. A test that exercises only the error
+  path stays green while transaction redaction regresses.
 
 ## 25. A statistical threshold/enforcement estimator must exclude incomplete-projection samples and require its domain precondition before promoting an advisory estimate to "enforceable"
 
@@ -1142,11 +1145,17 @@ syncs or a general decline.
   flag (`performanceSyncComplete`) and drop any week containing an activity that
   hasn't fully projected — don't let a missing projection read as a real zero (see
   also §15 on defaults counted as measurements, and §2 on valid domain values).
-- **Require the domain precondition before qualifying an enforceable threshold**
-  (here: the at-or-below-cap median strength change must be nonnegative); keep the
-  estimate advisory otherwise.
-- Add coverage for a false-zero week (must not qualify) and a two-declining-bands case
-  (stays advisory).
+- **Require the domain precondition before qualifying an enforceable threshold** —
+  and require _both sides_ of the effect, not just one. Here the `fitThreshold` guard
+  needs the at-or-below-cap median strength change to be nonnegative **and** the
+  above-cap median to be negative: the data must show the sign transition (volume
+  at/below the cap holds or improves strength while exceeding it _harms_ recovery)
+  before a cap is enforceable. A nonnegative-lower check alone still qualifies
+  two-improving-bands data (e.g. +2 below, +1 above), which demonstrates no cap. Keep
+  the estimate advisory otherwise.
+- Add coverage for a false-zero week (must not qualify), a two-declining-bands case
+  (stays advisory), and a two-improving-bands case (stays advisory — no demonstrated
+  cap).
 
 ## 26. Receipt-only retry guards are not idempotency when an external POST can finish ambiguously
 
