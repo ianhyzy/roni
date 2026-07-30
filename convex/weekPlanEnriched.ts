@@ -4,10 +4,12 @@
  * the local `status` field is a cache/hint kept approximately correct.
  */
 
+import { v } from "convex/values";
 import { action } from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
-import { getWeekStartDateString } from "./weekPlanHelpers";
+import { sanitizeTimezone } from "./ai/timeDecay";
+import { getWeekStartDateStringInTimezone } from "./weekPlanHelpers";
 import type { Activity } from "./tonal/types";
 
 // ---------------------------------------------------------------------------
@@ -134,13 +136,14 @@ export async function safeActivities(fetcher: () => Promise<Activity[]>): Promis
 // ---------------------------------------------------------------------------
 
 export const getWeekPlanEnriched = action({
-  args: {},
-  handler: async (ctx): Promise<EnrichedWeekPlan | null> => {
+  args: { userTimezone: v.optional(v.string()) },
+  handler: async (ctx, { userTimezone: rawTz }): Promise<EnrichedWeekPlan | null> => {
     const userId = await ctx.runQuery(internal.lib.auth.resolveEffectiveUserId, {});
     if (!userId) throw new Error("Not authenticated");
+    const userTimezone = sanitizeTimezone(rawTz);
 
     // 1. Get local week plan
-    const weekStartDate = getWeekStartDateString(new Date());
+    const weekStartDate = getWeekStartDateStringInTimezone(new Date(), userTimezone);
     const plan = (await ctx.runQuery(internal.weekPlans.getByUserIdAndWeekStartInternal, {
       userId,
       weekStartDate,

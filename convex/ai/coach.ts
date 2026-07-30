@@ -15,9 +15,10 @@ import type { Id } from "../_generated/dataModel";
 import { getTrainingSnapshotForChat, type TrainingSnapshotSource } from "./trainingSnapshotCache";
 import { estimateMessagesTokens } from "./contextWindow";
 import { buildSearchTelemetryContextWindow } from "./contextWindowSearchTelemetry";
-import { COACH_TOOLS, ESTIMATED_TOOL_DEFINITION_TOKENS } from "./coachTools";
+import { buildCoachTools, COACH_TOOLS, ESTIMATED_TOOL_DEFINITION_TOKENS } from "./coachTools";
 import { buildInstructions } from "./promptSections";
 import { createModelTierPrepareStep, type ModelTierPrepareStep } from "./coachModelPolicy";
+import { sanitizeTimezone } from "./timeDecay";
 
 export { createModelTierPrepareStep, selectCoachPrepareStepTier } from "./coachModelPolicy";
 export type { ModelTierPrepareStep } from "./coachModelPolicy";
@@ -164,11 +165,13 @@ export interface CoachAgentConfigOptions {
 
 export function makeCoachAgentConfig(options: CoachAgentConfigOptions = {}) {
   const { userTimezone, provider, modelId, messageSearchMode = "cross_thread", timing } = options;
+  const sanitizedUserTimezone = sanitizeTimezone(userTimezone);
   const budgetProvider = provider ?? "gemini";
   const budgetModelId = modelId ?? getProviderConfig(budgetProvider).primaryModel;
   const promptBudgetTokens = getPromptInputBudget(budgetProvider, budgetModelId);
   return {
     ...coachAgentConfig,
+    tools: buildCoachTools(sanitizedUserTimezone),
     contextOptions: {
       ...coachAgentConfig.contextOptions,
       searchOtherThreads: messageSearchMode === "cross_thread",
@@ -209,7 +212,11 @@ export function makeCoachAgentConfig(options: CoachAgentConfigOptions = {}) {
         return [staticSystem, ...messages];
       }
 
-      const snapshotResult = await getTrainingSnapshotForChat(ctx, args.userId, userTimezone);
+      const snapshotResult = await getTrainingSnapshotForChat(
+        ctx,
+        args.userId,
+        sanitizedUserTimezone,
+      );
       if (timing) {
         timing.snapshotBuildMs = (timing.snapshotBuildMs ?? 0) + snapshotResult.snapshotBuildMs;
         timing.snapshotSource ??= snapshotResult.source;

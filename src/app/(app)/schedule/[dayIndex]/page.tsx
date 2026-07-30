@@ -1,6 +1,6 @@
 "use client";
 
-import { Component, type ReactNode, use, useEffect } from "react";
+import { Component, type ReactNode, use, useCallback, useEffect } from "react";
 import Link from "next/link";
 import { useAction } from "convex/react";
 import { useAnalytics } from "@/lib/analytics";
@@ -12,6 +12,7 @@ import { GarminWorkoutDeliveryCard } from "@/features/schedule/GarminWorkoutDeli
 import { StatusBadge } from "@/features/schedule/StatusBadge";
 import { ArrowLeft, Clock, Dumbbell, MessageSquare, RefreshCw } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { getBrowserTimezone } from "@/lib/timezone";
 import { api } from "../../../../../convex/_generated/api";
 import type { ScheduleData } from "../../../../../convex/schedule";
 
@@ -84,7 +85,15 @@ export default function ScheduleDayPage({ params }: { params: Promise<{ dayIndex
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dayIndex]);
 
-  const schedule = useActionData<ScheduleData | null>(useAction(api.schedule.getScheduleData));
+  const scheduleAction = useAction(api.schedule.getScheduleData);
+  const loadSchedule = useCallback(
+    (_args: Record<string, never>) => {
+      const userTimezone = getBrowserTimezone();
+      return scheduleAction(userTimezone ? { userTimezone } : {});
+    },
+    [scheduleAction],
+  );
+  const schedule = useActionData<ScheduleData | null>(loadSchedule);
 
   if (schedule.state.status === "loading") return <ScheduleDetailSkeleton />;
 

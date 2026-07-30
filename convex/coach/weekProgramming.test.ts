@@ -1,5 +1,18 @@
-import { describe, expect, it } from "vitest";
+import { type FunctionReference, getFunctionName } from "convex/server";
+import { describe, expect, it, vi } from "vitest";
+import type { Id } from "../_generated/dataModel";
+import type { ActionCtx } from "../_generated/server";
+import { generateDraftWeekPlan } from "./weekProgramming";
 import { getSessionTypesForSplit, getTrainingDayIndices } from "./weekProgrammingHelpers";
+
+type TestFunctionReference = FunctionReference<
+  "query" | "mutation" | "action",
+  "public" | "internal"
+>;
+
+function getHandler<T>(registered: unknown): T {
+  return (registered as { _handler: T })._handler;
+}
 
 describe("getTrainingDayIndices", () => {
   it("returns Mon/Wed/Fri (0, 2, 4) for 3 target days", () => {
@@ -187,5 +200,47 @@ describe("generateDraftWeekPlan link-step race condition handler", () => {
     const err = new Error("Workout plan not found or access denied");
 
     expect(() => simulateLinkStepCatch(err)).toThrow("Workout plan not found");
+  });
+});
+
+describe("generateDraftWeekPlan regeneration guard", () => {
+  it("returns the deletion failure before reading programming inputs or creating rows", async () => {
+    const userId = "user-1" as Id<"users">;
+    const weekPlanId = "week-plan-1" as Id<"weekPlans">;
+    const runQuery = vi.fn(async (ref: TestFunctionReference) => {
+      const name = getFunctionName(ref);
+      if (name === "weekPlans:getByUserIdAndWeekStartInternal") return { _id: weekPlanId };
+      throw new Error(`Unexpected query ${name}`);
+    });
+    const runMutation = vi.fn(async (ref: TestFunctionReference) => {
+      const name = getFunctionName(ref);
+      if (name === "weekPlans:deleteWeekPlanInternal") {
+        return { ok: false, error: "Scheduled workouts cannot be deleted" };
+      }
+      throw new Error(`Unexpected mutation ${name}`);
+    });
+    const runAction = vi.fn(async () => {
+      throw new Error("No action should run after deletion fails");
+    });
+    const handler =
+      getHandler<
+        (
+          ctx: ActionCtx,
+          args: { userId: Id<"users">; weekStartDate?: string },
+        ) => Promise<{ success: true } | { success: false; error: string }>
+      >(generateDraftWeekPlan);
+
+    await expect(
+      handler({ runQuery, runMutation, runAction } as unknown as ActionCtx, {
+        userId,
+        weekStartDate: "2026-07-27",
+      }),
+    ).resolves.toEqual({
+      success: false,
+      error: "The existing week plan could not be replaced: Scheduled workouts cannot be deleted",
+    });
+    expect(runQuery).toHaveBeenCalledOnce();
+    expect(runMutation).toHaveBeenCalledOnce();
+    expect(runAction).not.toHaveBeenCalled();
   });
 });

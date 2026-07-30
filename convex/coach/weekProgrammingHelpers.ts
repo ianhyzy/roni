@@ -4,6 +4,7 @@
  */
 
 import type { Id } from "../_generated/dataModel";
+import { v } from "convex/values";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -111,6 +112,52 @@ export interface DraftWeekSummary {
   sessionDurationMinutes: number;
   days: DraftDaySummary[];
 }
+
+const exerciseSummaryValidator = v.object({
+  movementId: v.string(),
+  name: v.string(),
+  muscleGroups: v.array(v.string()),
+  sets: v.number(),
+  reps: v.optional(v.number()),
+  durationSeconds: v.optional(v.number()),
+  lastTime: v.optional(v.string()),
+  suggestedTarget: v.optional(v.string()),
+  lastWeight: v.optional(v.number()),
+  targetWeight: v.optional(v.number()),
+});
+
+export const generateDraftWeekPlanResultValidator = v.union(
+  v.object({
+    success: v.literal(true),
+    weekPlanId: v.id("weekPlans"),
+    summary: v.object({
+      weekStartDate: v.string(),
+      preferredSplit: v.string(),
+      targetDays: v.number(),
+      sessionDurationMinutes: v.number(),
+      days: v.array(
+        v.object({
+          dayIndex: v.number(),
+          dayName: v.string(),
+          sessionType: v.string(),
+          workoutPlanId: v.id("workoutPlans"),
+          estimatedDuration: v.number(),
+          exercises: v.array(exerciseSummaryValidator),
+        }),
+      ),
+    }),
+    degenerateDays: v.array(
+      v.object({
+        dayIndex: v.number(),
+        dayName: v.string(),
+        eliminatedByInjury: v.number(),
+        eliminatedByMovementId: v.number(),
+        eliminatedByAccessory: v.number(),
+      }),
+    ),
+  }),
+  v.object({ success: v.literal(false), error: v.string() }),
+);
 
 // ---------------------------------------------------------------------------
 // Pure functions

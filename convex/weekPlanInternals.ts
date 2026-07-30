@@ -10,7 +10,10 @@ import {
   daySlotValidator,
   dayStatusValidator,
   DEFAULT_DAYS,
+  getDraftWorkoutMutationBlocker,
+  getWorkoutApprovalFingerprint,
   isValidWeekStartDateString,
+  NON_DRAFT_WORKOUT_EDIT_ERROR,
   preferredSplitValidator,
 } from "./weekPlanHelpers";
 import { blockInputValidator } from "./validators";
@@ -205,26 +208,115 @@ export const createDraftWorkoutInternal = internalMutation({
   },
 });
 
+type ReplaceDayDraftWorkoutResult =
+  { ok: true; workoutPlanId: Id<"workoutPlans"> } | { ok: false; error: string };
+
+/** Atomically replace the exact draft currently linked to a week-plan day. */
+export const replaceDayDraftWorkoutInternal = internalMutation({
+  args: {
+    userId: v.id("users"),
+    weekPlanId: v.id("weekPlans"),
+    dayIndex: v.number(),
+    expectedWorkoutPlanId: v.union(v.id("workoutPlans"), v.null()),
+    title: v.string(),
+    blocks: blockInputValidator,
+    estimatedDuration: v.optional(v.number()),
+  },
+  handler: async (ctx, args): Promise<ReplaceDayDraftWorkoutResult> => {
+    if (args.dayIndex < 0 || args.dayIndex > 6) {
+      throw new Error("dayIndex must be 0 (Monday) through 6 (Sunday)");
+    }
+    const plan = await ctx.db.get(args.weekPlanId);
+    if (!plan || plan.userId !== args.userId) {
+      throw new Error("Week plan not found or access denied");
+    }
+
+    const currentWorkoutPlanId = plan.days[args.dayIndex]?.workoutPlanId ?? null;
+    if (currentWorkoutPlanId !== args.expectedWorkoutPlanId) {
+      return {
+        ok: false,
+        error: "This workout changed while the edit was being prepared. Please retry.",
+      };
+    }
+    if (currentWorkoutPlanId) {
+      const currentWorkout = await ctx.db.get(currentWorkoutPlanId);
+      if (!currentWorkout || currentWorkout.userId !== args.userId) {
+        return { ok: false, error: "Linked workout not found or access denied" };
+      }
+      if (getDraftWorkoutMutationBlocker(currentWorkout)) {
+        return { ok: false, error: NON_DRAFT_WORKOUT_EDIT_ERROR };
+      }
+    }
+
+    const normalizedBlocks = await normalizeBlocksAgainstCatalog(ctx, args.blocks);
+    const workoutPlanId = await ctx.db.insert("workoutPlans", {
+      userId: args.userId,
+      title: args.title,
+      blocks: normalizedBlocks,
+      status: "draft",
+      source: WORKOUT_SOURCE,
+      estimatedDuration: args.estimatedDuration,
+      createdAt: Date.now(),
+    });
+    const days = [...plan.days];
+    days[args.dayIndex] = {
+      ...days[args.dayIndex],
+      workoutPlanId,
+      ...(args.estimatedDuration !== undefined
+        ? { estimatedDuration: args.estimatedDuration }
+        : {}),
+    };
+    await ctx.db.patch(args.weekPlanId, { days, updatedAt: Date.now() });
+    if (currentWorkoutPlanId) await ctx.db.delete(currentWorkoutPlanId);
+    return { ok: true, workoutPlanId };
+  },
+});
+
 /** Internal: delete a week plan and its linked draft workouts. */
 export const deleteWeekPlanInternal = internalMutation({
   args: {
     userId: v.id("users"),
     weekPlanId: v.id("weekPlans"),
   },
+  returns: v.union(
+    v.object({ ok: v.literal(true), deleted: v.boolean() }),
+    v.object({ ok: v.literal(false), error: v.string() }),
+  ),
   handler: async (ctx, args) => {
     const plan = await ctx.db.get(args.weekPlanId);
-    // Concurrent re-generation can race to delete the same plan — a missing
-    // plan is a valid no-op; a mismatched owner is a security violation.
-    if (!plan) return;
-    if (plan.userId !== args.userId) throw new Error("Week plan access denied");
-    for (const day of plan.days) {
-      if (!day.workoutPlanId) continue;
-      const workout = await ctx.db.get(day.workoutPlanId);
-      if (workout && workout.status === "draft") {
-        await ctx.db.delete(day.workoutPlanId);
+    if (!plan) return { ok: true as const, deleted: false };
+    if (plan.userId !== args.userId) {
+      return { ok: false as const, error: "Week plan access denied" };
+    }
+
+    const workoutPlanIds = [
+      ...new Set(plan.days.flatMap((day) => (day.workoutPlanId ? [day.workoutPlanId] : []))),
+    ];
+    for (const workoutPlanId of workoutPlanIds) {
+      const workout = await ctx.db.get(workoutPlanId);
+      if (!workout) {
+        return { ok: false as const, error: "Linked workout not found" };
+      }
+      if (workout.userId !== args.userId) {
+        return { ok: false as const, error: "Linked workout access denied" };
+      }
+      const blocker = getDraftWorkoutMutationBlocker(workout);
+      if (blocker === "non_draft") {
+        return { ok: false as const, error: "Only draft week plans can be deleted" };
+      }
+      if (blocker === "scheduled") {
+        return { ok: false as const, error: "Scheduled workouts cannot be deleted" };
+      }
+      if (blocker === "claimed") {
+        return { ok: false as const, error: "Workout scheduling is in progress" };
       }
     }
+
+    for (const workoutPlanId of workoutPlanIds) {
+      await ctx.db.delete(workoutPlanId);
+    }
     await ctx.db.delete(args.weekPlanId);
+    return { ok: true as const, deleted: true };
   },
 });
 
@@ -252,34 +344,56 @@ export const deleteDraftWorkout = internalMutation({
 /** Internal: replace a draft workout link with the pushed version. */
 export const replaceDraftWithPushed = internalMutation({
   args: {
+    userId: v.id("users"),
     weekPlanId: v.id("weekPlans"),
     dayIndex: v.number(),
     oldWorkoutPlanId: v.id("workoutPlans"),
+    expectedDraftFingerprint: v.string(),
     newWorkoutPlanId: v.id("workoutPlans"),
     estimatedDuration: v.optional(v.number()),
   },
-  handler: async (
-    ctx,
-    { weekPlanId, dayIndex, oldWorkoutPlanId, newWorkoutPlanId, estimatedDuration },
-  ) => {
-    const plan = await ctx.db.get(weekPlanId);
-    if (!plan) return;
-
-    // 1. Patch the day slot FIRST (point to the pushed workout).
-    // If this fails, the draft still exists (harmless).
-    const days = [...plan.days];
-    days[dayIndex] = {
-      ...days[dayIndex],
-      workoutPlanId: newWorkoutPlanId,
-      ...(estimatedDuration != null && { estimatedDuration }),
-    };
-    await ctx.db.patch(weekPlanId, { days, updatedAt: Date.now() });
-
-    // 2. THEN delete the draft (if it still exists and is still a draft).
-    // If this fails, we have an orphaned draft record (harmless cleanup).
-    const draft = await ctx.db.get(oldWorkoutPlanId);
-    if (draft && draft.status === "draft") {
-      await ctx.db.delete(oldWorkoutPlanId);
+  returns: v.union(
+    v.object({ status: v.literal("replaced"), workoutPlanId: v.id("workoutPlans") }),
+    v.object({ status: v.literal("canonical"), workoutPlanId: v.id("workoutPlans") }),
+    v.object({ status: v.literal("conflict"), error: v.string() }),
+  ),
+  handler: async (ctx, args) => {
+    const conflict = (error: string) => ({ status: "conflict" as const, error });
+    if (args.dayIndex < 0 || args.dayIndex > 6) return conflict("Invalid week-plan day");
+    const plan = await ctx.db.get(args.weekPlanId);
+    if (!plan || plan.userId !== args.userId) {
+      return conflict("Week plan not found or access denied");
     }
+    const replacement = await ctx.db.get(args.newWorkoutPlanId);
+    if (!replacement || replacement.userId !== args.userId || replacement.status !== "pushed") {
+      return conflict("Replacement workout is not an owned pushed plan");
+    }
+    const currentWorkoutPlanId = plan.days[args.dayIndex]?.workoutPlanId;
+    if (currentWorkoutPlanId !== args.oldWorkoutPlanId) {
+      if (!currentWorkoutPlanId) return conflict("The week-plan day no longer has a workout");
+      const canonical = await ctx.db.get(currentWorkoutPlanId);
+      if (!canonical || canonical.userId !== args.userId || canonical.status !== "pushed") {
+        return conflict("The linked workout changed without a canonical pushed plan");
+      }
+      return { status: "canonical" as const, workoutPlanId: canonical._id };
+    }
+    const draft = await ctx.db.get(args.oldWorkoutPlanId);
+    if (!draft || draft.userId !== args.userId || draft.status !== "draft") {
+      return conflict("The linked draft is missing or no longer editable");
+    }
+    if (getWorkoutApprovalFingerprint(draft) !== args.expectedDraftFingerprint) {
+      return conflict(
+        "The draft changed while approval was in progress. Retry approval to push the updated workout.",
+      );
+    }
+    const days = [...plan.days];
+    days[args.dayIndex] = {
+      ...days[args.dayIndex],
+      workoutPlanId: args.newWorkoutPlanId,
+      ...(args.estimatedDuration != null && { estimatedDuration: args.estimatedDuration }),
+    };
+    await ctx.db.patch(args.weekPlanId, { days, updatedAt: Date.now() });
+    await ctx.db.delete(args.oldWorkoutPlanId);
+    return { status: "replaced" as const, workoutPlanId: args.newWorkoutPlanId };
   },
 });

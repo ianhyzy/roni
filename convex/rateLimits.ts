@@ -77,6 +77,13 @@ export const rateLimiter = new RateLimiter(components.rateLimiter, {
     period: MINUTE,
     capacity: 5,
   },
+  scheduleTonalWorkout: {
+    // One approval may schedule seven days; headroom covers a token-refresh retry.
+    kind: "token bucket",
+    rate: 10,
+    period: MINUTE,
+    capacity: 10,
+  },
   refreshTonalData: {
     kind: "token bucket",
     rate: 2,

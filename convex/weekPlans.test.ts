@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { getWeekStartDateString, isValidWeekStartDateString } from "./weekPlans";
+import {
+  getWeekStartDateString,
+  getWeekStartDateStringInTimezone,
+  isValidWeekStartDateString,
+} from "./weekPlans";
+import { getDateStringInTimezone } from "./weekPlanHelpers";
 
 describe("isValidWeekStartDateString", () => {
   it("accepts valid YYYY-MM-DD", () => {
@@ -38,5 +43,23 @@ describe("getWeekStartDateString", () => {
   it("returns same week Monday for Saturday", () => {
     const saturday = new Date("2026-03-14T12:00:00Z");
     expect(getWeekStartDateString(saturday)).toBe("2026-03-09");
+  });
+});
+
+describe("getWeekStartDateStringInTimezone", () => {
+  it("uses the user's Sunday when UTC has already reached Monday", () => {
+    const mondayInUtc = new Date("2026-03-09T01:00:00.000Z");
+
+    expect(getWeekStartDateStringInTimezone(mondayInUtc, "America/Denver")).toBe("2026-03-02");
+    expect(getWeekStartDateStringInTimezone(mondayInUtc, "UTC")).toBe("2026-03-09");
+  });
+});
+
+describe("getDateStringInTimezone", () => {
+  it("returns the local calendar date and falls back to UTC for invalid timezones", () => {
+    const instant = new Date("2026-08-03T01:00:00.000Z");
+
+    expect(getDateStringInTimezone(instant, "America/Los_Angeles")).toBe("2026-08-02");
+    expect(getDateStringInTimezone(instant, "Not/A_Timezone")).toBe("2026-08-03");
   });
 });

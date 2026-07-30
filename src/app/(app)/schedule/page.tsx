@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useCallback, useEffect } from "react";
 import Link from "next/link";
 import { useAction } from "convex/react";
 import { useAnalytics } from "@/lib/analytics";
@@ -9,6 +9,7 @@ import { useActionData } from "@/hooks/useActionData";
 import { ScheduleDayCard } from "@/features/schedule/ScheduleDayCard";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ErrorAlert } from "@/components/ErrorAlert";
+import { getBrowserTimezone } from "@/lib/timezone";
 import { ArrowRight, MessageSquare } from "lucide-react";
 import type { ScheduleData } from "../../../../convex/schedule";
 
@@ -126,7 +127,15 @@ export default function SchedulePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const schedule = useActionData<ScheduleData | null>(useAction(api.schedule.getScheduleData));
+  const scheduleAction = useAction(api.schedule.getScheduleData);
+  const loadSchedule = useCallback(
+    (_args: Record<string, never>) => {
+      const userTimezone = getBrowserTimezone();
+      return scheduleAction(userTimezone ? { userTimezone } : {});
+    },
+    [scheduleAction],
+  );
+  const schedule = useActionData<ScheduleData | null>(loadSchedule);
 
   if (schedule.state.status === "loading") return <ScheduleSkeleton />;
   if (schedule.state.status === "error") return <ScheduleError onRetry={schedule.refetch} />;

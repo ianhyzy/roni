@@ -1,8 +1,10 @@
 import { generateText } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import type { LanguageModelV3GenerateResult } from "@ai-sdk/provider";
+import { getFunctionName } from "convex/server";
 import { describe, expect, test, vi } from "vitest";
-import { approveWeekPlanTool, deleteWeekPlanTool } from "./weekTools";
+import { makeCoachAgentConfig } from "./coach";
+import { createApproveWeekPlanTool, deleteWeekPlanTool } from "./weekTools";
 
 const MOCK_USAGE = {
   inputTokens: {
@@ -21,7 +23,7 @@ const MOCK_USAGE = {
 const WRITE_TOOL_CASES = [
   {
     name: "approve_week_plan",
-    tool: approveWeekPlanTool,
+    tool: createApproveWeekPlanTool(),
     input: {},
   },
   {
@@ -78,4 +80,158 @@ describe("write tool approval policy", () => {
       ).toBe(true);
     },
   );
+});
+
+describe("approveWeekPlanTool", () => {
+  test("passes the sanitized user timezone to the week-plan push action", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-03T01:00:00.000Z"));
+    try {
+      const runAction = vi.fn(async (_ref: unknown, _args: unknown) => ({
+        success: true,
+        pushed: 0,
+        failed: 0,
+        schedulingFailed: 0,
+        deferred: 0,
+        skipped: 7,
+        results: [],
+      }));
+      const runQuery = vi.fn(async (_ref: unknown, _args: unknown) => ({
+        _id: "week-plan-1",
+      }));
+      const approveTool = makeCoachAgentConfig({
+        userTimezone: " America/Los_Angeles ",
+      }).tools.approve_week_plan;
+      const tool = {
+        ...approveTool,
+        ctx: {
+          userId: "test-user",
+          runQuery,
+          runMutation: vi.fn(async () => null),
+          runAction,
+        },
+      };
+
+      await tool.execute!({}, { toolCallId: "call-approve", messages: [] });
+
+      expect(runQuery.mock.calls[0][1]).toEqual({
+        userId: "test-user",
+        weekStartDate: "2026-07-27",
+      });
+      expect(runAction.mock.calls[0][1]).toEqual({
+        userId: "test-user",
+        weekPlanId: "week-plan-1",
+        userTimezone: "America/Los_Angeles",
+      });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  test("reports push divergence when workout creation succeeds but scheduling fails", async () => {
+    const runAction = vi.fn(async (_ref: unknown) => ({
+      success: false,
+      pushed: 1,
+      failed: 0,
+      schedulingFailed: 1,
+      deferred: 0,
+      skipped: 6,
+      results: [
+        {
+          dayIndex: 0,
+          dayName: "Monday",
+          sessionType: "push",
+          status: "pushed" as const,
+          tonalWorkoutId: "tonal-workout-1",
+          scheduleStatus: "failed" as const,
+          error: "Calendar unavailable",
+          pushDivergence: {
+            missingMovements: ["Bench Press"],
+            extraMovements: [],
+            setCountMismatches: [],
+          },
+        },
+      ],
+    }));
+    const tool = {
+      ...createApproveWeekPlanTool(),
+      ctx: {
+        userId: "test-user",
+        runQuery: vi.fn(async () => ({ _id: "week-plan-1" })),
+        runMutation: vi.fn(async () => null),
+        runAction,
+      },
+    };
+
+    const result = await tool.execute!({}, { toolCallId: "call-approve", messages: [] });
+
+    expect(result).toMatchObject({
+      divergenceNote: expect.stringContaining("Monday"),
+    });
+    expect(getFunctionName(runAction.mock.calls[0][0] as never)).toBe(
+      "coach/pushAndVerify:pushWeekPlanToTonal",
+    );
+  });
+
+  test("returns deferred days as retryable incomplete work", async () => {
+    const runAction = vi.fn(async () => ({
+      success: false,
+      pushed: 0,
+      failed: 0,
+      schedulingFailed: 0,
+      deferred: 1,
+      skipped: 6,
+      results: [
+        {
+          dayIndex: 0,
+          dayName: "Monday",
+          sessionType: "push",
+          status: "deferred" as const,
+          retryable: true,
+          error: "Approval is still in progress. Retry to finish this day safely.",
+        },
+      ],
+    }));
+    const tool = {
+      ...createApproveWeekPlanTool(),
+      ctx: {
+        userId: "test-user",
+        runQuery: vi.fn(async () => ({ _id: "week-plan-1" })),
+        runMutation: vi.fn(async () => null),
+        runAction,
+      },
+    };
+
+    await expect(
+      tool.execute!({}, { toolCallId: "call-approve", messages: [] }),
+    ).resolves.toMatchObject({
+      success: false,
+      failed: 0,
+      schedulingFailed: 0,
+      deferred: 1,
+      results: [{ status: "deferred", retryable: true }],
+    });
+  });
+});
+
+describe("deleteWeekPlanTool", () => {
+  test("reports a guarded deletion as deleted false with its message", async () => {
+    const tool = {
+      ...deleteWeekPlanTool,
+      ctx: {
+        userId: "test-user",
+        runQuery: vi.fn(async () => ({ _id: "week-plan-1" })),
+        runMutation: vi.fn(async () => ({
+          ok: false as const,
+          error: "Scheduled workouts cannot be deleted",
+        })),
+        runAction: vi.fn(),
+      },
+    };
+
+    await expect(tool.execute!({}, { toolCallId: "call-delete", messages: [] })).resolves.toEqual({
+      deleted: false,
+      message: "Scheduled workouts cannot be deleted",
+    });
+  });
 });

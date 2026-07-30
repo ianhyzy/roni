@@ -25,6 +25,7 @@ import {
 // Re-export for external consumers
 export {
   getWeekStartDateString,
+  getWeekStartDateStringInTimezone,
   isValidWeekStartDateString,
   preferredSplitValidator,
 } from "./weekPlanHelpers";
@@ -39,6 +40,7 @@ export {
   createForUserInternal,
   batchUpdateDayStatusesInternal,
   createDraftWorkoutInternal,
+  replaceDayDraftWorkoutInternal,
   deleteWeekPlanInternal,
   getWeekPlanById,
   deleteDraftWorkout,

@@ -4,12 +4,14 @@
  * catalog lookups so the frontend receives everything in one action call.
  */
 
+import { v } from "convex/values";
 import { action } from "./_generated/server";
 import { api, internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { EnrichedWeekPlan } from "./weekPlanEnriched";
 import type { Movement } from "./tonal/types";
 import { DAY_NAMES } from "./coach/weekProgrammingHelpers";
+import { sanitizeTimezone } from "./ai/timeDecay";
 import { TONAL_REST_MOVEMENT_ID } from "./tonal/transforms";
 
 // ---------------------------------------------------------------------------
@@ -64,15 +66,16 @@ function dayDate(weekStartDate: string, dayIndex: number): string {
 // ---------------------------------------------------------------------------
 
 export const getScheduleData = action({
-  args: {},
-  handler: async (ctx): Promise<ScheduleData | null> => {
+  args: { userTimezone: v.optional(v.string()) },
+  handler: async (ctx, { userTimezone: rawTz }): Promise<ScheduleData | null> => {
     const userId = await ctx.runQuery(internal.lib.auth.resolveEffectiveUserId, {});
     if (!userId) throw new Error("Not authenticated");
+    const userTimezone = sanitizeTimezone(rawTz);
 
     // 1. Fetch enriched week plan (handles Tonal activity sync)
     const enriched = (await ctx.runAction(
       api.weekPlanEnriched.getWeekPlanEnriched,
-      {},
+      userTimezone ? { userTimezone } : {},
     )) as EnrichedWeekPlan | null;
 
     if (!enriched) return null;

@@ -24,6 +24,36 @@ export const SESSION_TYPES = [
 /** Day status for calendar display. */
 export const DAY_STATUSES = ["programmed", "completed", "missed", "rescheduled"] as const;
 
+export const NON_DRAFT_WORKOUT_EDIT_ERROR =
+  "Only draft workouts can be edited. Pushed or completed workouts stay on their Tonal Calendar date.";
+
+/** Serialize the exact draft snapshot approved for a Tonal push. */
+export function getWorkoutApprovalFingerprint(workout: { title: string; blocks: unknown }): string {
+  return JSON.stringify([workout.title, workout.blocks]);
+}
+
+export type DraftWorkoutMutationBlocker = "non_draft" | "scheduled" | "claimed";
+
+/** Classify why a linked workout is unsafe to mutate or unlink. */
+export function getDraftWorkoutMutationBlocker(workout: {
+  status: string;
+  tonalWorkoutSignupId?: string;
+  tonalScheduledDate?: string;
+  tonalSchedulingReceiptVerifiedAt?: number;
+  tonalSchedulingClaim?: unknown;
+}): DraftWorkoutMutationBlocker | null {
+  if (workout.status !== "draft") return "non_draft";
+  if (
+    workout.tonalWorkoutSignupId !== undefined ||
+    workout.tonalScheduledDate !== undefined ||
+    workout.tonalSchedulingReceiptVerifiedAt !== undefined
+  ) {
+    return "scheduled";
+  }
+  if (workout.tonalSchedulingClaim !== undefined) return "claimed";
+  return null;
+}
+
 export const sessionTypeValidator = v.union(
   v.literal("push"),
   v.literal("pull"),
@@ -93,4 +123,29 @@ export function getWeekStartDateString(date: Date): string {
   const m = String(d.getUTCMonth() + 1).padStart(2, "0");
   const dayOfMonth = String(d.getUTCDate()).padStart(2, "0");
   return `${y}-${m}-${dayOfMonth}`;
+}
+
+/** Returns YYYY-MM-DD for the instant in the user's local calendar. */
+export function getDateStringInTimezone(date: Date, timeZone: string | undefined): string {
+  try {
+    const parts = new Intl.DateTimeFormat("en-CA", {
+      timeZone: timeZone ?? "UTC",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+    }).formatToParts(date);
+    const year = parts.find((part) => part.type === "year")?.value;
+    const month = parts.find((part) => part.type === "month")?.value;
+    const day = parts.find((part) => part.type === "day")?.value;
+    if (year && month && day) return `${year}-${month}-${day}`;
+  } catch {
+    // Invalid or unavailable timezones use the UTC calendar date.
+  }
+  return date.toISOString().slice(0, 10);
+}
+
+/** Returns the Monday containing the user's local calendar date. */
+export function getWeekStartDateStringInTimezone(date: Date, timeZone: string | undefined): string {
+  const calendarDate = getDateStringInTimezone(date, timeZone);
+  return getWeekStartDateString(new Date(`${calendarDate}T00:00:00.000Z`));
 }

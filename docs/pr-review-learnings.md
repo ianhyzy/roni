@@ -1136,6 +1136,44 @@ syncs or a general decline.
 - Add coverage for a false-zero week (must not qualify) and a two-declining-bands case
   (stays advisory).
 
+## 26. Receipt-only retry guards are not idempotency when an external POST can finish ambiguously
+
+**Seen in:** #616
+
+**Problem.** A stored signup receipt prevented ordinary duplicate scheduling,
+but it could be stale after a user removed or moved a Tonal Calendar tile, and
+two approvals could both pass the preflight before either wrote the receipt.
+A token refresh after an ambiguous POST could also repeat the POST because Tonal
+does not accept an idempotency key.
+
+**Preventive checks.**
+
+- Treat a recent receipt as a short-lived read optimization, not proof forever.
+- Acquire a durable lease before live reads, authorize POST atomically only after
+  a successful absence, and retain post-authorization ambiguity for the next
+  caller to reconcile. Never POST after a failed calendar read.
+- A downstream lease keyed by workout-plan ID cannot serialize concurrent
+  upstream creates that produce different IDs. Make the draft-to-pushed day link
+  an ownership-checked compare-and-swap; the loser must re-read and schedule the
+  canonical linked pushed plan, or defer retryably without a calendar call when
+  no valid canonical plan exists. Keep the loser's created plan intact for
+  explicit later reconciliation rather than hiding it with best-effort cleanup.
+- An ID-only compare-and-swap cannot detect edits made in place to the same draft.
+  Capture the approved title and blocks as an exact serialized fingerprint, then
+  compare again before replacing or deleting the draft.
+- On lease expiry, reconcile the available live calendar window first; accept an
+  exact tile, report a moved-tile conflict, and repost only after confirmed absence.
+- Block destructive regeneration when any linked workout is non-draft, scheduled,
+  or claimed, and validate the entire linked set before deleting the first row.
+- Treat `status === "draft"` as necessary but not sufficient before edits, moves,
+  or deletes: reject persisted signup, date, or receipt evidence and any present
+  scheduling claim, using one consistently ordered blocker before the first write.
+- Route one sanitized user-calendar week key through creation, approval, draft
+  gating, enrichment, and UI reads; fixing only tool lookups can still hide the
+  local plan at a UTC week boundary.
+- Stop starting external work with enough action-runtime reserve for one worst-case
+  operation; report untouched work as retryable/deferred, not as a false failure.
+
 ---
 
 ## How to use this log
@@ -1163,9 +1201,12 @@ syncs or a general decline.
   query/runtime bounds (window- and action-cap-bounded, not lifetime/per-request),
   cross-source deduplication (stable like-for-like attributes, wholesale field
   replacement), OAuth-secret handling (redact from every sink, initiating-origin
-  callbacks, revoke abandoned tokens), or statistical threshold/enforcement
+  callbacks, revoke abandoned tokens), statistical threshold/enforcement
   estimators (exclude incomplete-projection samples; require the domain
-  precondition)**, skim the matching section above.
+  precondition), or idempotency guards around a non-idempotent external POST
+  (durable lease over a stale receipt, atomic authorize-after-absence,
+  compare-and-swap on the draft→pushed link, retain post-POST ambiguity)**, skim
+  the matching section above.
 - When a review surfaces a _new_ recurring, legitimate gap (not stylistic, not
   one-off), add an entry here with the PR reference so the next agent inherits
   the lesson.

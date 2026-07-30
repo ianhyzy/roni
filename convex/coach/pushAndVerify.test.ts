@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { WeekPushResult } from "./pushAndVerify";
+import type { WeekPushResult } from "./pushAndVerifyContract";
 
 describe("WeekPushResult contract", () => {
   it("success result has all fields and counts match", () => {
@@ -7,6 +7,8 @@ describe("WeekPushResult contract", () => {
       success: true,
       pushed: 3,
       failed: 0,
+      schedulingFailed: 0,
+      deferred: 0,
       skipped: 4,
       results: [
         {
@@ -50,6 +52,8 @@ describe("WeekPushResult contract", () => {
       success: false,
       pushed: 2,
       failed: 1,
+      schedulingFailed: 0,
+      deferred: 0,
       skipped: 4,
       results: [
         { dayIndex: 0, dayName: "Monday", sessionType: "push", status: "pushed", title: "Push" },
@@ -73,6 +77,8 @@ describe("WeekPushResult contract", () => {
       success: false,
       pushed: 0,
       failed: 1,
+      schedulingFailed: 0,
+      deferred: 0,
       skipped: 6,
       results: [
         {
@@ -95,6 +101,8 @@ describe("WeekPushResult contract", () => {
       success: true,
       pushed: 0,
       failed: 0,
+      schedulingFailed: 0,
+      deferred: 0,
       skipped: 7,
       results: Array.from({ length: 7 }, (_, i) => ({
         dayIndex: i,
@@ -105,5 +113,32 @@ describe("WeekPushResult contract", () => {
     };
     expect(result.success).toBe(true);
     expect(result.pushed).toBe(0);
+  });
+
+  it("tracks calendar failure without erasing a successful workout push", () => {
+    const result: WeekPushResult = {
+      success: false,
+      pushed: 1,
+      failed: 0,
+      schedulingFailed: 1,
+      deferred: 0,
+      skipped: 6,
+      results: [
+        {
+          dayIndex: 0,
+          dayName: "Monday",
+          sessionType: "push",
+          status: "pushed",
+          tonalWorkoutId: "tonal-workout-1",
+          scheduledDate: "2026-08-03",
+          scheduleStatus: "failed",
+          error: "Tonal calendar unavailable",
+        },
+      ],
+    };
+
+    expect(result.pushed).toBe(1);
+    expect(result.failed).toBe(0);
+    expect(result.schedulingFailed).toBe(1);
   });
 });

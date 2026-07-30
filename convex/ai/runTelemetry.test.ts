@@ -195,7 +195,15 @@ describe("RunAccumulator", () => {
         toolResults: [
           {
             toolName: "approve_week_plan",
-            output: { success: true, pushed: 3, failed: 0, skipped: 0, results: [] },
+            output: {
+              success: true,
+              pushed: 3,
+              failed: 0,
+              schedulingFailed: 0,
+              deferred: 0,
+              skipped: 0,
+              results: [],
+            },
           },
         ],
       }),
@@ -212,7 +220,15 @@ describe("RunAccumulator", () => {
         toolResults: [
           {
             toolName: "approve_week_plan",
-            output: { success: false, pushed: 1, failed: 2, skipped: 0, results: [] },
+            output: {
+              success: false,
+              pushed: 1,
+              failed: 2,
+              schedulingFailed: 0,
+              deferred: 0,
+              skipped: 0,
+              results: [],
+            },
           },
         ],
       }),

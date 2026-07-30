@@ -333,8 +333,10 @@ legacy same-ID rows, external-sync queries/runtime bounded by lifetime counts or
 per-request budgets instead of the sync window and action cap, cross-source
 deduplication keyed on the provider resource ID or merging unlike records, OAuth
 secrets leaked to a telemetry sink / routed to the wrong origin / abandoned
-without revocation, and statistical threshold estimators that count
-incomplete-projection false zeros or skip their domain precondition). Skim the
+without revocation, statistical threshold estimators that count
+incomplete-projection false zeros or skip their domain precondition, and
+receipt-only retry guards that mistake a stale receipt for idempotency around a
+non-idempotent external POST). Skim the
 matching section before touching Tonal fetch helpers, AI cost/budget paths, test
 fixtures, scheduled sweeps, error boundaries around optional integrations,
 credential/format validators, payload filter/transform steps, retry/fallback and
@@ -344,8 +346,9 @@ tool-gating classifiers, AI telemetry/metrics, cached read fast-paths, new
 async/secondary coach-turn or sync steps, Convex
 tsconfig/runtime-boundary changes, external-data sync reconciliation, overlapping
 sync/token-rotation concurrency, refresh/scope-revocation cleanup, external-sync
-query/runtime bounds, cross-source deduplication, OAuth secret handling, or
-statistical threshold/enforcement estimators -- and
+query/runtime bounds, cross-source deduplication, OAuth secret handling,
+statistical threshold/enforcement estimators, or idempotency guards around a
+non-idempotent external POST -- and
 append a new entry when review surfaces a fresh recurring gap.
 
 <!-- convex-ai-start -->
