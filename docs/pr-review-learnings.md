@@ -903,9 +903,15 @@ another in-flight action already committed.
 
 **Preventive checks.**
 
-- **Serialize reconciliation per connection generation**, or skip any row whose
-  `syncedAt`/`lastIngestedAt` is newer than the action's captured `now` — on _every_
-  path (activities _and_ wellness), not just the one that happens to check.
+- **Serialize reconciliation per connection generation** — a per-connection
+  reconciliation version/lease is the robust fix. A bare "skip any row whose
+  `syncedAt`/`lastIngestedAt` is newer than the action's captured `now`" check is
+  _not_ equivalent to serialization: it only guards rows that still exist, so if a
+  newer reconciliation already _deleted_ a row, the older action finds nothing to
+  compare against and can reinsert its stale snapshot. If you can't serialize, gate
+  writes on a reconciliation version/lease (or tombstone deleted rows) rather than a
+  surviving-row timestamp alone — and apply the guard on _every_ path (activities
+  _and_ wellness), not just the one that happens to check.
 - **Condition disconnect/invalidation on the token version that actually failed.**
   Reread the connection (or claim it atomically) before `markDisconnected`, and pass
   `expectedTokenExpiresAt` so a rotated-in credential can't be erased by a request
@@ -992,9 +998,14 @@ hits users the feature doesn't even apply to.
 
 **Preventive checks.**
 
-- **Bound indexed scans by the sync/reconciliation window** (`beginTime >= startDate`
-  on the index) rather than counting or fetching the user's lifetime rows; stored UTC
-  strings sort compatibly with a `YYYY-MM-DD` prefix.
+- **Bound indexed scans by the sync/reconciliation window** rather than counting or
+  fetching the user's lifetime rows — but mind the same civil-vs-UTC boundary as §19.
+  A bare `beginTime >= startDate` on a UTC-string index drops a shortly-after-midnight
+  activity whose civil date is in-window but whose UTC `beginTime` falls on the prior
+  date (exactly the boundary row §19 warns about), which destructive reconciliation
+  would then treat as missing. Widen the bound by a one-day UTC lookback and then
+  filter by civil date, or index the civil date directly, so the scan matches the
+  API's `civil_start_time` window instead of the raw UTC prefix.
 - **Budget total page/time across the whole sync against `CONVEX_ACTION_MAX_MS`**,
   not independently per data type.
 - **Gate an over-fetch to the case that needs it** (active connection present) and
