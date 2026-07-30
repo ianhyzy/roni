@@ -1,6 +1,6 @@
 # PR Review Learnings
 
-Last reviewed: 2026-07-29
+Last reviewed: 2026-07-30
 
 A running log of recurring, legitimate issues raised in pull-request review that
 agents (and humans) should pre-empt. Each entry records the **problem**, **why
@@ -154,7 +154,7 @@ exactly the slow/retried turns it was built for.
 
 ## 5. Error boundaries around optional integrations must recover and log
 
-**Seen in:** #426 (2 review threads, both P2)
+**Seen in:** #426 (2 review threads, both P2); #602 (the Fitbit feature-status hook)
 
 **Problem.** A new React error boundary wrapped the optional Garmin
 "send-to-Garmin" card on the schedule detail page so a failure there couldn't
@@ -191,6 +191,13 @@ user nor Sentry/operators ever learn it regressed.
 - Add regression coverage for the **recovery** transition (toggle the mocked
   query failure → success and assert the card returns), not just the
   failure-hides-card case.
+- The same rule applies to a **status/feature hook**, not just a render boundary:
+  #602's `useFitbitFeatureStatus` collapsed a transient `getFitbitFeatureStatus`
+  rejection to `undefined`, which Settings and Dashboard both treat like _loading_
+  and render no Fitbit UI — so an already-connected user silently lost the refresh
+  and disconnect controls until the hook's 5-minute interval retried. Preserve a
+  distinct error state and expose a `refetch` callback so the optional integration
+  renders a recoverable error instead of disappearing.
 
 ## 6. Validate new credential/ID formats against a real example, and update every copy of the check
 
@@ -586,6 +593,13 @@ the wrong direction.
   `ReferenceError` that returns a "too big / can't cache" sentinel disables
   caching under a misleading payload-size log instead of surfacing the missing
   global.
+- **Wire an expanded typecheck target into CI, not just `package.json`.** #606
+  added a dual-target `npm run typecheck` (app + `convex/tsconfig.json`) to catch
+  Convex deploy-time type errors, but review noted the CI Type Check job still
+  invoked `npx tsc --noEmit` directly, so the second target never ran in CI and the
+  deploy failure it guards against stayed undetected. #607 fixed the workflow to run
+  `npm run typecheck`. When you add a compiler target/script for a safety check,
+  confirm the CI step actually invokes the script, not the bare tool.
 
 ## 15. Per-turn telemetry must record what actually happened — never let default/initial values, pre-trim intent, or context-expansion artifacts count as measurements
 
@@ -812,6 +826,305 @@ deletion, work done for failed turns, and stale/crossed state.
   (house-key quota near the cap, deletion-in-progress, a terminal coach failure,
   two out-of-order writes), asserting the guard holds.
 
+## 19. Destructive external-sync reconciliation must fail closed on malformed or partial payloads — and a changed-connection or rejected reconciliation is a failed sync, not a success
+
+**Seen in:** #602 (several P1/P2 threads on the Fitbit / Google Health sync)
+
+**Problem.** The direct importer treats each freshly-fetched array as the
+_authoritative complete_ set and reconciles destructively — `reconcileExternalActivities`
+deletes every previously-stored direct activity absent from the array, and
+`upsertWellnessDaily` clears stored fields absent from each synced data type.
+Several ways a non-authoritative array reached that destructive step:
+
+- **Malformed points were silently dropped, then reconciled as "gone."** When
+  Google omitted a required exercise field or changed a payload shape, the
+  normalizer dropped the malformed point but `runSync` still treated the shortened
+  array as complete — so an all-row schema mismatch reported a _successful
+  zero-activity sync_ and erased the user's 30-day activity set. The wellness
+  branches (sleep/RHR/HRV) had the same gap and could wipe up to 30 days of
+  recovery data; exercise parsing was later made to fail closed while the wellness
+  branches still continued past malformed points.
+- **A changed connection was reported as success.** When disconnect/relinking won
+  after the initial read but before persistence, both reconciliation mutations
+  deliberately returned `false`; the caller ignored the result and `runSync` still
+  returned success with the fetched counts, so a manual refresh reported "synced"
+  after the connection had changed.
+- **A civil-vs-UTC cutoff mismatch aborted the whole sync.** The API filter used
+  `exercise.interval.civil_start_time`, but persistence compared cutoffs against a
+  UTC-string timestamp, so a shortly-after-midnight workout in a positive UTC
+  offset was rejected and the exception aborted the entire user's sync.
+
+**Why it matters.** A destructive "the source is the full truth" reconciliation is
+only safe if the fetched set really is complete and valid. A silent drop, a
+transient shape change, or a mid-flight connection change turns "I didn't receive
+X" into "delete X" — erasing real data while the sync reports success, so nothing
+surfaces the loss.
+
+**Preventive checks.**
+
+- **Fail closed before destructive reconciliation.** Reject malformed source points
+  (exercise _and_ wellness) and abort the sync rather than reconciling a partial
+  array; keep filtering only for genuinely non-authoritative sources. Never let "N
+  points parsed out of a shape-changed payload" drive a delete/clear of the rest
+  (see also §11 — permissiveness is only safe where a downstream repair step exists;
+  a delete path has none).
+- **Check every reconciliation mutation's result.** If a reconciliation returns a
+  connection-changed / `false` sentinel, propagate it as a failed sync and don't
+  record success counts.
+- **Compare cutoffs on the same time basis the upstream filter uses** (civil date
+  vs UTC instant); a boundary-row mismatch shouldn't throw and abort the whole sync.
+- Add coverage for an all-rows-malformed payload (no deletion, sync fails), a
+  mid-sync disconnect (failed result), and a boundary-date activity.
+
+## 20. Overlapping syncs and rotating OAuth tokens must be serialized or guarded by version/timestamp — a `now` captured at action start races
+
+**Seen in:** #602 (several P1/P2 threads)
+
+**Problem.** The hourly cron sync, initial sync, and manual refresh can run
+concurrently against the same connection, and each captured `now` when it
+_started_:
+
+- **An older sync deletes/overwrites newer results.** When a newer action persisted
+  a newly-observed workout (or wellness value) first, the older action's
+  reconciliation unconditionally deleted the row (absent from its earlier snapshot)
+  or overwrote the row and even moved `lastIngestedAt` _backward_ — the activity
+  path checked `syncedAt`/newness, but the wellness path never did.
+- **A concurrent refresh + disconnect erases fresh credentials.** When Google
+  rotated the refresh token, one request installed new credentials while another
+  received `invalid_grant` for the superseded token; the `invalid_grant`/disconnect
+  branch keyed only on the unchanged generation and `markDisconnected` ran without
+  `expectedTokenExpiresAt`, so it erased the just-installed credentials and
+  scheduled deletion of otherwise-valid data.
+
+**Why it matters.** "Latest read wins" is wrong when actions overlap: the action
+that _started_ later isn't necessarily the one that _finished_ later. Reconciliation
+and disconnect decisions made against a start-of-action snapshot silently undo work
+another in-flight action already committed.
+
+**Preventive checks.**
+
+- **Serialize reconciliation per connection generation**, or skip any row whose
+  `syncedAt`/`lastIngestedAt` is newer than the action's captured `now` — on _every_
+  path (activities _and_ wellness), not just the one that happens to check.
+- **Condition disconnect/invalidation on the token version that actually failed.**
+  Reread the connection (or claim it atomically) before `markDisconnected`, and pass
+  `expectedTokenExpiresAt` so a rotated-in credential can't be erased by a request
+  that failed on the superseded token.
+- Add coverage for two out-of-order syncs (older must not delete/overwrite newer)
+  and a refresh-rotates-token-then-disconnect race (must not erase the new
+  credential).
+
+## 21. On external-data refresh or scope revocation, clear fields that disappeared and purge data the user no longer consents to — patch-merge and source-reclassification leave ghosts
+
+**Seen in:** #602 (multiple P1/P2 threads)
+
+**Problem.** Refresh and consent changes only _added_ or _relabeled_ data, never
+removed what was no longer authorized:
+
+- **Patch-merge preserved revoked signals.** `upsertWellnessDaily` patched only the
+  fields still present, so when Google stopped returning a signal (e.g. after a
+  revoked sleep/health-metrics scope), the stale sleep/RHR/HRV values stayed in the
+  active row and `gatherSnapshotInputs` kept sending them to the coach.
+- **Revoked/reduced scopes didn't purge their imported data.** `removeGrantedScope`
+  and the reduced-scope refresh path in `replaceTokens` updated the scope list but
+  never scheduled the activity/wellness purge, so data imported under a
+  since-revoked scope stayed visible to the dashboard and coach indefinitely — the
+  next sync simply derived `dataTypes` from the remaining scopes and never revisited
+  the dropped one.
+- **Reclassifying a source orphaned legacy same-ID rows.** Introducing the canonical
+  `fitbit` source meant `persistExternalActivities` only reused a same-ID row whose
+  stored source already normalized to `fitbit`; pre-existing rows stored as `other`
+  weren't adopted, so the next Tonal sync inserted a second canonical row and both
+  were counted.
+
+**Why it matters.** This is the removal-side complement to §9 (don't clobber known
+values on refresh): a refresh/consent path that only ever writes-present or relabels
+lets revoked or superseded data linger, double-count, and keep flowing to the AI
+after the user has withdrawn consent.
+
+**Preventive checks.**
+
+- **Reconcile _absent_ fields on refresh**, not just present ones — clear fields the
+  latest payload omits (or delete now-empty rows) instead of patch-merging
+  indefinitely.
+- **When a scope is revoked or a refresh returns a reduced scope set, purge the data
+  that scope covered**, using the same cleanup the explicit-revocation path runs —
+  don't defer removal to a later 403.
+- **When introducing/renaming a source classification, migrate or explicitly adopt
+  existing same-ID rows** so the new canonical row replaces the legacy one instead of
+  duplicating it (the same widen→migrate→narrow discipline the AGENTS.md Convex
+  Patterns section applies to schema narrows).
+- Add coverage for a signal that disappears on refresh (row cleared), a scope
+  revocation (imported data purged), and a legacy same-ID row (adopted, not
+  duplicated).
+
+## 22. Bound external-sync queries and total runtime by the sync window and the action cap — not by lifetime row counts or per-request budgets
+
+**Seen in:** #602 (P1/P2 threads + a CodeRabbit Major)
+
+**Problem.** Several limits were computed against the wrong denominator:
+
+- **A lifetime-count guard failed permanently.** The dedup scan counted _every_
+  Fitbit-source `externalActivities` row for the user (including Tonal-derived rows
+  with no `fitbitConnectionGeneration`) and threw once the total exceeded 1000; since
+  Tonal enrichment continually accumulates rows, active users eventually cross the
+  cap with no malformed data and every reconciliation throws forever. The scan only
+  needed candidates inside the 30-day reconciliation window.
+- **A per-datatype budget exceeded the action cap.** `runSync` read up to four data
+  types sequentially, each allowing 20 pages at up to 15s/request — an 80-request /
+  1,200s worst case that exceeds Convex's 600s action cap, so the platform kills the
+  action before its catch block records an error (see also §4, §8).
+- **An unconditional over-fetch charged all users.** A fixed `3×` over-fetch /
+  filter / slice on `externalActivities` tripled document reads on _every_ chat turn,
+  even for users with no Fitbit connection (where the generation filter is a no-op),
+  and could still under-return if too many fetched rows were stale-generation. It
+  needed gating to active connections and a named multiplier — and, after
+  disconnect/relink, could fill the entire over-fetch with soon-to-be-cleaned stale
+  rows so unrelated recent Garmin/Tonal activities vanished from the snapshot.
+- **Single-page generation cleanup left stale rows.** Cleanup scanned one page per
+  call, so old-generation activity/wellness rows survived outside the current window
+  indefinitely after a relink.
+
+**Why it matters.** A bound derived from lifetime totals or per-request budgets
+drifts out of the safe range as data accumulates or as the slow path stacks up —
+turning a guard into a permanent failure, a killed action, or a cost regression that
+hits users the feature doesn't even apply to.
+
+**Preventive checks.**
+
+- **Bound indexed scans by the sync/reconciliation window** (`beginTime >= startDate`
+  on the index) rather than counting or fetching the user's lifetime rows; stored UTC
+  strings sort compatibly with a `YYYY-MM-DD` prefix.
+- **Budget total page/time across the whole sync against `CONVEX_ACTION_MAX_MS`**,
+  not independently per data type.
+- **Gate an over-fetch to the case that needs it** (active connection present) and
+  name the multiplier; confirm the filtered result can still reach its target count
+  or paginate until it does, so a batch of stale-generation rows can't starve the
+  snapshot.
+- **Drain generation cleanup fully** (paginate until the old generation is gone)
+  before treating a relink as complete.
+
+## 23. Cross-source deduplication must match on stable, like-for-like attributes — not the provider resource ID — and replace owned fields wholesale instead of blending records
+
+**Seen in:** #602 (P1/P2 threads)
+
+**Problem.** The same physical workout or day arrives from more than one source, and
+the dedup/merge logic missed or corrupted the overlap:
+
+- **Dedup keyed only on the resource ID.** A workout already imported via Tonal's
+  external-activity feed (`Fitbit` / `Fitbit Web API`) has a _different_ `externalId`
+  than the direct Google Health import, so the ID lookup missed it and inserted a
+  second row; both then reached the dashboard and `gatherSnapshotInputs`,
+  double-counting the training load.
+- **Dedup compared unlike duration fields.** For a workout with >60s of paused time,
+  the direct import stored Google's `activeDuration` as `totalDuration` while Tonal
+  stored _elapsed_ `totalDuration`; `representsSameWorkout` compared these mismatched
+  fields with only a 60s tolerance, so the duplicate slipped through.
+- **A "longest sleep wins" merge blended two sessions.** `compactPatch` strips
+  `undefined`, so spreading the winner over `existing` retained the _losing_ session's
+  stage values (deep/REM) alongside the winner's duration and start/end times — one
+  day's row carried fields from two different sleep sessions.
+
+**Why it matters.** Deduplication and last-write merges that key on a source-specific
+ID or spread over a prior record silently double-count or splice unrelated data — the
+failure shows up as inflated training load or a physiologically impossible row, far
+from the merge that caused it.
+
+**Preventive checks.**
+
+- **Dedup across sources on stable workout attributes** (start instant + type + a
+  like-for-like duration), not the provider resource ID; reconcile provider-derived
+  rows against direct imports.
+- **Compare like durations** — normalize both sources to elapsed (or retain an
+  active-duration field on both) before applying a tolerance window.
+- **Replace an owned field-group wholesale** when one record wins, rather than
+  spreading the winner over the loser; a merge that strips `undefined` will keep the
+  loser's fields the winner didn't set.
+- Add coverage for a Tonal-imported + direct-import pair (one row), a paused-workout
+  duration pair, and a two-session same-day sleep merge.
+
+## 24. Treat single-use OAuth secrets as secrets end-to-end: redact them from every telemetry sink, route callbacks to the initiating origin, and revoke tokens abandoned after the exchange
+
+**Seen in:** #602 (P1/P2 threads)
+
+**Problem.** The OAuth flow leaked its short-lived credentials three ways:
+
+- **The callback ticket reached Sentry.** A new sanitizer redacted the
+  `/fitbit/callback?ticket=...` URL for PostHog only; `sentryBeforeSend` returned the
+  URL unchanged, so a client-side error or sampled page-load trace captured before
+  the ticket was claimed could export the single-use OAuth ticket to Sentry.
+- **The callback went to the wrong app origin.** `resolveAppOrigin()` prioritizes
+  `GARMIN_OAUTH_POST_REDIRECT_URL`, so when that and `SITE_URL` identify different
+  origins the single-use Fitbit ticket was delivered to the Garmin-configured origin
+  instead of the app that initiated the flow — especially on the shared Convex dev
+  deployment with isolated Conductor workspaces, where the destination may not hold
+  the initiating session, so `completeFitbitOAuth` can't claim the user-bound ticket.
+- **Abandoned tokens weren't revoked.** When the identity request timed out /
+  returned malformed data, or persistence failed _after_ a successful token exchange,
+  the generic catch discarded the live refresh token without revoking or storing it —
+  the UI said "connection failed" but the Google grant stayed usable and neither
+  disconnect nor account deletion could find it to revoke. Relatedly, token-revocation
+  retries had no backoff and ignored `Retry-After`, so all attempts could expire
+  inside one rate-limit/outage window and leave the grant active.
+
+**Why it matters.** An OAuth ticket or refresh token that escapes into a telemetry
+sink, lands on the wrong origin, or is dropped without revocation is a live credential
+outside the system's control — indexed in Sentry, unclaimable by the real session, or
+an orphaned standing grant on the provider.
+
+**Preventive checks.**
+
+- **Apply OAuth-query redaction to _every_ capture sink** (Sentry _and_ PostHog and
+  any future one), or keep the single-use secret out of the query string entirely.
+- **Carry the initiating origin through the OAuth `state`** (or use a
+  provider-specific redirect setting) so the callback returns to the app that started
+  the flow, not whichever origin a shared helper prioritizes.
+- **Retain an exchanged token long enough to revoke it on _every_ post-exchange
+  failure path** (identity timeout, malformed response, persistence error) before
+  discarding it, and back off (honor `Retry-After` / bounded exponential) between
+  retryable revocation responses.
+- Add coverage that a callback URL is scrubbed from the Sentry `beforeSend` payload,
+  that the callback resolves to the initiating origin, and that a post-exchange
+  failure revokes the token.
+
+## 25. A statistical threshold/enforcement estimator must exclude incomplete-projection samples and require its domain precondition before promoting an advisory estimate to "enforceable"
+
+**Seen in:** #608 (2 P2 threads on personal-MRV estimation)
+
+**Problem.** The personal-MRV estimator fitted a `qualified_for_enforcement`
+set-volume threshold from per-week strength/volume observations, but two classes of
+unsound sample could still qualify it:
+
+- **Incomplete projections produced false zeros.** When a completed activity hadn't
+  finished projecting its `exercisePerformance` rows, `setsByWeek` had no entry and
+  the fallback recorded the muscle as _zero_ sets. The repo already tracks this with
+  `completedWorkouts.performanceSyncComplete`, but the query never read it — so
+  partial/legacy syncs supplied enough false zero-volume observations to qualify a
+  threshold.
+- **A declining-everywhere trend was read as a recoverable range.** When both the
+  at-or-below and above-cap segments were losing strength (e.g. medians −1 and −2 with
+  sufficient Cliff's delta), the condition still accepted the candidate, even though
+  such data never demonstrates a recoverable volume range and may just reflect an
+  unrelated downward trend.
+
+**Why it matters.** An estimator that promotes an _advisory_ number to an _enforceable_
+one is a guardrail; if it treats incomplete-sync artifacts as real measurements or
+accepts data that doesn't actually demonstrate the effect, it enforces a threshold
+built on noise — biasing programming for every user whose history includes partial
+syncs or a general decline.
+
+**Preventive checks.**
+
+- **Exclude samples whose upstream projection is incomplete.** Read the completeness
+  flag (`performanceSyncComplete`) and drop any week containing an activity that
+  hasn't fully projected — don't let a missing projection read as a real zero (see
+  also §15 on defaults counted as measurements, and §2 on valid domain values).
+- **Require the domain precondition before qualifying an enforceable threshold**
+  (here: the at-or-below-cap median strength change must be nonnegative); keep the
+  estimate advisory otherwise.
+- Add coverage for a false-zero week (must not qualify) and a two-declining-bands case
+  (stays advisory).
+
 ---
 
 ## How to use this log
@@ -829,9 +1142,19 @@ deletion, work done for failed turns, and stale/crossed state.
   telemetry/metrics (what to count, which samples to exclude), cached/projected
   read fast-paths in front of a live source (freshness, watermark, verification),
   new async/secondary steps attached to a coach turn or sync (inheriting quota /
-  deletion / terminal-outcome / ordering guards), or Convex tsconfig /
-  runtime-boundary changes (Node globals in default-runtime files)**, skim the
-  matching section above.
+  deletion / terminal-outcome / ordering guards), Convex tsconfig /
+  runtime-boundary changes (Node globals in default-runtime files; wiring an
+  expanded typecheck into CI), external-data sync reconciliation (fail closed on
+  malformed/partial payloads; a changed-connection reconciliation is a failed
+  sync), overlapping-sync / rotating-token concurrency (serialize or
+  version/timestamp-guard), refresh & scope-revocation cleanup (clear absent
+  fields, purge revoked-scope data, migrate legacy same-ID rows), external-sync
+  query/runtime bounds (window- and action-cap-bounded, not lifetime/per-request),
+  cross-source deduplication (stable like-for-like attributes, wholesale field
+  replacement), OAuth-secret handling (redact from every sink, initiating-origin
+  callbacks, revoke abandoned tokens), or statistical threshold/enforcement
+  estimators (exclude incomplete-projection samples; require the domain
+  precondition)**, skim the matching section above.
 - When a review surfaces a _new_ recurring, legitimate gap (not stylistic, not
   one-off), add an entry here with the PR reference so the next agent inherits
   the lesson.

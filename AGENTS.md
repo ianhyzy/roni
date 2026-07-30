@@ -322,17 +322,30 @@ failed/partial samples, cached/projected read fast-paths that skip freshness
 verification or never advance their watermark, new async/secondary steps that
 skip the primary path's quota/deletion/terminal-outcome/ordering guards,
 internal actions reachable
-without their tool schema that skip validating their own input, and Convex
+without their tool schema that skip validating their own input, Convex
 tsconfig/runtime-boundary changes that let Node-only globals leak into
-default-runtime files). Skim the
+default-runtime files or leave an expanded typecheck unwired in CI, destructive
+external-sync reconciliation that trusts malformed/partial payloads or reports a
+changed-connection sync as success, overlapping-sync/rotating-token races that a
+start-of-action `now` or stale generation resolves wrong, refresh/scope-revocation
+paths that patch-merge stale fields or never purge revoked-scope data or orphan
+legacy same-ID rows, external-sync queries/runtime bounded by lifetime counts or
+per-request budgets instead of the sync window and action cap, cross-source
+deduplication keyed on the provider resource ID or merging unlike records, OAuth
+secrets leaked to a telemetry sink / routed to the wrong origin / abandoned
+without revocation, and statistical threshold estimators that count
+incomplete-projection false zeros or skip their domain precondition). Skim the
 matching section before touching Tonal fetch helpers, AI cost/budget paths, test
 fixtures, scheduled sweeps, error boundaries around optional integrations,
 credential/format validators, payload filter/transform steps, retry/fallback and
 normalization paths, AI tool-call name/ID resolution, tool-input (Zod) schemas,
 internal actions callable without the tool schema, model-tier routing, keyword
 tool-gating classifiers, AI telemetry/metrics, cached read fast-paths, new
-async/secondary coach-turn or sync steps, or Convex
-tsconfig/runtime-boundary changes -- and
+async/secondary coach-turn or sync steps, Convex
+tsconfig/runtime-boundary changes, external-data sync reconciliation, overlapping
+sync/token-rotation concurrency, refresh/scope-revocation cleanup, external-sync
+query/runtime bounds, cross-source deduplication, OAuth secret handling, or
+statistical threshold/enforcement estimators -- and
 append a new entry when review surfaces a fresh recurring gap.
 
 <!-- convex-ai-start -->
