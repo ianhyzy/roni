@@ -959,10 +959,14 @@ after the user has withdrawn consent.
 - **When introducing/renaming a source classification, migrate or explicitly adopt
   existing same-ID rows** so the new canonical row replaces the legacy one instead of
   duplicating it (the same widen→migrate→narrow discipline the AGENTS.md Convex
-  Patterns section applies to schema narrows).
+  Patterns section applies to schema narrows). Adopt only after confirming the row is
+  genuinely a legacy alias — `externalId` is unique only _within_ a source, so an
+  `other` row from an unrelated provider can share the ID; require matching
+  provider-derived fields before migrating, don't adopt on ID alone (consistent with
+  §23's warning against cross-source ID-only dedup).
 - Add coverage for a signal that disappears on refresh (row cleared), a scope
-  revocation (imported data purged), and a legacy same-ID row (adopted, not
-  duplicated).
+  revocation (imported data purged), a legacy same-ID row (adopted, not duplicated),
+  and an unrelated same-ID row from another source (_not_ adopted).
 
 ## 22. Bound external-sync queries and total runtime by the sync window and the action cap — not by lifetime row counts or per-request budgets
 
@@ -1012,8 +1016,12 @@ hits users the feature doesn't even apply to.
   name the multiplier; confirm the filtered result can still reach its target count
   or paginate until it does, so a batch of stale-generation rows can't starve the
   snapshot.
-- **Drain generation cleanup fully** (paginate until the old generation is gone)
-  before treating a relink as complete.
+- **Drain generation cleanup fully, but asynchronously** — don't make cleanup
+  completion synchronous with the relink (that either blocks the user across many
+  scheduled transactions or pushes an unbounded single action past the Convex cap).
+  Mark the new connection active immediately, keep stale rows invisible via
+  active-generation filtering, and schedule paginated cleanup to drain the old
+  generation over subsequent runs.
 
 ## 23. Cross-source deduplication must match on stable, like-for-like attributes — not the provider resource ID — and replace owned fields wholesale instead of blending records
 
@@ -1089,7 +1097,11 @@ an orphaned standing grant on the provider.
   any future one), or keep the single-use secret out of the query string entirely.
 - **Carry the initiating origin through the OAuth `state`** (or use a
   provider-specific redirect setting) so the callback returns to the app that started
-  the flow, not whichever origin a shared helper prioritizes.
+  the flow, not whichever origin a shared helper prioritizes. Store it in
+  authenticated/opaque state and **validate it against an allow-list of configured app
+  origins before redirecting** — a raw browser-supplied origin echoed back through
+  `state` is an open redirect that hands the callback ticket to an attacker-chosen
+  origin, the very leak this section guards against.
 - **Retain an exchanged token long enough to revoke it on _every_ post-exchange
   failure path** (identity timeout, malformed response, persistence error) before
   discarding it, and back off (honor `Retry-After` / bounded exponential) between
@@ -1171,7 +1183,7 @@ does not accept an idempotency key.
 - Route one sanitized user-calendar week key through creation, approval, draft
   gating, enrichment, and UI reads; fixing only tool lookups can still hide the
   local plan at a UTC week boundary.
-- Stop starting external work with enough action-runtime reserve for one worst-case
+- Stop starting external work without enough action-runtime reserve for one worst-case
   operation; report untouched work as retryable/deferred, not as a false failure.
 
 ---
