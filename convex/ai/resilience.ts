@@ -13,7 +13,7 @@ import { COACH_MAX_STEPS } from "./coach";
 import { type ProviderId } from "./providers";
 import { type AttemptOutcome, runWithPrimaryCircuitBreaker } from "./resilienceCircuitBreaker";
 import { type AccumulatorInit, RunAccumulator } from "./runTelemetry";
-import { classifyByokError } from "./byokErrors";
+import { classifyByokError, consumeCapturedError, resetCapturedError } from "./byokErrors";
 import { runInRunSpan } from "./otel";
 import { isQuotaError, isTransientError } from "./transientErrors";
 import {
@@ -151,6 +151,7 @@ export async function streamWithRetry(
       const finalizeTurnPending = (reason: string) => safeFinalizePending(ctx, turnRef, reason);
 
       const runAttempt = async (agent: Agent): Promise<AttemptOutcome> => {
+        resetCapturedError(agent);
         const attemptPrepareStep =
           agent === fallbackAgent ? (fallbackPrepareStep ?? prepareStep) : prepareStep;
         try {
@@ -172,7 +173,7 @@ export async function streamWithRetry(
             return { done: true, success: false, errorClass: cls };
           }
           if (isQuotaError(error) || !isTransientError(error)) {
-            const cls = errorClassName(error);
+            const cls = getFinalizeCodeForError(error);
             accumulator.setTerminalErrorClass(cls);
             span.recordError(cls);
             await safeReportError(ctx, { ...errorReport, error });
@@ -204,7 +205,7 @@ export async function streamWithRetry(
           hasRetryMarker = true;
         },
         recordTerminalError: async (error) => {
-          const cls = errorClassName(error);
+          const cls = getFinalizeCodeForError(error);
           accumulator.setTerminalErrorClass(cls);
           span.recordError(cls);
           await safeReportError(ctx, { ...errorReport, error });
@@ -214,10 +215,6 @@ export async function streamWithRetry(
       return accumulator;
     },
   );
-}
-
-function errorClassName(error: unknown): string {
-  return getFinalizeCodeForError(error);
 }
 
 interface TelemetryArgs {
@@ -258,9 +255,14 @@ async function attemptStream({
   const timeout = setTimeout(() => controller.abort("Stream timeout"), ATTEMPT_TIMEOUT_MS);
   let budgetTrip: BudgetCapTrip | undefined;
   let reportedProviderError: unknown;
+  const reportedOrCapturedError = (fallback: unknown): unknown =>
+    reportedProviderError instanceof Error &&
+    reportedProviderError.message === MASKED_UI_STREAM_ERROR
+      ? (consumeCapturedError(agent) ?? reportedProviderError ?? fallback)
+      : (reportedProviderError ?? consumeCapturedError(agent) ?? fallback);
   const preferReportedProviderError = (error: unknown): unknown =>
     error instanceof Error && error.message === MASKED_UI_STREAM_ERROR
-      ? (reportedProviderError ?? error)
+      ? reportedOrCapturedError(error)
       : error;
   try {
     const { thread } = await agent.continueThread(ctx, { threadId, userId });
@@ -329,7 +331,7 @@ async function attemptStream({
       throw error;
     }
     if (accumulator.toRow().finishReason === "error") {
-      throw reportedProviderError ?? new Error("provider_response_failed");
+      throw reportedOrCapturedError(new Error("provider_response_failed"));
     }
     if (budgetTrip) {
       await ctx.runMutation(internal.aiUsage.recordBudgetStop, {

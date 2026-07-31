@@ -19,6 +19,7 @@ import { buildCoachTools, COACH_TOOLS, ESTIMATED_TOOL_DEFINITION_TOKENS } from "
 import { buildInstructions } from "./promptSections";
 import { createModelTierPrepareStep, type ModelTierPrepareStep } from "./coachModelPolicy";
 import { sanitizeTimezone } from "./timeDecay";
+import { bindProviderErrorCapture, createProviderErrorCapture } from "./byokErrors";
 
 export { createModelTierPrepareStep, selectCoachPrepareStepTier } from "./coachModelPolicy";
 export type { ModelTierPrepareStep } from "./coachModelPolicy";
@@ -274,6 +275,7 @@ export function buildCoachAgents(apiKey: string, userTimezone?: string): CoachAg
 export interface ProviderAgentArgs {
   provider: ProviderId;
   apiKey: string;
+  isHouseKey?: boolean;
   modelOverride?: string;
   userTimezone?: string;
   messageSearchMode?: CoachMessageSearchMode;
@@ -281,15 +283,18 @@ export interface ProviderAgentArgs {
 }
 
 export function buildCoachAgentsForProvider(args: ProviderAgentArgs): CoachAgentPair {
-  const { provider, apiKey, modelOverride, userTimezone, messageSearchMode, timing } = args;
+  const { provider, apiKey, isHouseKey, modelOverride, userTimezone, messageSearchMode, timing } =
+    args;
   const config = getProviderConfig(provider);
+  const errorCapture = isHouseKey === true ? null : createProviderErrorCapture();
   const tierModelNames = buildTierRecord((tier) => getModelForTier(provider, tier, modelOverride));
-  const tierModels = buildTierRecord((tier) =>
-    config.createLanguageModel(apiKey, tierModelNames[tier]),
-  );
+  const tierModels = buildTierRecord((tier) => {
+    const model = config.createLanguageModel(apiKey, tierModelNames[tier]);
+    return errorCapture?.wrapModel(model) ?? model;
+  });
   const tierAgents = buildTierRecord((tier) => {
     const modelId = tierModelNames[tier];
-    return new Agent(components.agent, {
+    const agent = new Agent(components.agent, {
       name: getTierAgentName(tier),
       languageModel: tierModels[tier],
       ...makeCoachAgentConfig({
@@ -300,6 +305,8 @@ export function buildCoachAgentsForProvider(args: ProviderAgentArgs): CoachAgent
         timing,
       }),
     });
+    if (errorCapture) bindProviderErrorCapture(agent, errorCapture);
+    return agent;
   });
 
   const primaryTier: ModelTier = "chat";
