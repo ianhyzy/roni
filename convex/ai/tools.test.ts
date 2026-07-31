@@ -1,8 +1,10 @@
 import { generateText } from "ai";
 import { MockLanguageModelV3 } from "ai/test";
 import type { LanguageModelV3GenerateResult } from "@ai-sdk/provider";
+import { getFunctionName } from "convex/server";
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
+import { internal } from "../_generated/api";
 import {
   createWorkoutTool,
   deleteWorkoutTool,
@@ -118,4 +120,82 @@ describe("write tool approval policy", () => {
       ).toBe(true);
     },
   );
+});
+
+type DeleteToolContext = {
+  userId: string;
+  runQuery: (...args: unknown[]) => Promise<unknown>;
+  runMutation: (...args: unknown[]) => Promise<unknown>;
+  runAction: (...args: unknown[]) => Promise<unknown>;
+};
+
+type ExecutableDeleteTool = {
+  execute: (
+    input: { workoutId: string },
+    options: { toolCallId: string; messages: [] },
+  ) => Promise<unknown>;
+};
+
+async function executeDeleteWorkout(ctx: DeleteToolContext) {
+  const executable = { ...(deleteWorkoutTool as object), ctx } as unknown as ExecutableDeleteTool;
+  return await executable.execute(
+    { workoutId: "tonal-workout-id" },
+    { toolCallId: "delete-test", messages: [] },
+  );
+}
+
+describe("deleteWorkoutTool scheduling preflight", () => {
+  it("does not run the deletion action when weekly scheduling state blocks deletion", async () => {
+    const runMutation = vi.fn(async () => null);
+    const error =
+      "This workout is linked to or scheduled by a weekly plan and cannot be deleted individually.";
+    const runAction = vi.fn(async (..._args: unknown[]) => error);
+
+    await expect(
+      executeDeleteWorkout({
+        userId: "user-id",
+        runQuery: vi.fn(async () => null),
+        runMutation,
+        runAction,
+      }),
+    ).rejects.toThrow(error);
+
+    expect(runAction).toHaveBeenCalledOnce();
+    expect(getFunctionName(runAction.mock.calls[0][0] as never)).toBe(
+      getFunctionName(internal.workoutPlans.getDeleteWorkoutBlocker),
+    );
+    expect(runAction.mock.calls[0][1]).toEqual({
+      userId: "user-id",
+      tonalWorkoutId: "tonal-workout-id",
+    });
+    expect(runMutation).toHaveBeenCalledOnce();
+  });
+
+  it("preserves the successful standalone deletion result", async () => {
+    const runAction = vi.fn(async (ref: unknown, _args: unknown) =>
+      getFunctionName(ref as never) ===
+      getFunctionName(internal.workoutPlans.getDeleteWorkoutBlocker)
+        ? null
+        : { deleted: true as const },
+    );
+
+    await expect(
+      executeDeleteWorkout({
+        userId: "user-id",
+        runQuery: vi.fn(async () => null),
+        runMutation: vi.fn(async () => null),
+        runAction,
+      }),
+    ).resolves.toEqual({ deleted: true });
+
+    expect(runAction).toHaveBeenCalledTimes(2);
+    expect(runAction.mock.calls.map(([ref]) => getFunctionName(ref as never))).toEqual([
+      getFunctionName(internal.workoutPlans.getDeleteWorkoutBlocker),
+      getFunctionName(internal.tonal.mutations.deleteWorkout),
+    ]);
+    expect(runAction.mock.calls[1]?.[1]).toEqual({
+      userId: "user-id",
+      workoutId: "tonal-workout-id",
+    });
+  });
 });

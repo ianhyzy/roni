@@ -849,6 +849,17 @@ does not accept an idempotency key.
   local plan at a UTC week boundary.
 - Stop starting external work with enough action-runtime reserve for one worst-case
   operation; report untouched work as retryable/deferred, not as a false failure.
+- When an action adds secondary failure or deferred outcome counters, carry every
+  category through validators, summaries, banners, and tests. Do not infer overall
+  success from the primary `failed` counter or label a calendar failure as a push failure.
+- A destructive preflight that derives a reverse relationship from nested array
+  fields must not `collect()` an account's full history. Exhaust bounded pages and
+  fail closed if the scan cannot finish, or introduce an indexed relation with a
+  migration before relying on it.
+- Validate both sides of every public relink path, including create and empty-slot
+  assignment: protect the outgoing workout, and verify the incoming workout's
+  ownership and scheduling state before the first write. An unchanged owned link
+  may still accept metadata-only updates.
 
 ---
 

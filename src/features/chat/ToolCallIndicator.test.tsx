@@ -66,12 +66,18 @@ describe("ToolCallIndicator", () => {
     expect(screen.getByText("Pushing workouts to your Tonal...")).toBeInTheDocument();
   });
 
-  it("renders confirmation banner for approve_week_plan on success", () => {
+  it("renders confirmation banner for a stored approve_week_plan success", () => {
     render(
       <ToolCallIndicator
         toolName="approve_week_plan"
         state="output-available"
-        output={{ success: true, pushed: 4, failed: 0, skipped: 3, results: [] }}
+        output={{
+          success: true,
+          pushed: 4,
+          failed: 0,
+          skipped: 3,
+          results: [],
+        }}
       />,
     );
 
@@ -86,7 +92,15 @@ describe("ToolCallIndicator", () => {
       <ToolCallIndicator
         toolName="approve_week_plan"
         state="output-available"
-        output={{ success: false, pushed: 2, failed: 1, skipped: 0, results: [] }}
+        output={{
+          success: false,
+          pushed: 2,
+          failed: 1,
+          schedulingFailed: 0,
+          deferred: 0,
+          skipped: 0,
+          results: [],
+        }}
       />,
     );
 

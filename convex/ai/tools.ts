@@ -375,6 +375,14 @@ export const deleteWorkoutTool = createTool({
     "delete_workout",
     async (ctx, input, _options): Promise<{ deleted: true }> => {
       const userId = requireUserId(ctx);
+      const blocker: string | null = await ctx.runAction(
+        internal.workoutPlans.getDeleteWorkoutBlocker,
+        {
+          userId,
+          tonalWorkoutId: input.workoutId,
+        },
+      );
+      if (blocker) throw new Error(blocker);
       return (await ctx.runAction(internal.tonal.mutations.deleteWorkout, {
         userId,
         workoutId: input.workoutId,

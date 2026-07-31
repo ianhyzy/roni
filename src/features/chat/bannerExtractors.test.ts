@@ -3,8 +3,26 @@ import { extractBannerProps } from "./bannerExtractors";
 
 describe("extractBannerProps", () => {
   describe("approve_week_plan", () => {
+    const validCounts = { pushed: 3, failed: 0, schedulingFailed: 0, deferred: 0 };
+    const malformedNewCounts = [
+      ["schedulingFailed", null],
+      ["schedulingFailed", "0"],
+      ["schedulingFailed", 0.5],
+      ["schedulingFailed", -1],
+      ["deferred", null],
+      ["deferred", "0"],
+      ["deferred", 0.5],
+      ["deferred", -1],
+    ] as const;
+
     it("returns success when all workouts pushed", () => {
-      const output = { success: true, pushed: 5, failed: 0, skipped: 2, results: [] };
+      const output = {
+        ...validCounts,
+        success: true,
+        pushed: 5,
+        skipped: 2,
+        results: [],
+      };
       expect(extractBannerProps("approve_week_plan", output)).toEqual({
         variant: "success",
         message: "5 workouts pushed to Tonal",
@@ -12,15 +30,132 @@ describe("extractBannerProps", () => {
     });
 
     it("returns error when some workouts failed", () => {
-      const output = { success: false, pushed: 3, failed: 2, skipped: 0, results: [] };
+      const output = { ...validCounts, success: false, failed: 2, skipped: 0, results: [] };
       expect(extractBannerProps("approve_week_plan", output)).toEqual({
         variant: "error",
         message: "3 pushed, 2 failed",
       });
     });
 
+    it("returns success for a stored result without scheduling counters", () => {
+      expect(
+        extractBannerProps("approve_week_plan", { success: true, pushed: 5, failed: 0 }),
+      ).toEqual({
+        variant: "success",
+        message: "5 workouts pushed to Tonal",
+      });
+    });
+
+    it("returns push failure for a stored result without scheduling counters", () => {
+      expect(
+        extractBannerProps("approve_week_plan", { success: false, pushed: 3, failed: 2 }),
+      ).toEqual({
+        variant: "error",
+        message: "3 pushed, 2 failed",
+      });
+    });
+
+    it.each([
+      {
+        success: true,
+        failed: 0,
+        expected: { variant: "success", message: "3 workouts pushed to Tonal" },
+      },
+      {
+        success: false,
+        failed: 2,
+        expected: { variant: "error", message: "3 pushed, 2 failed" },
+      },
+    ] as const)(
+      "normalizes explicitly undefined scheduling counters",
+      ({ expected, ...output }) => {
+        expect(
+          extractBannerProps("approve_week_plan", {
+            ...output,
+            pushed: 3,
+            schedulingFailed: undefined,
+            deferred: undefined,
+          }),
+        ).toEqual(expected);
+      },
+    );
+
+    it("reports calendar scheduling failures separately", () => {
+      const output = { ...validCounts, success: false, schedulingFailed: 2 };
+
+      expect(extractBannerProps("approve_week_plan", output)).toEqual({
+        variant: "error",
+        message: "3 pushed, 2 calendar scheduling failed",
+      });
+    });
+
+    it("reports deferred approvals with retry guidance", () => {
+      const output = { ...validCounts, success: false, deferred: 2 };
+
+      expect(extractBannerProps("approve_week_plan", output)).toEqual({
+        variant: "error",
+        message: "3 pushed, 2 deferred. Retry approval to finish",
+      });
+    });
+
+    it("reports every incomplete outcome category", () => {
+      const output = {
+        ...validCounts,
+        success: false,
+        pushed: 2,
+        failed: 1,
+        schedulingFailed: 2,
+        deferred: 3,
+      };
+
+      expect(extractBannerProps("approve_week_plan", output)).toEqual({
+        variant: "error",
+        message:
+          "2 pushed, 1 failed, 2 calendar scheduling failed, 3 deferred. Retry approval to finish",
+      });
+    });
+
+    it.each(malformedNewCounts)(
+      "uses the generic failure when %s is the defined malformed value %s",
+      (field, value) => {
+        const output = { ...validCounts, success: false, [field]: value };
+
+        expect(extractBannerProps("approve_week_plan", output)).toEqual({
+          variant: "error",
+          message: "Failed to push workouts to Tonal",
+        });
+      },
+    );
+
+    it.each(malformedNewCounts)(
+      "returns null for a successful output when %s is the defined malformed value %s",
+      (field, value) => {
+        const output = { ...validCounts, success: true, [field]: value };
+
+        expect(extractBannerProps("approve_week_plan", output)).toBeNull();
+      },
+    );
+
+    it("does not report success when a success sentinel includes incomplete outcomes", () => {
+      expect(
+        extractBannerProps("approve_week_plan", {
+          ...validCounts,
+          success: true,
+          schedulingFailed: 1,
+          deferred: 2,
+        }),
+      ).toEqual({
+        variant: "error",
+        message: "3 pushed, 1 calendar scheduling failed, 2 deferred. Retry approval to finish",
+      });
+    });
+
     it("returns error with message when output has error field", () => {
-      const output = { error: "No week plan found. Use program_week first." };
+      const output = {
+        ...validCounts,
+        success: true,
+        error: "No week plan found. Use program_week first.",
+      };
       expect(extractBannerProps("approve_week_plan", output)).toEqual({
         variant: "error",
         message: "No week plan found. Use program_week first.",
@@ -36,7 +171,11 @@ describe("extractBannerProps", () => {
 
     it("never reports success when the explicit success sentinel is false", () => {
       expect(
-        extractBannerProps("approve_week_plan", { success: false, pushed: 4, failed: 0 }),
+        extractBannerProps("approve_week_plan", {
+          ...validCounts,
+          success: false,
+          pushed: 4,
+        }),
       ).toEqual({
         variant: "error",
         message: "Failed to push workouts to Tonal",

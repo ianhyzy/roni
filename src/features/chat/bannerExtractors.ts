@@ -5,30 +5,46 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
+function isNonnegativeInteger(value: unknown): value is number {
+  return Number.isInteger(value) && Number(value) >= 0;
+}
+
 const approveWeekPlan: Extractor = (output) => {
   if (!isRecord(output)) return null;
   if (typeof output.error === "string") {
     return { variant: "error", message: output.error };
   }
 
+  const pushed = output.pushed;
+  const failed = output.failed;
+  const schedulingFailed = output.schedulingFailed === undefined ? 0 : output.schedulingFailed;
+  const deferred = output.deferred === undefined ? 0 : output.deferred;
   const hasCounts =
-    Number.isInteger(output.pushed) &&
-    Number.isInteger(output.failed) &&
-    Number(output.pushed) >= 0 &&
-    Number(output.failed) >= 0;
+    isNonnegativeInteger(pushed) &&
+    isNonnegativeInteger(failed) &&
+    isNonnegativeInteger(schedulingFailed) &&
+    isNonnegativeInteger(deferred);
 
   if (output.success === false) {
-    if (hasCounts && Number(output.failed) > 0) {
-      return { variant: "error", message: `${output.pushed} pushed, ${output.failed} failed` };
+    if (!hasCounts || (failed === 0 && schedulingFailed === 0 && deferred === 0)) {
+      return { variant: "error", message: "Failed to push workouts to Tonal" };
     }
-    return { variant: "error", message: "Failed to push workouts to Tonal" };
   }
 
-  if (output.success !== true || !hasCounts) return null;
-  if (Number(output.failed) > 0) {
-    return { variant: "error", message: `${output.pushed} pushed, ${output.failed} failed` };
+  if ((output.success !== true && output.success !== false) || !hasCounts) return null;
+
+  if (failed > 0 || schedulingFailed > 0 || deferred > 0) {
+    const outcomes = [`${pushed} pushed`];
+    if (failed > 0) outcomes.push(`${failed} failed`);
+    if (schedulingFailed > 0) {
+      outcomes.push(`${schedulingFailed} calendar scheduling failed`);
+    }
+    if (deferred > 0) outcomes.push(`${deferred} deferred`);
+
+    const retryGuidance = deferred > 0 ? ". Retry approval to finish" : "";
+    return { variant: "error", message: `${outcomes.join(", ")}${retryGuidance}` };
   }
-  return { variant: "success", message: `${output.pushed} workouts pushed to Tonal` };
+  return { variant: "success", message: `${pushed} workouts pushed to Tonal` };
 };
 
 function booleanSentinel(field: string, successMsg: string, errorMsg: string): Extractor {

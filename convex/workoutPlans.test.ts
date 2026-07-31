@@ -4,7 +4,7 @@ import { type FunctionReference, getFunctionName } from "convex/server";
 import { describe, expect, test, vi } from "vitest";
 import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
-import { getRetryPushCompletion } from "./workoutPlans";
+import { getRetryPushCompletion, SCHEDULED_WORKOUT_DELETE_ERROR } from "./workoutPlans";
 import schema from "./schema";
 
 const modules = import.meta.glob("./**/*.*s");
@@ -134,6 +134,177 @@ describe("getRecentMovementIds", () => {
     expect(recentMovementIds).not.toContain("completed-2");
     expect(recentMovementIds).toContain("pushed-1");
     expect(recentMovementIds).toContain("pushed-2");
+  });
+});
+
+describe("getDeleteWorkoutBlocker", () => {
+  async function seedDeletionPlan(
+    t: ReturnType<typeof convexTest>,
+    userId: Id<"users">,
+    overrides: Partial<Doc<"workoutPlans">> = {},
+  ) {
+    return await t.run((ctx) =>
+      ctx.db.insert("workoutPlans", {
+        userId,
+        tonalWorkoutId: "tonal-delete-1",
+        title: "Standalone workout",
+        blocks: [],
+        status: "pushed",
+        createdAt: 1,
+        ...overrides,
+      }),
+    );
+  }
+
+  test("blocks an owned workout linked to any weekly plan", async () => {
+    const t = convexTest(schema, modules);
+    const userId = await t.run((ctx) => ctx.db.insert("users", {}));
+    const workoutPlanId = await seedDeletionPlan(t, userId);
+    await t.run(async (ctx) => {
+      for (let index = 0; index < 16; index += 1) {
+        await ctx.db.insert("weekPlans", {
+          userId,
+          weekStartDate: `2026-07-${String(index + 1).padStart(2, "0")}`,
+          preferredSplit: "ppl",
+          targetDays: 0,
+          days: [],
+          createdAt: index,
+          updatedAt: index,
+        });
+      }
+      await ctx.db.insert("weekPlans", {
+        userId,
+        weekStartDate: "2026-08-01",
+        preferredSplit: "ppl",
+        targetDays: 1,
+        days: [
+          {
+            sessionType: "push",
+            status: "programmed",
+            workoutPlanId,
+          },
+        ],
+        createdAt: 1,
+        updatedAt: 1,
+      });
+    });
+
+    await expect(
+      t.action(internal.workoutPlans.getDeleteWorkoutBlocker, {
+        userId,
+        tonalWorkoutId: "tonal-delete-1",
+      }),
+    ).resolves.toBe(SCHEDULED_WORKOUT_DELETE_ERROR);
+  });
+
+  test.each([
+    { name: "signup receipt", evidence: { tonalWorkoutSignupId: "signup-1" } },
+    { name: "scheduled date", evidence: { tonalScheduledDate: "2026-07-27" } },
+    {
+      name: "verified receipt",
+      evidence: { tonalSchedulingReceiptVerifiedAt: 1 },
+    },
+  ])("blocks persisted $name evidence", async ({ evidence }) => {
+    const t = convexTest(schema, modules);
+    const userId = await t.run((ctx) => ctx.db.insert("users", {}));
+    await seedDeletionPlan(t, userId, evidence);
+
+    await expect(
+      t.action(internal.workoutPlans.getDeleteWorkoutBlocker, {
+        userId,
+        tonalWorkoutId: "tonal-delete-1",
+      }),
+    ).resolves.toBe(SCHEDULED_WORKOUT_DELETE_ERROR);
+  });
+
+  test.each([
+    ["active", 1, SCHEDULED_WORKOUT_DELETE_ERROR],
+    ["expired", -1, null],
+    ["equal-boundary", 0, null],
+  ])(
+    "returns the expected deletion blocker for an $name claim",
+    async (name, leaseOffset, expected) => {
+      vi.useFakeTimers();
+      vi.setSystemTime(new Date("2026-07-28T12:00:00.000Z"));
+      try {
+        const t = convexTest(schema, modules);
+        const userId = await t.run((ctx) => ctx.db.insert("users", {}));
+        await seedDeletionPlan(t, userId, {
+          tonalSchedulingClaim: {
+            claimId: "claim-1",
+            workoutId: "tonal-delete-1",
+            scheduledDate: "2026-07-27",
+            phase: "checking",
+            leaseExpiresAt: Date.now() + leaseOffset,
+          },
+        });
+
+        await expect(
+          t.action(internal.workoutPlans.getDeleteWorkoutBlocker, {
+            userId,
+            tonalWorkoutId: "tonal-delete-1",
+          }),
+        ).resolves.toBe(expected);
+      } finally {
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  test("allows a standalone workout but fails closed beyond the week scan ceiling", async () => {
+    const t = convexTest(schema, modules);
+    const userId = await t.run((ctx) => ctx.db.insert("users", {}));
+    await seedDeletionPlan(t, userId);
+
+    await expect(
+      t.action(internal.workoutPlans.getDeleteWorkoutBlocker, {
+        userId,
+        tonalWorkoutId: "tonal-delete-1",
+      }),
+    ).resolves.toBeNull();
+
+    await t.run(async (ctx) => {
+      for (let index = 0; index < 1_601; index += 1) {
+        await ctx.db.insert("weekPlans", {
+          userId,
+          weekStartDate: "2026-08-01",
+          preferredSplit: "ppl",
+          targetDays: 0,
+          days: [],
+          createdAt: index,
+          updatedAt: index,
+        });
+      }
+    });
+
+    await expect(
+      t.action(internal.workoutPlans.getDeleteWorkoutBlocker, {
+        userId,
+        tonalWorkoutId: "tonal-delete-1",
+      }),
+    ).resolves.toBe(SCHEDULED_WORKOUT_DELETE_ERROR);
+  });
+
+  test("allows absent and other-user records", async () => {
+    const t = convexTest(schema, modules);
+    const [userId, otherUserId] = await t.run(async (ctx) => [
+      await ctx.db.insert("users", {}),
+      await ctx.db.insert("users", {}),
+    ]);
+    await seedDeletionPlan(t, otherUserId, { tonalWorkoutSignupId: "signup-other" });
+
+    await expect(
+      t.action(internal.workoutPlans.getDeleteWorkoutBlocker, {
+        userId,
+        tonalWorkoutId: "tonal-delete-1",
+      }),
+    ).resolves.toBeNull();
+    await expect(
+      t.action(internal.workoutPlans.getDeleteWorkoutBlocker, {
+        userId,
+        tonalWorkoutId: "missing-tonal-id",
+      }),
+    ).resolves.toBeNull();
   });
 });
 

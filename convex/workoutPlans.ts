@@ -33,6 +33,13 @@ const statusValidator = v.union(
   v.literal("failed"),
 );
 
+export {
+  getDeleteWorkoutBlocker,
+  getDeleteWorkoutLinkPage,
+  getDeleteWorkoutPlanState,
+  SCHEDULED_WORKOUT_DELETE_ERROR,
+} from "./workoutDeletionGuard";
+
 export const create = internalMutation({
   args: {
     userId: v.id("users"),

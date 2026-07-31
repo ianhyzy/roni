@@ -17,10 +17,54 @@ import {
   daySlotValidator,
   dayStatusValidator,
   DEFAULT_DAYS,
+  getDraftWorkoutMutationBlocker,
   getWeekStartDateString,
   isValidWeekStartDateString,
   preferredSplitValidator,
 } from "./weekPlanHelpers";
+import type { Doc, Id } from "./_generated/dataModel";
+import type { MutationCtx } from "./_generated/server";
+
+function getIncomingWorkoutLinkBlocker(
+  workout: Doc<"workoutPlans">,
+): "scheduled" | "claimed" | null {
+  if (
+    workout.tonalWorkoutSignupId !== undefined ||
+    workout.tonalScheduledDate !== undefined ||
+    workout.tonalSchedulingReceiptVerifiedAt !== undefined
+  ) {
+    return "scheduled";
+  }
+  return workout.tonalSchedulingClaim !== undefined ? "claimed" : null;
+}
+
+async function assertWorkoutRelinkAllowed(
+  ctx: MutationCtx,
+  options: {
+    userId: Id<"users">;
+    currentWorkoutPlanId: Id<"workoutPlans"> | undefined;
+    nextWorkoutPlanId: Id<"workoutPlans"> | undefined;
+  },
+): Promise<void> {
+  const { userId, currentWorkoutPlanId, nextWorkoutPlanId } = options;
+  const nextWorkout = nextWorkoutPlanId ? await ctx.db.get(nextWorkoutPlanId) : null;
+  if (nextWorkoutPlanId && (!nextWorkout || nextWorkout.userId !== userId)) {
+    throw new Error("Workout plan not found or access denied");
+  }
+  if (currentWorkoutPlanId === nextWorkoutPlanId) return;
+  const currentWorkout = currentWorkoutPlanId ? await ctx.db.get(currentWorkoutPlanId) : null;
+  const blocker = currentWorkout ? getDraftWorkoutMutationBlocker(currentWorkout) : null;
+  if (blocker === "non_draft") {
+    throw new Error(
+      "Only draft workouts can be relinked. Pushed or completed workouts stay on their Tonal Calendar date.",
+    );
+  }
+  if (blocker === "scheduled") throw new Error("Scheduled workouts cannot be relinked");
+  if (blocker === "claimed") throw new Error("Workout scheduling is in progress");
+  const incomingBlocker = nextWorkout ? getIncomingWorkoutLinkBlocker(nextWorkout) : null;
+  if (incomingBlocker === "scheduled") throw new Error("Scheduled workouts cannot be linked");
+  if (incomingBlocker === "claimed") throw new Error("Workout scheduling is in progress");
+}
 
 // Re-export for external consumers
 export {
@@ -104,8 +148,15 @@ export const create = mutation({
       throw new Error(`Week plan already exists for ${args.weekStartDate}. Use update instead.`);
     }
     const now = Date.now();
-    const days =
+    const days: Doc<"weekPlans">["days"] =
       args.days && args.days.length === 7 ? args.days : DEFAULT_DAYS.map((d) => ({ ...d }));
+    for (const day of days) {
+      await assertWorkoutRelinkAllowed(ctx, {
+        userId,
+        currentWorkoutPlanId: undefined,
+        nextWorkoutPlanId: day.workoutPlanId,
+      });
+    }
     const weekPlanId = await ctx.db.insert("weekPlans", {
       userId,
       weekStartDate: args.weekStartDate,
@@ -137,6 +188,15 @@ export const update = mutation({
     if (args.days !== undefined && args.days.length !== 7) {
       throw new Error("days must have exactly 7 elements (Mon-Sun)");
     }
+    if (args.days !== undefined) {
+      for (let dayIndex = 0; dayIndex < plan.days.length; dayIndex += 1) {
+        await assertWorkoutRelinkAllowed(ctx, {
+          userId,
+          currentWorkoutPlanId: plan.days[dayIndex]?.workoutPlanId,
+          nextWorkoutPlanId: args.days[dayIndex]?.workoutPlanId,
+        });
+      }
+    }
     await ctx.db.patch(args.weekPlanId, {
       updatedAt: Date.now(),
       ...(args.preferredSplit !== undefined && { preferredSplit: args.preferredSplit }),
@@ -166,12 +226,13 @@ export const linkWorkoutPlanToDay = mutation({
     if (!plan || plan.userId !== userId) {
       throw new Error("Week plan not found or access denied");
     }
-    const workout = await ctx.db.get(args.workoutPlanId);
-    if (!workout || workout.userId !== userId) {
-      throw new Error("Workout plan not found or access denied");
-    }
     const days = [...plan.days];
     const slot = { ...days[args.dayIndex] };
+    await assertWorkoutRelinkAllowed(ctx, {
+      userId,
+      currentWorkoutPlanId: slot.workoutPlanId,
+      nextWorkoutPlanId: args.workoutPlanId,
+    });
     slot.workoutPlanId = args.workoutPlanId;
     if (args.status !== undefined) slot.status = args.status;
     if (args.estimatedDuration !== undefined) slot.estimatedDuration = args.estimatedDuration;
