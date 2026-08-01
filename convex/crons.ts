@@ -77,6 +77,13 @@ if (cronsEnabled()) {
     internal.fitbit.sync.sweepExpiredOauthArtifacts,
     {},
   );
+
+  crons.interval(
+    "sweep-strava-oauth-artifacts",
+    { hours: 1 },
+    internal.strava.oauthFlow.sweepExpiredOauthArtifacts,
+    {},
+  );
 }
 
 export default crons;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { getRecencyLabel, sanitizeTimezone } from "./timeDecay";
+import { getCalendarDateRecencyLabel, getRecencyLabel, sanitizeTimezone } from "./timeDecay";
 
 describe("getRecencyLabel", () => {
   it("returns 'today' for same-day timestamps", () => {
@@ -40,6 +40,15 @@ describe("getRecencyLabel", () => {
   it("returns 'today' near midnight in positive-UTC timezone", () => {
     const now = new Date("2026-03-15T22:00:00Z");
     expect(getRecencyLabel("2026-03-15T20:00:00Z", now, "Asia/Tokyo")).toBe("today");
+  });
+});
+
+describe("getCalendarDateRecencyLabel", () => {
+  it("compares date-only values in the user's timezone", () => {
+    const now = new Date("2026-07-30T09:30:00.000Z");
+
+    expect(getCalendarDateRecencyLabel("2026-07-30", now, "Pacific/Kiritimati")).toBe("today");
+    expect(getCalendarDateRecencyLabel("2026-07-29", now, "Pacific/Kiritimati")).toBe("yesterday");
   });
 });
 

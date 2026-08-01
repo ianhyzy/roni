@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { getFunctionName } from "convex/server";
 import {
   buildTrainingSnapshot,
@@ -149,20 +149,22 @@ describe("buildTrainingSnapshot", () => {
   const gatherSnapshotInputsName = getFunctionName(internal.coachState.gatherSnapshotInputs);
   const weekPlansName = getFunctionName(internal.weekPlans.getByUserIdAndWeekStartInternal);
 
+  afterEach(() => vi.useRealTimers());
+
   function emptyInputs() {
     return {
       profile: null,
       scores: [],
       readiness: null,
       activities: [],
+      liftingSessions: [],
       activeBlock: null,
       recentFeedback: [],
       activeGoals: [],
       activeInjuries: [],
       exerciseExclusions: [],
       externalActivities: [],
-      garminWellness: [],
-      fitbitWellness: [],
+      recoveryInputs: { preferredSource: null, observations: [], checkIns: [] },
       memoryFacts: [],
     };
   }
@@ -253,7 +255,8 @@ describe("buildTrainingSnapshot", () => {
     expect(queryCalls).not.toContain(getFunctionName(internal.injuries.getActiveInternal));
   });
 
-  it("includes recent Garmin wellness signals in the coach snapshot", async () => {
+  it("injects one selected recovery source with subjective check-in context", async () => {
+    vi.useFakeTimers({ now: new Date("2026-07-30T12:00:00.000Z") });
     const ctx = {
       runQuery: async (query: unknown) => {
         const queryName = getFunctionName(query as never);
@@ -270,57 +273,33 @@ describe("buildTrainingSnapshot", () => {
                 workoutsPerWeek: 4,
               },
             },
-            garminWellness: [
-              {
-                calendarDate: "2026-04-24",
-                sleepDurationSeconds: 6 * 60 * 60,
-                hrvLastNightAvg: 44,
-                avgStress: 62,
-                bodyBatteryLowestValue: 18,
-                bodyBatteryHighestValue: 54,
-              },
-            ],
-            fitbitWellness: [],
-          };
-        }
-        if (queryName === weekPlansName) return null;
-        return [];
-      },
-    };
-
-    const snapshot = await buildTrainingSnapshot(ctx as never, "user-1");
-
-    expect(snapshot).toContain("Garmin Recovery Signals");
-    expect(snapshot).toContain("sleep 6h");
-    expect(snapshot).toContain("HRV 44ms");
-    expect(snapshot).toContain("body battery 18-54");
-  });
-
-  it("includes recent Fitbit recovery signals in the coach snapshot", async () => {
-    const ctx = {
-      runQuery: async (query: unknown) => {
-        const queryName = getFunctionName(query as never);
-        if (queryName === gatherSnapshotInputsName) {
-          return {
-            ...emptyInputs(),
-            profile: {
-              profileData: {
-                firstName: "Alice",
-                lastName: "Lifter",
-                heightInches: 66,
-                weightPounds: 150,
-                level: "intermediate",
-                workoutsPerWeek: 4,
-              },
+            recoveryInputs: {
+              preferredSource: "garmin",
+              observations: [
+                {
+                  source: "garmin",
+                  calendarDate: "2026-07-30",
+                  ingestedAt: Date.now(),
+                  sleepDurationSeconds: 5.5 * 60 * 60,
+                  hrvMilliseconds: 44,
+                },
+                {
+                  source: "fitbit",
+                  calendarDate: "2026-07-30",
+                  ingestedAt: Date.now() + 1,
+                  sleepDurationSeconds: 8 * 60 * 60,
+                },
+              ],
+              checkIns: [
+                {
+                  calendarDate: "2026-07-30",
+                  energy: 2,
+                  soreness: 4,
+                  stress: 3,
+                  updatedAt: Date.now(),
+                },
+              ],
             },
-            fitbitWellness: [
-              {
-                calendarDate: "2026-04-24",
-                sleepDurationSeconds: 6.5 * 60 * 60,
-                restingHeartRate: 57,
-                averageHrvMilliseconds: 43.5,
-              },
-            ],
           };
         }
         if (queryName === weekPlansName) return null;
@@ -328,12 +307,13 @@ describe("buildTrainingSnapshot", () => {
       },
     };
 
-    const snapshot = await buildTrainingSnapshot(ctx as never, "user-1");
+    const snapshot = await buildTrainingSnapshot(ctx as never, "user-1", "America/Denver");
 
-    expect(snapshot).toContain("Fitbit Recovery Signals");
-    expect(snapshot).toContain("sleep 6.5h");
-    expect(snapshot).toContain("RHR 57");
-    expect(snapshot).toContain("HRV 43.5ms");
+    expect(snapshot).toContain("Recovery Signals (Garmin)");
+    expect(snapshot).not.toContain("Recovery Signals (Fitbit)");
+    expect(snapshot).toContain("sleep 5.5h");
+    expect(snapshot).toContain("energy 2/5");
+    expect(snapshot).toContain("Caution: short sleep; low energy; high soreness");
   });
 
   it("includes exact exercise exclusions in the coach snapshot", async () => {

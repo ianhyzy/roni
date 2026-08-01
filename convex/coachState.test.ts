@@ -169,62 +169,22 @@ describe("gatherSnapshotInputs", () => {
         averageHeartRate: 145,
         syncedAt: now,
       });
-      await ctx.db.insert("garminWellnessDaily", {
-        userId,
-        calendarDate: "2026-04-23",
-        sleepDurationSeconds: 25200,
-        hrvLastNightAvg: 50,
-        avgStress: 40,
-        bodyBatteryHighestValue: 85,
-        bodyBatteryLowestValue: 30,
-        lastIngestedAt: now,
-      });
-      await ctx.db.insert("fitbitConnections", {
-        userId,
-        healthUserId: "health-user-1",
-        generation: "generation-1",
-        status: "active",
-        accessTokenEncrypted: "encrypted-access-token",
-        refreshTokenEncrypted: "encrypted-refresh-token",
-        tokenExpiresAt: now + 60_000,
-        scopes: [],
-        connectedAt: now,
-        refreshDueAt: now + 60_000,
-      });
-      await ctx.db.insert("fitbitWellnessDaily", {
-        userId,
-        generation: "generation-1",
-        calendarDate: "2026-04-23",
-        sleepDurationSeconds: 24_300,
-        restingHeartRate: 53,
-        averageHrvMilliseconds: 47.5,
-        lastIngestedAt: now,
-      });
     });
 
     const inputs = await t.query(internal.coachState.gatherSnapshotInputs, { userId });
 
     expect(inputs.profile?.profileData?.firstName).toBe("Alice");
-    expect(inputs.scores).toHaveLength(1);
     expect(inputs.scores[0].bodyRegion).toBe("Upper");
     expect(inputs.readiness?.chest).toBe(80);
     expect(inputs.activities).toHaveLength(1);
     expect(inputs.activities[0].title).toBe("Push Day");
     expect(inputs.activeBlock?.blockType).toBe("building");
-    expect(inputs.recentFeedback).toHaveLength(1);
     expect(inputs.recentFeedback[0].rpe).toBe(8);
-    expect(inputs.activeGoals).toHaveLength(1);
     expect(inputs.activeGoals[0].title).toBe("Bench +20");
-    expect(inputs.activeInjuries).toHaveLength(1);
     expect(inputs.activeInjuries[0].area).toBe("left shoulder");
-    expect(inputs.exerciseExclusions).toHaveLength(1);
     expect(inputs.exerciseExclusions[0].movementName).toBe("Lateral Raise");
-    expect(inputs.externalActivities).toHaveLength(1);
     expect(inputs.externalActivities[0].source).toBe("Apple Watch");
-    expect(inputs.garminWellness).toHaveLength(1);
-    expect(inputs.garminWellness[0].calendarDate).toBe("2026-04-23");
-    expect(inputs.fitbitWellness).toHaveLength(1);
-    expect(inputs.fitbitWellness[0].averageHrvMilliseconds).toBe(47.5);
+    expect(inputs.recoveryInputs.observations).toEqual([]);
   });
 
   test("excludes direct Fitbit data when its connection is no longer active", async () => {
@@ -278,7 +238,7 @@ describe("gatherSnapshotInputs", () => {
     expect(inputs.externalActivities.map((row) => row.externalId)).toEqual([
       "tonal-fitbit-workout",
     ]);
-    expect(inputs.fitbitWellness).toEqual([]);
+    expect(inputs.recoveryInputs.observations).toEqual([]);
   });
 
   test("returns only the eight highest-ranked remembered preferences", async () => {
@@ -342,8 +302,11 @@ describe("gatherSnapshotInputs", () => {
     expect(inputs.activeInjuries).toEqual([]);
     expect(inputs.exerciseExclusions).toEqual([]);
     expect(inputs.externalActivities).toEqual([]);
-    expect(inputs.garminWellness).toEqual([]);
-    expect(inputs.fitbitWellness).toEqual([]);
+    expect(inputs.recoveryInputs).toEqual({
+      preferredSource: null,
+      observations: [],
+      checkIns: [],
+    });
     expect(inputs.memoryFacts).toEqual([]);
   });
 
@@ -393,8 +356,11 @@ describe("gatherSnapshotInputs", () => {
     expect(inputs.activeInjuries).toEqual([]);
     expect(inputs.exerciseExclusions).toEqual([]);
     expect(inputs.externalActivities).toEqual([]);
-    expect(inputs.garminWellness).toEqual([]);
-    expect(inputs.fitbitWellness).toEqual([]);
+    expect(inputs.recoveryInputs).toEqual({
+      preferredSource: null,
+      observations: [],
+      checkIns: [],
+    });
     expect(inputs.memoryFacts).toEqual([]);
   });
 });

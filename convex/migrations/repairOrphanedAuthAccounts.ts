@@ -5,7 +5,7 @@
  *
  * 1. Find the oldest `users` row for the email (the real one holding data).
  * 2. Safety check: verify every orphan `users` row has zero references in
- *    the 18 user-scoped app tables. Abort that email if any found — orphans
+ *    every registered user-scoped app table. Abort that email if any found — orphans
  *    were created by an auth-only path that never completed a signed-in
  *    session, so they should have zero app data.
  * 3. Repoint the password `authAccounts` row at the oldest user.
@@ -44,11 +44,17 @@ const AFFECTED_EMAILS = [
 // USER_TABLE_BATCH_TABLES. `satisfies Record<UserTableBatchTable, string>`
 // keeps this migration from silently missing newly registered tables.
 const USER_TABLE_BATCH_SAFETY_INDEXES = {
-  aiUsage: "by_userId",
+  aiUsage: "by_userId_createdAt",
   aiBudgetWarnings: "by_userId",
   aiRun: "by_userId_createdAt",
   checkIns: "by_userId",
+  recoveryCheckIns: "by_userId",
   completedWorkouts: "by_userId_date",
+  liftingSets: "by_userId",
+  liftingExercises: "by_userId",
+  liftingSessions: "by_userId_and_performedAt",
+  nutritionDailyLogs: "by_userId_and_calendarDate",
+  nutritionTargets: "by_userId",
   currentStrengthScores: "by_userId",
   emailChangeRequests: "by_userId",
   exerciseExclusions: "by_userId",
@@ -63,6 +69,10 @@ const USER_TABLE_BATCH_SAFETY_INDEXES = {
   fitbitOauthStates: "by_userId",
   fitbitOauthCallbackTickets: "by_userId",
   fitbitWellnessDaily: "by_userId",
+  stravaConnections: "by_userId",
+  stravaOauthStates: "by_userId",
+  stravaOauthCallbackTickets: "by_userId",
+  stravaWebhookEvents: "by_userId",
   injuries: "by_userId",
   muscleReadiness: "by_userId",
   strengthScoreSnapshots: "by_userId_date",

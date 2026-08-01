@@ -89,7 +89,25 @@ async function takeBatchForDeletion(
           .withIndex("by_userId_date", (q) => q.eq("userId", userId))
           .take(BATCH_SIZE)
       ).map((d) => d._id);
+    case "liftingSessions":
+      return (
+        await ctx.db
+          .query("liftingSessions")
+          .withIndex("by_userId_and_performedAt", (q) => q.eq("userId", userId))
+          .take(BATCH_SIZE)
+      ).map((d) => d._id);
+    case "nutritionDailyLogs":
+      return (
+        await ctx.db
+          .query("nutritionDailyLogs")
+          .withIndex("by_userId_and_calendarDate", (q) => q.eq("userId", userId))
+          .take(BATCH_SIZE)
+      ).map((d) => d._id);
     case "checkIns":
+    case "recoveryCheckIns":
+    case "nutritionTargets":
+    case "liftingSets":
+    case "liftingExercises":
     case "workoutPlans":
     case "injuries":
     case "exerciseExclusions":
@@ -107,6 +125,10 @@ async function takeBatchForDeletion(
     case "fitbitOauthStates":
     case "fitbitOauthCallbackTickets":
     case "fitbitWellnessDaily":
+    case "stravaConnections":
+    case "stravaOauthStates":
+    case "stravaOauthCallbackTickets":
+    case "stravaWebhookEvents":
       return (
         await ctx.db
           .query(table)

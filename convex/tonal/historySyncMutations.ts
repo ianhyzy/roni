@@ -238,6 +238,7 @@ export const externalActivityValidator = v.object({
     v.literal(EXTERNAL_ACTIVITY_SOURCES.APPLE_HEALTH),
     v.literal(EXTERNAL_ACTIVITY_SOURCES.FITBIT),
     v.literal(EXTERNAL_ACTIVITY_SOURCES.GARMIN),
+    v.literal(EXTERNAL_ACTIVITY_SOURCES.STRAVA),
     v.literal(EXTERNAL_ACTIVITY_SOURCES.OTHER),
   ),
   distance: v.optional(v.number()),

@@ -32,7 +32,8 @@ type SpecializedTable =
   | "aiUsage"
   | "aiRun"
   | "userMemoryFacts"
-  | "completedWorkouts";
+  | "completedWorkouts"
+  | "nutritionDailyLogs";
 
 type Seeder = (
   ctx: Parameters<Parameters<Harness["run"]>[0]>[0],
@@ -143,6 +144,16 @@ const SEEDERS: Record<SpecializedTable, Seeder> = {
       syncedAt: Date.now(),
     });
   },
+  nutritionDailyLogs: async (ctx, userId, marker) => {
+    await ctx.db.insert("nutritionDailyLogs", {
+      userId,
+      calendarDate: marker === "99" ? "2026-02-01" : `2026-01-${marker}`,
+      source: "manual",
+      proteinGrams: 150,
+      createdAt: FIXED_TIMESTAMP,
+      updatedAt: FIXED_TIMESTAMP,
+    });
+  },
 };
 
 const SPECIALIZED_TABLES = Object.keys(SEEDERS) as SpecializedTable[];
@@ -176,4 +187,30 @@ describe("deleteUserTableBatch dispatch", () => {
       expect(otherRows).toHaveLength(1);
     },
   );
+
+  test("drains nutrition targets without touching another user", async () => {
+    const t = convexTest(schema, modules);
+    const userId = await createUser(t);
+    const otherUserId = await createUser(t);
+    await t.run(async (ctx) => {
+      for (const ownerId of [userId, otherUserId]) {
+        await ctx.db.insert("nutritionTargets", {
+          userId: ownerId,
+          source: "self_set",
+          proteinGrams: 150,
+          createdAt: FIXED_TIMESTAMP,
+          updatedAt: FIXED_TIMESTAMP,
+        });
+      }
+    });
+
+    await t.mutation(internal.accountDeletion.deleteUserTableBatch, {
+      userId,
+      table: "nutritionTargets",
+    });
+
+    const rows = await t.run(async (ctx) => ctx.db.query("nutritionTargets").collect());
+    expect(rows).toHaveLength(1);
+    expect(rows[0]?.userId).toBe(otherUserId);
+  });
 });

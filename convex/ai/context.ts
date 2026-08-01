@@ -5,6 +5,7 @@ import { detectMissedSessions, formatMissedSessionContext } from "../coach/misse
 import { getDateStringInTimezone, getWeekStartDateStringInTimezone } from "../weekPlanHelpers";
 import type { OwnedAccessories } from "../tonal/accessories";
 import type { SnapshotInputs } from "../coachState";
+import { deriveRecoveryState } from "../trainingState/recovery";
 export { getRecencyLabel } from "./timeDecay";
 import { getRecencyLabel } from "./timeDecay";
 import {
@@ -16,9 +17,9 @@ import {
   type SnapshotSection,
   trimSnapshot,
 } from "./snapshotHelpers";
-import { formatGarminWellnessLines } from "./garminWellnessSnapshot";
-import { formatFitbitWellnessLines } from "./fitbitWellnessSnapshot";
-
+import { formatRecoveryLines } from "./recoverySnapshot";
+import { formatLiftingSnapshot } from "./liftingSnapshot";
+import { formatNutritionSnapshot } from "./nutritionSnapshot";
 // Re-export for backward compatibility (tests, other consumers)
 export { type SnapshotSection, trimSnapshot, getHrIntensityLabel, formatExternalActivityLine };
 
@@ -36,9 +37,7 @@ export async function buildTrainingSnapshotWithMetadata(
 ): Promise<BuiltTrainingSnapshot> {
   const convexUserId = userId as Id<"users">;
 
-  // Single internalQuery replaces the prior 10-runQuery fan-out. See
-  // ADR 0001 §0 (Alt-A): Convex bills function invocations separately from
-  // document reads, so collapsing 10 → 1 cuts cache-miss chat-turn invocations
+  // ADR 0001 Alt-A: one query cuts per-source invocation fan-out
   // by ~9x. Per-source error isolation lives inside the query via safe<T>();
   // we deliberately do NOT swallow errors at this call site so infrastructure
   // failures surface to streamWithRetry / Phoenix telemetry instead of being
@@ -49,6 +48,7 @@ export async function buildTrainingSnapshotWithMetadata(
   if (inputs.deletionInProgress) {
     return { snapshot: "Account deletion is in progress.", memoryFactsInjected: 0 };
   }
+  const snapshotNow = new Date();
   const memoryFacts = inputs.memoryFacts ?? [];
 
   const profile = inputs.profile;
@@ -70,14 +70,15 @@ export async function buildTrainingSnapshotWithMetadata(
     scores,
     readiness,
     activities,
+    liftingSessions = [],
+    nutrition = { days: [], targets: null },
     activeBlock,
     recentFeedback,
     activeGoals,
     activeInjuries,
     exerciseExclusions,
     externalActivities,
-    garminWellness,
-    fitbitWellness,
+    recoveryInputs,
   } = inputs;
   const sections: SnapshotSection[] = [];
 
@@ -88,9 +89,8 @@ export async function buildTrainingSnapshotWithMetadata(
     });
   }
 
-  // Priority 1: User profile + onboarding + preferences
   const profileLines: string[] = [];
-  const age = computeAge(pd.dateOfBirth, new Date());
+  const age = computeAge(pd.dateOfBirth, snapshotNow);
   const ageSuffix = age !== null ? ` | Age: ${age}` : "";
   profileLines.push(
     `User: ${pd.firstName} ${pd.lastName} | ${pd.heightInches}"/${pd.weightPounds}lbs${ageSuffix} | Level: ${pd.level} | ${pd.workoutsPerWeek}x/week`,
@@ -117,7 +117,6 @@ export async function buildTrainingSnapshotWithMetadata(
   }
   sections.push({ priority: 1, lines: profileLines });
 
-  // Priority 2: Equipment
   const owned = profile.ownedAccessories as OwnedAccessories | undefined;
   const equipmentLines: string[] = [];
   if (owned) {
@@ -149,7 +148,6 @@ export async function buildTrainingSnapshotWithMetadata(
   }
   sections.push({ priority: 2, lines: equipmentLines });
 
-  // Priority 3: Explicit exercise exclusions and active injuries
   const excludedExercises = (exerciseExclusions ?? []) as Doc<"exerciseExclusions">[];
   if (excludedExercises.length > 0) {
     const exclusionLines: string[] = [`Excluded Exercises:`];
@@ -174,7 +172,6 @@ export async function buildTrainingSnapshotWithMetadata(
     sections.push({ priority: 3, lines: injuryLines });
   }
 
-  // Priority 4: Active goals
   const goals = activeGoals as Doc<"goals">[];
   if (goals.length > 0) {
     const goalLines: string[] = [`Active Goals:`];
@@ -189,7 +186,6 @@ export async function buildTrainingSnapshotWithMetadata(
     sections.push({ priority: 4, lines: goalLines });
   }
 
-  // Priority 5: Training block
   const block = activeBlock as Doc<"trainingBlocks"> | null;
   const blockLines: string[] = [];
   if (block) {
@@ -206,7 +202,6 @@ export async function buildTrainingSnapshotWithMetadata(
   }
   sections.push({ priority: 5, lines: blockLines });
 
-  // Priority 6: Recent feedback
   const feedback = recentFeedback as Doc<"workoutFeedback">[];
   if (feedback.length > 0) {
     const feedbackLines: string[] = [];
@@ -224,7 +219,13 @@ export async function buildTrainingSnapshotWithMetadata(
     sections.push({ priority: 6, lines: feedbackLines });
   }
 
-  // Priority 7: Strength scores
+  const liftingSection = formatLiftingSnapshot({
+    sessions: liftingSessions,
+    now: snapshotNow,
+    userTimezone,
+  });
+  if (liftingSection) sections.push(liftingSection);
+
   if (scores.length > 0) {
     const scoreLines = scores.map((s) => `${s.bodyRegion}: ${s.score}`).join(", ");
     sections.push({
@@ -235,7 +236,6 @@ export async function buildTrainingSnapshotWithMetadata(
     });
   }
 
-  // Priority 8: Muscle readiness
   if (readiness) {
     const readyParts = [
       `Chest: ${readiness.chest}`,
@@ -253,12 +253,10 @@ export async function buildTrainingSnapshotWithMetadata(
     sections.push({ priority: 8, lines: [`Muscle Readiness (0-100): ${readyParts}`] });
   }
 
-  // Priority 9: Recent workouts (time-decay: recent = more detail)
   if (activities.length > 0) {
-    const now = new Date();
     const wl = [`Recent Workouts:`];
     for (const a of activities) {
-      const r = getRecencyLabel(a.date + "T12:00:00Z", now, userTimezone);
+      const r = getRecencyLabel(a.date + "T12:00:00Z", snapshotNow, userTimezone);
       const recent = r === "today" || r === "yesterday";
       const tag = recent ? `[${r.toUpperCase()}] ` : "";
       const vol = r !== "last week" && r !== "older" ? ` | ${a.totalVolume}lbs vol` : "";
@@ -268,13 +266,11 @@ export async function buildTrainingSnapshotWithMetadata(
     sections.push({ priority: 9, lines: wl });
   }
 
-  // Priority 10: External activities (time-decay: highlight recent high-intensity)
   if (externalActivities.length > 0) {
-    const now = new Date();
     const el: string[] = [`External Activities (non-Tonal):`];
     let vigorousThisWeek = 0;
     for (const ext of externalActivities) {
-      const r = getRecencyLabel(ext.beginTime, now, userTimezone);
+      const r = getRecencyLabel(ext.beginTime, snapshotNow, userTimezone);
       const tag = r === "today" || r === "yesterday" ? `  [${r.toUpperCase()}] ` : "  ";
       const type = capitalizeWorkoutType(ext.workoutType);
       const mins = Math.round(ext.totalDuration / 60);
@@ -307,14 +303,17 @@ export async function buildTrainingSnapshotWithMetadata(
     sections.push({ priority: 6, lines: el });
   }
 
-  for (const wellnessLines of [
-    formatGarminWellnessLines(garminWellness),
-    formatFitbitWellnessLines(fitbitWellness),
-  ]) {
-    if (wellnessLines.length > 0) sections.push({ priority: 6, lines: wellnessLines });
-  }
+  const recoveryLines = formatRecoveryLines(
+    deriveRecoveryState({
+      now: snapshotNow.getTime(),
+      currentCalendarDate: getDateStringInTimezone(snapshotNow, userTimezone),
+      inputs: recoveryInputs,
+    }),
+  );
+  if (recoveryLines.length > 0) sections.push({ priority: 6, lines: recoveryLines });
+  const nutritionSection = formatNutritionSnapshot({ nutrition, now: snapshotNow, userTimezone });
+  if (nutritionSection) sections.push(nutritionSection);
 
-  // Priority 11: Performance notes
   if (activities.length >= 2) {
     const perfLines: string[] = [];
     const latest = activities[0];
@@ -330,11 +329,9 @@ export async function buildTrainingSnapshotWithMetadata(
     sections.push({ priority: 11, lines: perfLines });
   }
 
-  // Priority 12: Missed session detection — non-critical, skip on error
   try {
-    const now = new Date();
-    const todayDate = getDateStringInTimezone(now, userTimezone);
-    const weekStartDate = getWeekStartDateStringInTimezone(now, userTimezone);
+    const todayDate = getDateStringInTimezone(snapshotNow, userTimezone);
+    const weekStartDate = getWeekStartDateStringInTimezone(snapshotNow, userTimezone);
     const weekPlan = (await ctx.runQuery(internal.weekPlans.getByUserIdAndWeekStartInternal, {
       userId: convexUserId,
       weekStartDate,

@@ -20,8 +20,7 @@ const EMPTY_SNAPSHOT_INPUTS = {
   activeInjuries: [],
   exerciseExclusions: [],
   externalActivities: [],
-  garminWellness: [],
-  fitbitWellness: [],
+  recoveryInputs: { preferredSource: null, observations: [], checkIns: [] },
 };
 
 function buildLargeSnapshotInputs() {

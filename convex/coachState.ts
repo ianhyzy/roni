@@ -1,42 +1,33 @@
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import { internalQuery, type QueryCtx } from "./_generated/server";
-import { GARMIN_WELLNESS_SNAPSHOT_ROW_LIMIT } from "./ai/garminWellnessSnapshot";
-import { FITBIT_WELLNESS_SNAPSHOT_ROW_LIMIT } from "./ai/fitbitWellnessSnapshot";
 import { MAX_EXCLUDED_EXERCISES } from "./exerciseExclusions";
 import { isDeletionInProgress } from "./lib/auth";
-import { MAX_RECENT_WELLNESS_DAILY_ROWS } from "./garmin/wellnessDaily";
-import { MAX_RECENT_FITBIT_WELLNESS_ROWS } from "./fitbit/wellnessDaily";
+import { type LiftingSessionSnapshot, readRecentLiftingSessions } from "./liftingCoachProjection";
+import { type NutritionSnapshot, readNutritionSnapshot } from "./nutritionCoachProjection";
+import { readRecoveryInputs } from "./trainingState/read";
+import type { RecoveryInputs } from "./trainingState/types";
 import { MAX_INJECTED_MEMORY_FACTS } from "./userMemoryFacts";
 
 // Keep the aggregated snapshot query within the bounded per-source read limits.
 const RECENT_COMPLETED_WORKOUTS_LIMIT = 20;
 const RECENT_FEEDBACK_LIMIT = 5;
 const RECENT_EXTERNAL_ACTIVITIES_LIMIT = 20;
-// Avoid reading wellness rows the formatter will immediately discard.
-const GARMIN_WELLNESS_LIMIT = Math.min(
-  GARMIN_WELLNESS_SNAPSHOT_ROW_LIMIT,
-  MAX_RECENT_WELLNESS_DAILY_ROWS,
-);
-const FITBIT_WELLNESS_LIMIT = Math.min(
-  FITBIT_WELLNESS_SNAPSHOT_ROW_LIMIT,
-  MAX_RECENT_FITBIT_WELLNESS_ROWS,
-);
-
 export interface SnapshotInputs {
   deletionInProgress?: boolean;
   profile: Doc<"userProfiles"> | null;
   scores: ReadonlyArray<Doc<"currentStrengthScores">>;
   readiness: Doc<"muscleReadiness"> | null;
   activities: ReadonlyArray<Doc<"completedWorkouts">>;
+  liftingSessions: ReadonlyArray<LiftingSessionSnapshot>;
+  nutrition?: NutritionSnapshot;
   activeBlock: Doc<"trainingBlocks"> | null;
   recentFeedback: ReadonlyArray<Doc<"workoutFeedback">>;
   activeGoals: ReadonlyArray<Doc<"goals">>;
   activeInjuries: ReadonlyArray<Doc<"injuries">>;
   exerciseExclusions: ReadonlyArray<Doc<"exerciseExclusions">>;
   externalActivities: ReadonlyArray<Doc<"externalActivities">>;
-  garminWellness: ReadonlyArray<Doc<"garminWellnessDaily">>;
-  fitbitWellness: ReadonlyArray<Doc<"fitbitWellnessDaily">>;
+  recoveryInputs: RecoveryInputs;
   memoryFacts?: ReadonlyArray<Doc<"userMemoryFacts">>;
 }
 
@@ -61,42 +52,36 @@ export const gatherSnapshotInputs = internalQuery({
         scores: [],
         readiness: null,
         activities: [],
+        liftingSessions: [],
+        nutrition: { days: [], targets: null },
         activeBlock: null,
         recentFeedback: [],
         activeGoals: [],
         activeInjuries: [],
         exerciseExclusions: [],
         externalActivities: [],
-        garminWellness: [],
-        fitbitWellness: [],
+        recoveryInputs: { preferredSource: null, observations: [], checkIns: [] },
         memoryFacts: [],
       };
     }
     const profile = await safe(() => readUserProfile(ctx, userId), null, "profile");
-    const fitbitConnection = await safe<Doc<"fitbitConnections"> | null>(
-      () =>
-        ctx.db
-          .query("fitbitConnections")
-          .withIndex("by_userId", (q) => q.eq("userId", userId))
-          .unique(),
-      null,
-      "fitbitConnection",
+    const { activeFitbitGeneration, inputs: recoveryInputs } = await readRecoveryInputs(
+      ctx,
+      userId,
     );
-    const activeFitbitGeneration =
-      fitbitConnection?.status === "active" ? fitbitConnection.generation : null;
 
     const [
       scores,
       readiness,
       activities,
+      liftingSessions,
+      nutrition,
       activeBlock,
       recentFeedback,
       activeGoals,
       activeInjuries,
       exerciseExclusions,
       externalActivities,
-      garminWellness,
-      fitbitWellness,
       memoryFacts,
     ] = await Promise.all([
       safe<Doc<"currentStrengthScores">[]>(
@@ -121,6 +106,16 @@ export const gatherSnapshotInputs = internalQuery({
         () => readRecentCompletedWorkouts(ctx, userId),
         [],
         "activities",
+      ),
+      safe<LiftingSessionSnapshot[]>(
+        () => readRecentLiftingSessions(ctx, userId),
+        [],
+        "liftingSessions",
+      ),
+      safe<NutritionSnapshot>(
+        () => readNutritionSnapshot(ctx, userId),
+        { days: [], targets: null },
+        "nutrition",
       ),
       safe<Doc<"trainingBlocks"> | null>(() => readActiveBlock(ctx, userId), null, "activeBlock"),
       safe<Doc<"workoutFeedback">[]>(
@@ -161,30 +156,6 @@ export const gatherSnapshotInputs = internalQuery({
         [],
         "externalActivities",
       ),
-      safe<Doc<"garminWellnessDaily">[]>(
-        () =>
-          ctx.db
-            .query("garminWellnessDaily")
-            .withIndex("by_userId_calendarDate", (q) => q.eq("userId", userId))
-            .order("desc")
-            .take(GARMIN_WELLNESS_LIMIT),
-        [],
-        "garminWellness",
-      ),
-      safe<Doc<"fitbitWellnessDaily">[]>(
-        () =>
-          activeFitbitGeneration
-            ? ctx.db
-                .query("fitbitWellnessDaily")
-                .withIndex("by_userId_and_generation_and_calendarDate", (q) =>
-                  q.eq("userId", userId).eq("generation", activeFitbitGeneration),
-                )
-                .order("desc")
-                .take(FITBIT_WELLNESS_LIMIT)
-            : Promise.resolve([]),
-        [],
-        "fitbitWellness",
-      ),
       safe<Doc<"userMemoryFacts">[]>(
         () =>
           ctx.db
@@ -203,14 +174,15 @@ export const gatherSnapshotInputs = internalQuery({
       scores,
       readiness,
       activities,
+      liftingSessions,
+      nutrition,
       activeBlock,
       recentFeedback,
       activeGoals,
       activeInjuries,
       exerciseExclusions,
       externalActivities,
-      garminWellness,
-      fitbitWellness,
+      recoveryInputs,
       memoryFacts,
     };
   },

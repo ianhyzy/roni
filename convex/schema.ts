@@ -74,6 +74,8 @@ export default defineSchema({
         muted: v.boolean(),
       }),
     ),
+    /** Authoritative provider for overlapping sleep/recovery data. Omitted = freshest source. */
+    preferredRecoverySource: v.optional(v.union(v.literal("garmin"), v.literal("fitbit"))),
     /** Timestamp before which all check-ins are considered read (single-write "mark all read"). */
     checkInsReadAllBeforeAt: v.optional(v.number()),
     /** Which Tonal accessories the user owns (for exercise filtering). */
@@ -207,6 +209,47 @@ export default defineSchema({
     .index("by_userId", ["userId"])
     .index("by_userId_readAt", ["userId", "readAt"])
     .index("by_userId_createdAt", ["userId", "createdAt"]),
+
+  /** User-authored subjective recovery signal, upserted once per local calendar date. */
+  recoveryCheckIns: defineTable({
+    userId: v.id("users"),
+    calendarDate: v.string(),
+    energy: v.number(),
+    soreness: v.number(),
+    stress: v.number(),
+    notes: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_userId", ["userId"])
+    .index("by_userId_and_calendarDate", ["userId", "calendarDate"])
+    .index("by_userId_and_updatedAt", ["userId", "updatedAt"]),
+
+  /** User-reported daily nutrition totals. Missing metrics remain unknown. */
+  nutritionDailyLogs: defineTable({
+    userId: v.id("users"),
+    calendarDate: v.string(),
+    source: v.literal("manual"),
+    caloriesKcal: v.optional(v.number()),
+    proteinGrams: v.optional(v.number()),
+    carbsGrams: v.optional(v.number()),
+    fatGrams: v.optional(v.number()),
+    notes: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_userId_and_calendarDate", ["userId", "calendarDate"]),
+
+  /** User-authored nutrition targets. Missing metrics remain unset. */
+  nutritionTargets: defineTable({
+    userId: v.id("users"),
+    source: v.literal("self_set"),
+    caloriesKcal: v.optional(v.number()),
+    proteinGrams: v.optional(v.number()),
+    carbsGrams: v.optional(v.number()),
+    fatGrams: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_userId", ["userId"]),
 
   /** Tonal API response cache with TTL (stale-while-revalidate pattern). */
   tonalCache: defineTable({
@@ -686,6 +729,52 @@ export default defineSchema({
     .index("by_userId_activityId", ["userId", "activityId"])
     .index("by_userId_date", ["userId", "date"]),
 
+  /** User-entered lifting sessions, kept separate from Tonal performance records. */
+  liftingSessions: defineTable({
+    userId: v.id("users"),
+    source: v.literal("manual"),
+    performedAt: v.number(),
+    calendarDate: v.string(),
+    title: v.string(),
+    durationMinutes: v.optional(v.number()),
+    notes: v.optional(v.string()),
+    exerciseCount: v.number(),
+    setCount: v.number(),
+    totalReps: v.number(),
+    totalVolumeLbs: v.number(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_userId_and_performedAt", ["userId", "performedAt"]),
+
+  /** Per-exercise summaries for a user-entered lifting session. */
+  liftingExercises: defineTable({
+    userId: v.id("users"),
+    sessionId: v.id("liftingSessions"),
+    order: v.number(),
+    name: v.string(),
+    setCount: v.number(),
+    totalReps: v.number(),
+    totalVolumeLbs: v.number(),
+  })
+    .index("by_sessionId_and_order", ["sessionId", "order"])
+    .index("by_userId", ["userId"]),
+
+  /** Individual manual set records; array position determines stable order. */
+  liftingSets: defineTable({
+    userId: v.id("users"),
+    sessionId: v.id("liftingSessions"),
+    exerciseId: v.id("liftingExercises"),
+    exerciseOrder: v.number(),
+    order: v.number(),
+    kind: v.union(v.literal("warmup"), v.literal("working")),
+    reps: v.number(),
+    weightLbs: v.optional(v.number()),
+    rpe: v.optional(v.number()),
+  })
+    .index("by_sessionId_and_exerciseOrder_and_order", ["sessionId", "exerciseOrder", "order"])
+    .index("by_exerciseId_and_order", ["exerciseId", "order"])
+    .index("by_userId", ["userId"]),
+
   /** Per-exercise performance snapshots from each completed workout. */
   exercisePerformance: defineTable({
     userId: v.id("users"),
@@ -765,7 +854,7 @@ export default defineSchema({
    * record HR). All signal-dependent fields are therefore optional.
    *
    * New writes normalize `source` to canonical values
-   * (`appleHealth`, `garmin`, or `other`) before persistence. The schema stays
+   * (`appleHealth`, `fitbit`, `garmin`, `strava`, or `other`) before persistence. The schema stays
    * string-compatible so older rows can be repaired in place on next sync.
    * `externalId` is globally unique within a single source.
    */
@@ -787,6 +876,8 @@ export default defineSchema({
     avgPaceSecondsPerKm: v.optional(v.number()),
     /** Present only for direct Google Health imports, never Tonal-derived Fitbit rows. */
     fitbitConnectionGeneration: v.optional(v.string()),
+    /** Present only for direct Strava imports, never Tonal-derived activity rows. */
+    stravaConnectionGeneration: v.optional(v.string()),
     syncedAt: v.number(),
   })
     .index("by_userId_externalId", ["userId", "externalId"])
@@ -802,7 +893,33 @@ export default defineSchema({
       "userId",
       "fitbitConnectionGeneration",
       "beginTime",
+    ])
+    .index("by_userId_and_stravaConnectionGeneration_and_externalId", [
+      "userId",
+      "stravaConnectionGeneration",
+      "externalId",
+    ])
+    .index("by_userId_and_stravaConnectionGeneration_and_beginTime", [
+      "userId",
+      "stravaConnectionGeneration",
+      "beginTime",
     ]),
+
+  /** App-global Strava API quota state. It is not user-owned or user-exported. */
+  stravaRateLimitBudget: defineTable({
+    key: v.literal("global"),
+    shortWindowStartedAt: v.number(),
+    dailyWindowStartedAt: v.number(),
+    shortLimit: v.number(),
+    dailyLimit: v.number(),
+    shortReserved: v.number(),
+    dailyReserved: v.number(),
+    shortObservedUsage: v.number(),
+    dailyObservedUsage: v.number(),
+    awaitingHeadersUntil: v.optional(v.number()),
+    blockedUntil: v.optional(v.number()),
+    updatedAt: v.number(),
+  }).index("by_key", ["key"]),
 
   /**
    * Google Health OAuth credentials for one Fitbit account. The table uses a
@@ -887,6 +1004,117 @@ export default defineSchema({
     .index("by_userId", ["userId"])
     .index("by_userId_and_calendarDate", ["userId", "calendarDate"])
     .index("by_userId_and_generation_and_calendarDate", ["userId", "generation", "calendarDate"]),
+
+  /** Strava OAuth credentials for one athlete account. */
+  stravaConnections: defineTable(
+    v.union(
+      v.object({
+        userId: v.id("users"),
+        athleteId: v.string(),
+        generation: v.string(),
+        status: v.literal("active"),
+        accessTokenEncrypted: v.string(),
+        refreshTokenEncrypted: v.string(),
+        tokenExpiresAt: v.number(),
+        scopes: v.array(v.string()),
+        connectedAt: v.number(),
+        refreshDueAt: v.number(),
+        /** Opaque owner for the current rotating-token refresh lease. */
+        refreshLeaseNonce: v.optional(v.string()),
+        /** Lease expiry; a later refresh may take over only after this timestamp. */
+        refreshLeaseExpiresAt: v.optional(v.number()),
+        lastSyncAttemptAt: v.optional(v.number()),
+        lastSyncedAt: v.optional(v.number()),
+        lastSyncError: v.optional(v.string()),
+      }),
+      v.object({
+        userId: v.id("users"),
+        athleteId: v.string(),
+        generation: v.string(),
+        status: v.literal("disconnected"),
+        scopes: v.array(v.string()),
+        connectedAt: v.number(),
+        disconnectedAt: v.number(),
+        disconnectReason: v.union(
+          v.literal("user_disconnected"),
+          v.literal("permission_revoked"),
+          v.literal("token_invalid"),
+          v.literal("account_deleted"),
+        ),
+      }),
+    ),
+  )
+    .index("by_userId", ["userId"])
+    .index("by_athleteId_and_status", ["athleteId", "status"])
+    .index("by_status_and_refreshDueAt", ["status", "refreshDueAt"]),
+
+  /** Hashed, single-use Strava OAuth state bound to the initiating Roni user. */
+  stravaOauthStates: defineTable({
+    userId: v.id("users"),
+    stateHash: v.string(),
+    createdAt: v.number(),
+    expiresAt: v.number(),
+  })
+    .index("by_stateHash", ["stateHash"])
+    .index("by_expiresAt", ["expiresAt"])
+    .index("by_userId", ["userId"]),
+
+  /** Encrypted Strava authorization code behind a hashed, single-use browser ticket. */
+  stravaOauthCallbackTickets: defineTable({
+    userId: v.id("users"),
+    ticketHash: v.string(),
+    authorizationCodeEncrypted: v.string(),
+    acceptedScopes: v.array(v.string()),
+    completionNonce: v.optional(v.string()),
+    createdAt: v.number(),
+    expiresAt: v.number(),
+  })
+    .index("by_ticketHash", ["ticketHash"])
+    .index("by_expiresAt", ["expiresAt"])
+    .index("by_userId", ["userId"]),
+
+  /** Validated Strava webhook envelopes retained for bounded processing and replay. */
+  stravaWebhookEvents: defineTable({
+    eventKey: v.string(),
+    subscriptionId: v.string(),
+    objectType: v.union(v.literal("activity"), v.literal("athlete")),
+    aspectType: v.union(v.literal("create"), v.literal("update"), v.literal("delete")),
+    objectId: v.string(),
+    ownerId: v.string(),
+    eventTime: v.number(),
+    updates: v.optional(
+      v.object({
+        title: v.optional(v.string()),
+        type: v.optional(v.string()),
+        private: v.optional(v.string()),
+        authorized: v.optional(v.string()),
+      }),
+    ),
+    /** Resolve ownership before persistence; unknown athletes are never retained. */
+    userId: v.id("users"),
+    connectionGeneration: v.string(),
+    status: v.union(
+      v.literal("received"),
+      v.literal("processing"),
+      v.literal("processed"),
+      v.literal("ignored"),
+      v.literal("error"),
+    ),
+    attempts: v.number(),
+    /** Optional during rollout; counts durable processor dispatches, including recovery. */
+    dispatchAttempts: v.optional(v.number()),
+    /** Provider failures exclude intentional rate-budget deferrals. */
+    providerFailures: v.optional(v.number()),
+    /** Fences completion/retry writes to the exact processing lease. */
+    processingNonce: v.optional(v.string()),
+    nextAttemptAt: v.optional(v.number()),
+    receivedAt: v.number(),
+    updatedAt: v.number(),
+    errorReason: v.optional(v.string()),
+  })
+    .index("by_eventKey", ["eventKey"])
+    .index("by_userId", ["userId"])
+    .index("by_status_and_updatedAt", ["status", "updatedAt"]),
 
   /** Pre-generated workout library entries for SEO and inspiration. */
   libraryWorkouts: defineTable({

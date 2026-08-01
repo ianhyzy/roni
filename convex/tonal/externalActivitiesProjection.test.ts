@@ -63,7 +63,9 @@ describe("projectExternalActivities", () => {
     expect(projectExternalActivities([{ ...VALID_RAW, source: "Garmin" }])[0].source).toBe(
       "garmin",
     );
-    expect(projectExternalActivities([{ ...VALID_RAW, source: "Strava" }])[0].source).toBe("other");
+    expect(projectExternalActivities([{ ...VALID_RAW, source: "Strava" }])[0].source).toBe(
+      "strava",
+    );
   });
 
   it("rejects payloads missing truly required fields", () => {

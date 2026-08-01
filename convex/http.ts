@@ -3,17 +3,40 @@ import { httpAction } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { auth } from "./auth";
 import { GARMIN_PUSH_EVENT_TYPES } from "./garmin/webhookDispatch";
+import { getStravaWebhookConfig, supportedStravaScopes } from "./strava/config";
+import { parseStravaWebhookEnvelope } from "./strava/webhook";
+import { verifyStravaWebhookSignature, verifyStravaWebhookToken } from "./strava/webhookSignature";
 import {
   garminWebhookFailureStatus,
   verifyGarminWebhookSignature,
 } from "./garmin/webhookSignature";
-import { resolveAppOrigin, resolveFitbitAppOrigin } from "./httpOrigin";
+import { resolveAppOrigin, resolveFitbitAppOrigin, resolveStravaAppOrigin } from "./httpOrigin";
 
 const http = httpRouter();
 auth.addHttpRoutes(http);
 
 function redirectResponse(location: string): Response {
   return new Response(null, { status: 302, headers: { Location: location } });
+}
+
+async function readBoundedBody(req: Request, maxBytes: number): Promise<string | null> {
+  const declaredLength = Number(req.headers.get("Content-Length"));
+  if (Number.isFinite(declaredLength) && declaredLength > maxBytes) return null;
+  if (!req.body) return "";
+  const reader = req.body.getReader();
+  const decoder = new TextDecoder();
+  let totalBytes = 0;
+  let body = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) return body + decoder.decode();
+    totalBytes += value.byteLength;
+    if (totalBytes > maxBytes) {
+      await reader.cancel();
+      return null;
+    }
+    body += decoder.decode(value, { stream: true });
+  }
 }
 
 // Complete the exchange on the app origin where the authenticated session is available.
@@ -46,6 +69,112 @@ http.route({
     const bounce = new URL("/fitbit/callback", appOrigin);
     bounce.searchParams.set("ticket", result.ticket);
     return redirectResponse(bounce.toString());
+  }),
+});
+
+http.route({
+  path: "/strava/oauth/callback",
+  method: "GET",
+  handler: httpAction(async (ctx, req) => {
+    const url = new URL(req.url);
+    const appOrigin = resolveStravaAppOrigin();
+    const oauthError = url.searchParams.get("error");
+    if (oauthError) {
+      const reason = oauthError === "access_denied" ? "access_denied" : "oauth_error";
+      return redirectResponse(`${appOrigin}/settings?strava=error&reason=${reason}`);
+    }
+
+    const code = url.searchParams.get("code");
+    const state = url.searchParams.get("state");
+    const acceptedScopes = supportedStravaScopes(
+      (url.searchParams.get("scope") ?? "").split(/[,\s]+/),
+    );
+    if (!code?.trim() || !state?.trim() || acceptedScopes.length === 0) {
+      return redirectResponse(`${appOrigin}/settings?strava=error&reason=missing_params`);
+    }
+
+    const result = await ctx.runAction(internal.strava.oauthFlow.issueStravaCallbackTicket, {
+      code,
+      state,
+      acceptedScopes,
+    });
+    if (!result.success) {
+      return redirectResponse(`${appOrigin}/settings?strava=error&reason=invalid_callback`);
+    }
+
+    const bounce = new URL("/strava/callback", appOrigin);
+    bounce.searchParams.set("ticket", result.ticket);
+    return redirectResponse(bounce.toString());
+  }),
+});
+
+http.route({
+  path: "/strava/webhook",
+  method: "GET",
+  handler: httpAction(async (_ctx, req) => {
+    try {
+      const config = getStravaWebhookConfig();
+      const url = new URL(req.url);
+      const challenge = url.searchParams.get("hub.challenge");
+      const mode = url.searchParams.get("hub.mode");
+      const validToken = await verifyStravaWebhookToken(
+        url.searchParams.get("hub.verify_token"),
+        config.verifyToken,
+      );
+      if (mode !== "subscribe" || !challenge || challenge.length > 256 || !validToken) {
+        return new Response("Forbidden", { status: 403 });
+      }
+      return Response.json({ "hub.challenge": challenge });
+    } catch {
+      return new Response("Webhook unavailable", { status: 503 });
+    }
+  }),
+});
+
+http.route({
+  path: "/strava/webhook",
+  method: "POST",
+  handler: httpAction(async (ctx, req) => {
+    let config;
+    try {
+      config = getStravaWebhookConfig();
+    } catch {
+      return new Response("Webhook unavailable", { status: 503 });
+    }
+    if (!req.headers.get("Content-Type")?.toLowerCase().includes("application/json")) {
+      return new Response("Invalid content type", { status: 415 });
+    }
+    const body = await readBoundedBody(req, 64 * 1_024);
+    if (body === null) return new Response("Payload too large", { status: 413 });
+    if (
+      !(await verifyStravaWebhookSignature(
+        req.headers.get("X-Strava-Signature"),
+        body,
+        config.signingSecret,
+      ))
+    ) {
+      return new Response("Forbidden", { status: 403 });
+    }
+    let event;
+    try {
+      event = parseStravaWebhookEnvelope(JSON.parse(body));
+    } catch {
+      return new Response("Invalid payload", { status: 400 });
+    }
+    if (event.subscriptionId !== config.subscriptionId) {
+      return new Response("Forbidden", { status: 403 });
+    }
+    const owner = await ctx.runQuery(internal.strava.webhook.resolveActiveOwner, {
+      athleteId: event.ownerId,
+    });
+    if (!owner) return Response.json({});
+    await ctx.runMutation(internal.strava.webhook.recordReceived, {
+      event,
+      userId: owner.userId,
+      connectionGeneration: owner.generation,
+      now: Date.now(),
+    });
+    return Response.json({});
   }),
 });
 

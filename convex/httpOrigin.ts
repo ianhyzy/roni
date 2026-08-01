@@ -1,6 +1,7 @@
 type AppOriginEnv = {
   FITBIT_GOOGLE_OAUTH_POST_REDIRECT_URL?: string;
   GARMIN_OAUTH_POST_REDIRECT_URL?: string;
+  STRAVA_OAUTH_POST_REDIRECT_URL?: string;
   NODE_ENV?: string;
   SITE_URL?: string;
   VERCEL_URL?: string;
@@ -69,6 +70,23 @@ export function resolveFitbitAppOrigin(env: AppOriginEnv = process.env): string 
     throw new Error(
       "FITBIT_GOOGLE_OAUTH_POST_REDIRECT_URL, SITE_URL, or VERCEL_URL must be configured",
     );
+  }
+
+  return LOCAL_DEV_APP_ORIGIN;
+}
+
+export function resolveStravaAppOrigin(env: AppOriginEnv = process.env): string {
+  const redirects = [env.STRAVA_OAUTH_POST_REDIRECT_URL, env.SITE_URL];
+  for (const redirect of redirects) {
+    const origin = resolveConfiguredOrigin(redirect);
+    if (origin) return origin;
+  }
+
+  const vercelOrigin = resolveVercelOrigin(env);
+  if (vercelOrigin) return vercelOrigin;
+
+  if (isProductionEnv(env)) {
+    throw new Error("STRAVA_OAUTH_POST_REDIRECT_URL, SITE_URL, or VERCEL_URL must be configured");
   }
 
   return LOCAL_DEV_APP_ORIGIN;

@@ -62,3 +62,19 @@ export function getRecencyLabel(
   if (days < 14) return "last week";
   return "older";
 }
+
+export function getCalendarDateRecencyLabel(
+  date: string,
+  now: Date = new Date(),
+  timeZone?: string,
+): RecencyLabel {
+  const nowDay = calendarDay(now, timeZone);
+  if (date === nowDay) return "today";
+  if (date === prevCalendarDay(nowDay)) return "yesterday";
+
+  const days =
+    (Date.parse(`${nowDay}T00:00:00.000Z`) - Date.parse(`${date}T00:00:00.000Z`)) / 86_400_000;
+  if (days < 7) return "this week";
+  if (days < 14) return "last week";
+  return "older";
+}

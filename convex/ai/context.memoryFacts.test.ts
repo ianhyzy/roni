@@ -13,8 +13,7 @@ function emptyInputs() {
     activeInjuries: [],
     exerciseExclusions: [],
     externalActivities: [],
-    garminWellness: [],
-    fitbitWellness: [],
+    recoveryInputs: { preferredSource: null, observations: [], checkIns: [] },
     memoryFacts: [],
   };
 }

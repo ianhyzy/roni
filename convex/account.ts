@@ -132,6 +132,18 @@ export const deleteAccount = action({
         console.error("[accountDeletion] Fitbit token revocation request failed", { userId });
       }
 
+      try {
+        const revoked = await ctx.runAction(internal.strava.disconnect.revokeForAccountDeletion, {
+          userId,
+        });
+        if (!revoked) {
+          console.error("[accountDeletion] Strava token revocation failed", { userId });
+        }
+      } catch {
+        // Remote revocation is best-effort; local deletion must still converge.
+        console.error("[accountDeletion] Strava token revocation request failed", { userId });
+      }
+
       await ctx.runAction(components.agent.users.deleteAllForUserId, { userId });
 
       // Drain each table in batches of 500 to stay under the 4096 read limit

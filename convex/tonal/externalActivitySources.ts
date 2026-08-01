@@ -2,6 +2,7 @@ export const EXTERNAL_ACTIVITY_SOURCES = {
   APPLE_HEALTH: "appleHealth",
   FITBIT: "fitbit",
   GARMIN: "garmin",
+  STRAVA: "strava",
   OTHER: "other",
 } as const;
 
@@ -12,6 +13,7 @@ export const EXTERNAL_ACTIVITY_SOURCE_VALUES = [
   EXTERNAL_ACTIVITY_SOURCES.APPLE_HEALTH,
   EXTERNAL_ACTIVITY_SOURCES.FITBIT,
   EXTERNAL_ACTIVITY_SOURCES.GARMIN,
+  EXTERNAL_ACTIVITY_SOURCES.STRAVA,
   EXTERNAL_ACTIVITY_SOURCES.OTHER,
 ] as const;
 
@@ -30,6 +32,10 @@ export function normalizeExternalActivitySource(source: string): ExternalActivit
     case "fitbit":
     case "fitbitwebapi":
       return EXTERNAL_ACTIVITY_SOURCES.FITBIT;
+    case "strava":
+    case "stravaapi":
+    case "stravawebapi":
+      return EXTERNAL_ACTIVITY_SOURCES.STRAVA;
     default:
       return EXTERNAL_ACTIVITY_SOURCES.OTHER;
   }

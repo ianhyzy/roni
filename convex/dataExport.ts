@@ -5,19 +5,14 @@ import * as analytics from "./lib/posthog";
 import type { Doc } from "./_generated/dataModel";
 import type { Activity } from "./tonal/types";
 import type { JsonExportSectionKey } from "./userData";
+import { collectRecoveryExportData, type RecoveryExportData } from "./recoveryExport";
+import { collectLiftingExportData, type LiftingExportData } from "./liftingExport";
+import { collectNutritionExportData, type NutritionExportData } from "./nutritionExport";
 
-type GarminWellnessDailyExportRow = Omit<
-  Doc<"garminWellnessDaily">,
-  "_id" | "_creationTime" | "userId"
->;
-type GarminWorkoutDeliveryExportRow = Omit<
-  Doc<"garminWorkoutDeliveries">,
-  "_id" | "_creationTime" | "userId"
->;
-type FitbitWellnessDailyExportRow = Omit<
-  Doc<"fitbitWellnessDaily">,
-  "_id" | "_creationTime" | "userId"
->;
+type UserMetadata = "_id" | "_creationTime" | "userId";
+type GarminWorkoutDeliveryExportRow = Omit<Doc<"garminWorkoutDeliveries">, UserMetadata>;
+type GarminWellnessDailyExportRow = Omit<Doc<"garminWellnessDaily">, UserMetadata>;
+type FitbitWellnessDailyExportRow = Omit<Doc<"fitbitWellnessDaily">, UserMetadata>;
 
 interface ExportedData extends Record<JsonExportSectionKey | "exportedAt" | "user", unknown> {
   exportedAt: string;
@@ -26,11 +21,13 @@ interface ExportedData extends Record<JsonExportSectionKey | "exportedAt" | "use
     profileData: Record<string, unknown> | null;
     tonalConnectedAt: number | null;
     checkInPreferences: Record<string, unknown> | null;
+    preferredRecoverySource: "garmin" | "fitbit" | null;
     lastActiveAt: number;
   } | null;
   workoutPlans: Record<string, unknown>[];
   weekPlans: Record<string, unknown>[];
   checkIns: Record<string, unknown>[];
+  recoveryCheckIns: RecoveryExportData["recoveryCheckIns"];
   completedWorkouts: {
     date: string;
     title: string;
@@ -99,6 +96,9 @@ interface ExportedData extends Record<JsonExportSectionKey | "exportedAt" | "use
   garminWorkoutDeliveries: GarminWorkoutDeliveryExportRow[];
   garminWellnessDaily: GarminWellnessDailyExportRow[];
   fitbitWellnessDaily: FitbitWellnessDailyExportRow[];
+  liftingSessions: LiftingExportData["liftingSessions"];
+  nutritionDailyLogs: NutritionExportData["nutritionDailyLogs"];
+  nutritionTargets: NutritionExportData["nutritionTargets"];
 }
 
 /** Convert a Tonal API Activity to the completedWorkouts export format. */
@@ -136,10 +136,14 @@ export const exportData = action({
     const data = (await ctx.runQuery(internal.dataExport.collectUserData, {
       userId,
     })) as ExportedData;
+    Object.assign(
+      data,
+      ...(await Promise.all([
+        collectLiftingExportData(ctx, userId),
+        collectNutritionExportData(ctx, userId),
+      ])),
+    );
 
-    // Fetch fresh Tonal workout history to supplement synced DB records.
-    // Only 2 API calls — workout history and external activities — to avoid
-    // overloading the Tonal API.
     if (data.profile?.tonalConnectedAt) {
       try {
         const [knownIds, activities] = await Promise.all([
@@ -154,7 +158,6 @@ export const exportData = action({
             data.completedWorkouts.push(activityToExportRow(a));
           }
         }
-        // Sort merged results chronologically
         data.completedWorkouts.sort((a, b) => a.date.localeCompare(b.date));
       } catch (err) {
         console.warn("Tonal API unavailable during export — continuing with DB data only", err);
@@ -260,6 +263,7 @@ export const collectUserData = internalQuery({
       .query("fitbitWellnessDaily")
       .withIndex("by_userId_and_calendarDate", (q) => q.eq("userId", userId))
       .collect();
+    const recoveryData = await collectRecoveryExportData(ctx, userId);
 
     // Build movement ID → name lookup, fetching only movements actually
     // referenced by this user's exercisePerformance rows.
@@ -288,6 +292,7 @@ export const collectUserData = internalQuery({
             profileData: profile.profileData ?? null,
             tonalConnectedAt: profile.tonalConnectedAt ?? null,
             checkInPreferences: profile.checkInPreferences ?? null,
+            preferredRecoverySource: profile.preferredRecoverySource ?? null,
             lastActiveAt: profile.lastActiveAt,
           }
         : null,
@@ -384,6 +389,10 @@ export const collectUserData = internalQuery({
       garminWorkoutDeliveries: garminWorkoutDeliveries.map(userDocumentToExportRow),
       garminWellnessDaily: garminWellnessDaily.map(userDocumentToExportRow),
       fitbitWellnessDaily: fitbitWellnessDaily.map(userDocumentToExportRow),
+      liftingSessions: [],
+      nutritionDailyLogs: [],
+      nutritionTargets: [],
+      ...recoveryData,
     };
   },
 });

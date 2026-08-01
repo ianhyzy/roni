@@ -2,10 +2,11 @@
 
 import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { useQuery } from "convex/react";
+import { useAction, useQuery } from "convex/react";
 import { useAuthActions } from "@convex-dev/auth/react";
 import { usePageView } from "@/lib/analytics";
 import { useFitbitFeatureStatus } from "@/hooks/useFitbitFeatureStatus";
+import { useActionData } from "@/hooks/useActionData";
 import { api } from "../../../../convex/_generated/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -29,6 +30,7 @@ import { MemoryFacts } from "@/features/settings/MemoryFacts";
 import { DataExport } from "@/features/settings/DataExport";
 import { DeleteAccount } from "@/features/settings/DeleteAccount";
 import { ProfileCard } from "@/features/settings/ProfileCard";
+import { RecoverySourcePreference } from "@/features/settings/RecoverySourcePreference";
 import {
   TonalConnectionCard,
   type TonalConnectionState,
@@ -41,6 +43,10 @@ import {
   FitbitConnectionCard,
   type FitbitConnectionNotice,
 } from "@/features/settings/FitbitConnectionCard";
+import {
+  StravaConnectionCard,
+  type StravaConnectionNotice,
+} from "@/features/settings/StravaConnectionCard";
 import { ProviderSection } from "@/features/byok/ProviderSection";
 import { DISCORD_URL, REPO_URL } from "@/lib/urls";
 import { LogOut, MessageSquare } from "lucide-react";
@@ -65,10 +71,16 @@ function SettingsPageInner() {
   const me = useQuery(api.users.getMe, {});
   const garminFeature = useQuery(api.garmin.connections.getGarminFeatureStatus, {});
   const fitbitFeatureStatus = useFitbitFeatureStatus();
+  const stravaFeatureStatus = useActionData(useAction(api.strava.status.getStravaFeatureStatus));
   const fitbitFeature =
     fitbitFeatureStatus.state.status === "success" ||
     fitbitFeatureStatus.state.status === "refreshing"
       ? fitbitFeatureStatus.state.data
+      : undefined;
+  const stravaFeature =
+    stravaFeatureStatus.state.status === "success" ||
+    stravaFeatureStatus.state.status === "refreshing"
+      ? stravaFeatureStatus.state.data
       : undefined;
   const [signOutOpen, setSignOutOpen] = useState(false);
 
@@ -121,6 +133,21 @@ function SettingsPageInner() {
       ? { kind: "success", message: "Fitbit connected. Your first sync is starting." }
       : fitbitParam === "error"
         ? { kind: "error", message: fitbitErrorMessage }
+        : undefined;
+
+  const stravaParam = searchParams.get("strava");
+  const stravaReason = searchParams.get("reason");
+  const stravaErrorMessage =
+    stravaReason === "access_denied"
+      ? "Strava connection was canceled."
+      : stravaReason === "missing_params"
+        ? "Strava connection failed because the authorization response was incomplete. Please try again."
+        : "Strava connection failed. Please try again.";
+  const stravaNotice: StravaConnectionNotice | undefined =
+    stravaParam === "connected"
+      ? { kind: "success", message: "Strava connected. Your first sync is starting." }
+      : stravaParam === "error"
+        ? { kind: "error", message: stravaErrorMessage }
         : undefined;
 
   return (
@@ -218,6 +245,32 @@ function SettingsPageInner() {
           />
         </section>
       ) : null}
+
+      {/* Keep existing Strava connections manageable if deployment configuration changes. */}
+      {stravaFeatureStatus.state.status === "error" ||
+      stravaFeature?.configured ||
+      stravaFeature?.hasConnection ? (
+        <section className="mb-10" id="strava-connection">
+          <h2 className={SECTION_HEADING}>Strava Connection</h2>
+          {stravaFeatureStatus.state.status === "error" ? (
+            <div className="mb-3">
+              <ErrorAlert
+                message="Could not check Strava availability. Existing connections are not affected."
+                onRetry={stravaFeatureStatus.refetch}
+              />
+            </div>
+          ) : null}
+          <StravaConnectionCard
+            configured={stravaFeature?.configured ?? false}
+            callbackNotice={stravaNotice}
+          />
+        </section>
+      ) : null}
+
+      <section className="mb-10" id="recovery-source">
+        <h2 className={SECTION_HEADING}>Recovery Source</h2>
+        <RecoverySourcePreference />
+      </section>
 
       {/* Equipment */}
       <section className="mb-10">

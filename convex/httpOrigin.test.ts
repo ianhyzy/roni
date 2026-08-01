@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { LOCAL_DEV_APP_ORIGIN, resolveAppOrigin, resolveFitbitAppOrigin } from "./httpOrigin";
+import {
+  LOCAL_DEV_APP_ORIGIN,
+  resolveAppOrigin,
+  resolveFitbitAppOrigin,
+  resolveStravaAppOrigin,
+} from "./httpOrigin";
 
 describe("resolveAppOrigin", () => {
   it("uses the Garmin post-OAuth redirect URL first", () => {
@@ -106,5 +111,57 @@ describe("resolveFitbitAppOrigin", () => {
 
   it("uses the local origin in development when no configured origin is available", () => {
     expect(resolveFitbitAppOrigin({ NODE_ENV: "development" })).toBe(LOCAL_DEV_APP_ORIGIN);
+  });
+});
+
+describe("resolveStravaAppOrigin", () => {
+  it("uses only the Strava-specific post-OAuth redirect before SITE_URL", () => {
+    expect(
+      resolveStravaAppOrigin({
+        STRAVA_OAUTH_POST_REDIRECT_URL: "https://strava.example.com/settings",
+        FITBIT_GOOGLE_OAUTH_POST_REDIRECT_URL: "https://fitbit.example.com/settings",
+        GARMIN_OAUTH_POST_REDIRECT_URL: "https://garmin.example.com/settings",
+        SITE_URL: "https://fallback.example.com",
+      }),
+    ).toBe("https://strava.example.com");
+  });
+
+  it("never falls back to another provider redirect URL", () => {
+    expect(
+      resolveStravaAppOrigin({
+        STRAVA_OAUTH_POST_REDIRECT_URL: "not-a-url",
+        FITBIT_GOOGLE_OAUTH_POST_REDIRECT_URL: "https://fitbit.example.com/settings",
+        GARMIN_OAUTH_POST_REDIRECT_URL: "https://garmin.example.com/settings",
+        SITE_URL: "https://roni.example.com/settings",
+      }),
+    ).toBe("https://roni.example.com");
+  });
+
+  it("uses Vercel as the final configured fallback", () => {
+    expect(
+      resolveStravaAppOrigin({
+        GARMIN_OAUTH_POST_REDIRECT_URL: "https://garmin.example.com/settings",
+        VERCEL_URL: "preview.example.vercel.app",
+      }),
+    ).toBe("https://preview.example.vercel.app");
+  });
+
+  it("accepts only an absolute HTTP origin from configured redirects", () => {
+    expect(
+      resolveStravaAppOrigin({
+        STRAVA_OAUTH_POST_REDIRECT_URL: "javascript:alert(1)",
+        SITE_URL: "https://roni.example.com/settings",
+      }),
+    ).toBe("https://roni.example.com");
+  });
+
+  it("fails closed in production when no Strava app origin is configured", () => {
+    expect(() => resolveStravaAppOrigin({ NODE_ENV: "production" })).toThrow(
+      "STRAVA_OAUTH_POST_REDIRECT_URL, SITE_URL, or VERCEL_URL must be configured",
+    );
+  });
+
+  it("uses the local origin in development when no configured origin is available", () => {
+    expect(resolveStravaAppOrigin({ NODE_ENV: "development" })).toBe(LOCAL_DEV_APP_ORIGIN);
   });
 });

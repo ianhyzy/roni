@@ -3,6 +3,17 @@ export const USER_DATA_TABLES = [
   { table: "userProfiles", delete: "deleteUserRecord", jsonExportKey: "profile" },
   { table: "userProfileActivity", delete: "byUserIdBatch", jsonExportKey: null },
   { table: "checkIns", delete: "byUserIdBatch", jsonExportKey: "checkIns" },
+  {
+    table: "recoveryCheckIns",
+    delete: "byUserIdBatch",
+    jsonExportKey: "recoveryCheckIns",
+  },
+  {
+    table: "nutritionDailyLogs",
+    delete: "byUserIdBatch",
+    jsonExportKey: "nutritionDailyLogs",
+  },
+  { table: "nutritionTargets", delete: "byUserIdBatch", jsonExportKey: "nutritionTargets" },
   { table: "tonalCache", delete: "tonalCacheBatch", jsonExportKey: null },
   { table: "workoutPlans", delete: "byUserIdBatch", jsonExportKey: "workoutPlans" },
   { table: "weekPlans", delete: "byUserIdBatch", jsonExportKey: "weekPlans" },
@@ -21,6 +32,9 @@ export const USER_DATA_TABLES = [
   { table: "aiBudgetWarnings", delete: "byUserIdBatch", jsonExportKey: null },
   { table: "aiRun", delete: "byUserIdBatch", jsonExportKey: null },
   { table: "completedWorkouts", delete: "byUserIdBatch", jsonExportKey: "completedWorkouts" },
+  { table: "liftingSets", delete: "byUserIdBatch", jsonExportKey: null },
+  { table: "liftingExercises", delete: "byUserIdBatch", jsonExportKey: null },
+  { table: "liftingSessions", delete: "byUserIdBatch", jsonExportKey: "liftingSessions" },
   {
     table: "exercisePerformance",
     delete: "exercisePerformanceBatch",
@@ -66,6 +80,10 @@ export const USER_DATA_TABLES = [
     delete: "byUserIdBatch",
     jsonExportKey: "fitbitWellnessDaily",
   },
+  { table: "stravaConnections", delete: "byUserIdBatch", jsonExportKey: null },
+  { table: "stravaOauthStates", delete: "byUserIdBatch", jsonExportKey: null },
+  { table: "stravaOauthCallbackTickets", delete: "byUserIdBatch", jsonExportKey: null },
+  { table: "stravaWebhookEvents", delete: "byUserIdBatch", jsonExportKey: null },
 ] as const;
 
 type UserDataEntry = (typeof USER_DATA_TABLES)[number];

@@ -33,8 +33,7 @@ const EMPTY_SNAPSHOT_INPUTS = {
   activeInjuries: [],
   exerciseExclusions: [],
   externalActivities: [],
-  garminWellness: [],
-  fitbitWellness: [],
+  recoveryInputs: { preferredSource: null, observations: [], checkIns: [] },
 };
 const EMPTY_PROFILE_CTX = {
   runQuery: async (query: unknown) => {

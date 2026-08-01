@@ -85,6 +85,8 @@ function getGreeting(): string {
 const NAV_PILLS = [
   { label: "View stats", href: "/stats" },
   { label: "Strength trends", href: "/strength" },
+  { label: "Log lifting", href: "/lifting" },
+  { label: "Log nutrition", href: "/nutrition" },
   { label: "Personal records", href: "/prs" },
   { label: "Browse exercises", href: "/exercises" },
   { label: "Excluded exercises", href: "/settings#excluded-exercises" },
@@ -168,7 +170,7 @@ export default function DashboardPage() {
           <Link
             key={href}
             href={href}
-            className="rounded-full bg-muted/50 px-4 py-2 text-xs text-muted-foreground transition-colors duration-150 hover:bg-muted/80 hover:text-foreground"
+            className="inline-flex min-h-11 items-center rounded-full bg-muted/50 px-4 py-2 text-xs text-muted-foreground transition-colors duration-150 hover:bg-muted/80 hover:text-foreground"
           >
             {label}
           </Link>
