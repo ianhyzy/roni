@@ -1,6 +1,6 @@
 # PR Review Learnings
 
-Last reviewed: 2026-07-29
+Last reviewed: 2026-08-01
 
 A running log of recurring, legitimate issues raised in pull-request review that
 agents (and humans) should pre-empt. Each entry records the **problem**, **why
@@ -814,7 +814,7 @@ deletion, work done for failed turns, and stale/crossed state.
 
 ## 19. Receipt-only retry guards are not idempotency when an external POST can finish ambiguously
 
-**Seen in:** #616
+**Seen in:** #616, #619 (follow-up)
 
 **Problem.** A stored signup receipt prevented ordinary duplicate scheduling,
 but it could be stale after a user removed or moved a Tonal Calendar tile, and
@@ -861,6 +861,118 @@ does not accept an idempotency key.
   ownership and scheduling state before the first write. An unchanged owned link
   may still accept metadata-only updates.
 
+**Follow-up (#619).** Preserving scheduled state across the delete/relink guards
+surfaced four further gaps worth pre-empting when you touch these paths:
+
+- **Apply the lease-expiry rule uniformly across _every_ guard.** `acquireClaim`,
+  `authorizePost`, and `completeClaim` already treat `leaseExpiresAt <= now` as
+  expired, but `getDeleteWorkoutBlocker` blocked _any_ stored `tonalSchedulingClaim`.
+  A guard that ignores the shared expiry rule can strand a plan forever when the
+  claim lifecycle fails. Use one `leaseExpiresAt > now` active-claim helper in
+  every guard, and cover the exact-boundary (`==`) case.
+- **An expired _ambiguous_ claim phase must still block.** Only an expired initial
+  `checking` claim is known to predate POST authorization; an expired `reconciling`
+  or `post_authorized` claim may mean the calendar tile was created but its receipt
+  was never persisted. Treating those later phases as "safe to delete" lets
+  `delete_workout` remove a workout Tonal actually scheduled. Keep ambiguous
+  post-authorization phases as blockers (or reconcile them against the live
+  calendar first), even after the lease expires.
+- **Reserve atomically — a clean preflight in one transaction is stale by the next.**
+  The delete preflight (query) and the external `DELETE` (action) run in separate
+  transactions, so a scheduling claim or day-link acquired in between is never
+  observed and the workout is deleted while weekly scheduling still references it.
+  Reserve the deletion atomically in Convex and make scheduling/link mutations
+  reject that reservation before issuing the external call — don't rely on a
+  read-then-act gap (ties to §17's TOCTOU freshness concern).
+- **Validate incoming lifecycle _status_, not only scheduling evidence.** An owned
+  `failed`/`pushing`/`deleted` workout with no scheduling fields still isn't a safe
+  target: approval only has a valid replacement path for `draft`/already-`pushed`
+  plans, so linking a `failed` row makes every retry orphan another Tonal workout.
+  Reject unsafe incoming lifecycle states alongside the scheduling-evidence check.
+
+## 20. A statistical/threshold estimator must exclude incomplete observations and require evidence of the effect it claims — never let missing data count as a real zero
+
+**Seen in:** #608 (2 P2 review threads)
+
+**Problem.** The personal-MRV estimator fits a per-user set-count threshold from
+observed volume-vs-strength history, then flags it `qualified_for_enforcement`
+once the evidence is strong enough. Two ways the fit was driven by data that
+didn't actually support it:
+
+- **Missing/in-progress data counted as a real zero observation.** When a
+  completed activity had not finished projecting its `exercisePerformance` rows,
+  `setsByWeek` had no entry and the fallback recorded the muscle as having _zero_
+  sets that week. The repository already tracks this state with
+  `completedWorkouts.performanceSyncComplete`, but the query never read it — so
+  partial/legacy syncs supplied enough false zero-volume observations to push a
+  threshold to `qualified_for_enforcement` from data the user never actually
+  trained at zero.
+- **A "recoverable range" threshold was fit from data showing only decline.** The
+  qualifying condition accepted a candidate when the higher-volume segment
+  declined _more_ than the lower-volume one (e.g. medians of `-1` at/below the cap
+  and `-2` above it). That difference is consistent with an unrelated downward
+  trend and never demonstrates a recoverable volume ceiling, yet it could return
+  `qualified_for_enforcement`. The fix requires the at-or-below-cap median strength
+  change to be **nonnegative** before a fitted threshold can enforce.
+
+**Why it matters.** An estimator that turns weak or absent evidence into an
+enforceable threshold silently changes the product's behavior (here, capping a
+user's programmed volume) on data that doesn't justify it — the failure looks
+like a confident measurement. "No row yet" is not "measured zero," and "declines
+less" is not "recovers."
+
+**Preventive checks.**
+
+- **Distinguish _absent_ from _zero_.** Before a fallback records a zero
+  observation, confirm the underlying source is actually complete (read the
+  `performanceSyncComplete`-style flag); withhold the estimate — or exclude the
+  affected window entirely — until every contributing record has finished
+  projecting. A missing entry must never feed a threshold as a real data point.
+- **Require the fit to demonstrate the effect it enforces**, not merely a relative
+  comparison. If the threshold claims a _recoverable_ range, the at-or-below-cap
+  evidence must be non-declining; two declining bands stay advisory. State the
+  positive condition the enforcement gate needs, and reject candidates that only
+  satisfy a weaker relative one.
+- Add coverage for the false-zero qualification path (incomplete-sync weeks must
+  not qualify) and for the two-declining-bands case (must remain advisory).
+
+## 21. Widening a persisted output/record shape must stay backward-compatible with rows written before the new fields existed
+
+**Seen in:** #619 (1 P2 review thread)
+
+**Problem.** Adding calendar scheduling to `approve_week_plan` gave its success
+output two new counters (`schedulingFailed`, `deferred`) on top of the existing
+`success`/`pushed`/`failed`. The chat banner extractor was tightened to require
+_both_ new counters via a `hasCounts` check — but chat threads persist tool
+results, so an `approve_week_plan` result emitted **before** the change has the
+old shape with no new counters. `hasCounts` was `false` for those legacy rows, the
+extractor returned `null`, and `ToolCallIndicator` replaced a previously confirmed
+successful push with "This change could not be confirmed." The fix normalizes only
+_absent/`undefined`_ new fields to legacy zero while still rejecting genuinely
+malformed values (`null`, strings, fractions, negatives).
+
+**Why it matters.** Persisted outputs (chat tool results, stored documents, cached
+payloads) outlive the code that wrote them. A reader that treats a newly added
+field as mandatory retroactively invalidates every record written before the
+field existed — turning a display/telemetry addition into a regression on real
+historical data, and (as here) flipping a confirmed success into an alarming
+"couldn't confirm."
+
+**Preventive checks.**
+
+- When a reader/extractor gains a requirement for a **newly added** field, treat
+  its _absence_ (`undefined`/missing) as the benign legacy default (usually zero /
+  empty), and reserve rejection for values that are actually malformed. Absent ≠
+  invalid for a field that didn't exist when the row was written.
+- Before tightening a validator over a **persisted** shape, ask "what does a record
+  written by the previous version look like, and does this still accept it?" — the
+  same widen→migrate→narrow discipline the schema section of AGENTS.md applies to
+  Convex validators applies to any reader of stored data.
+- Add a regression that feeds the extractor/reader a **stored legacy-shape** record
+  (old counters only) and asserts it still resolves to the correct outcome, not
+  just a freshly emitted current-shape one (ties to §2 — use valid domain values
+  the system can actually have persisted).
+
 ---
 
 ## How to use this log
@@ -878,9 +990,13 @@ does not accept an idempotency key.
   telemetry/metrics (what to count, which samples to exclude), cached/projected
   read fast-paths in front of a live source (freshness, watermark, verification),
   new async/secondary steps attached to a coach turn or sync (inheriting quota /
-  deletion / terminal-outcome / ordering guards), or Convex tsconfig /
-  runtime-boundary changes (Node globals in default-runtime files)**, skim the
-  matching section above.
+  deletion / terminal-outcome / ordering guards), Convex tsconfig /
+  runtime-boundary changes (Node globals in default-runtime files), scheduling
+  claim/lease and delete/relink guards (active-vs-expired consistency,
+  cross-transaction reservation, incoming lifecycle status), statistical/threshold
+  estimators (excluding incomplete data, requiring evidence of the enforced
+  effect), or readers/validators over a widened persisted output shape (backward
+  compatibility with pre-existing rows)**, skim the matching section above.
 - When a review surfaces a _new_ recurring, legitimate gap (not stylistic, not
   one-off), add an entry here with the PR reference so the next agent inherits
   the lesson.

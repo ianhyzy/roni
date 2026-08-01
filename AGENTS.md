@@ -322,17 +322,25 @@ failed/partial samples, cached/projected read fast-paths that skip freshness
 verification or never advance their watermark, new async/secondary steps that
 skip the primary path's quota/deletion/terminal-outcome/ordering guards,
 internal actions reachable
-without their tool schema that skip validating their own input, and Convex
+without their tool schema that skip validating their own input, Convex
 tsconfig/runtime-boundary changes that let Node-only globals leak into
-default-runtime files). Skim the
+default-runtime files, scheduling claim/lease and delete/relink guards that apply
+the lease-expiry rule inconsistently or reserve non-atomically across separate
+query/action transactions, statistical/threshold estimators that let incomplete
+data count as a real zero or enforce a threshold without evidence of the effect it
+claims, and readers/validators over a widened persisted output shape that treat a
+newly added field as mandatory and so invalidate rows written before it existed).
+Skim the
 matching section before touching Tonal fetch helpers, AI cost/budget paths, test
 fixtures, scheduled sweeps, error boundaries around optional integrations,
 credential/format validators, payload filter/transform steps, retry/fallback and
 normalization paths, AI tool-call name/ID resolution, tool-input (Zod) schemas,
 internal actions callable without the tool schema, model-tier routing, keyword
 tool-gating classifiers, AI telemetry/metrics, cached read fast-paths, new
-async/secondary coach-turn or sync steps, or Convex
-tsconfig/runtime-boundary changes -- and
+async/secondary coach-turn or sync steps, Convex
+tsconfig/runtime-boundary changes, scheduling claim/lease and delete/relink
+guards, statistical/threshold estimators, or readers over a widened persisted
+output shape -- and
 append a new entry when review surfaces a fresh recurring gap.
 
 <!-- convex-ai-start -->
