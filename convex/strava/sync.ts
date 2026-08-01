@@ -76,8 +76,7 @@ async function recordFailure(
       userId: identity.userId,
       generation: identity.generation,
       attemptedAt,
-      result: "failure",
-      error: failure.error,
+      result: { status: "failure", error: failure.error },
     });
   } catch {
     console.error("[stravaSync] failed to record sync failure", {
@@ -192,8 +191,7 @@ async function syncActivities(
       userId: identity.userId,
       generation: identity.generation,
       attemptedAt,
-      result: "success",
-      succeededAt: Date.now(),
+      result: { status: "success", succeededAt: Date.now() },
     });
   } catch {
     console.error("[stravaSync] failed to record sync success", {

@@ -861,6 +861,22 @@ does not accept an idempotency key.
   ownership and scheduling state before the first write. An unchanged owned link
   may still accept metadata-only updates.
 
+## 20. Type-safe Convex argument validators can still be undeployable
+
+**Seen in:** #624
+
+**Problem.** A top-level `v.union` gave an internal mutation a correct TypeScript
+success/failure contract and passed behavioral tests, but Convex rejected the
+function metadata during deployment because exported arguments must be an object
+or `v.any()`.
+
+**Preventive checks.**
+
+- Keep exported Convex function arguments in a top-level object; put discriminated
+  unions inside a required object field.
+- When changing a function's argument shape, assert the exported metadata shape
+  and required fields, then run a real Convex dev push before merging.
+
 ---
 
 ## How to use this log

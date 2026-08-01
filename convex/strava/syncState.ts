@@ -3,22 +3,21 @@ import { internal } from "../_generated/api";
 import { internalMutation } from "../_generated/server";
 
 export const recordSyncResult = internalMutation({
-  args: v.union(
-    v.object({
-      userId: v.id("users"),
-      generation: v.string(),
-      attemptedAt: v.number(),
-      result: v.literal("success"),
-      succeededAt: v.number(),
-    }),
-    v.object({
-      userId: v.id("users"),
-      generation: v.string(),
-      attemptedAt: v.number(),
-      result: v.literal("failure"),
-      error: v.string(),
-    }),
-  ),
+  args: {
+    userId: v.id("users"),
+    generation: v.string(),
+    attemptedAt: v.number(),
+    result: v.union(
+      v.object({
+        status: v.literal("success"),
+        succeededAt: v.number(),
+      }),
+      v.object({
+        status: v.literal("failure"),
+        error: v.string(),
+      }),
+    ),
+  },
   returns: v.boolean(),
   handler: async (ctx, args) => {
     const row = await ctx.db
@@ -27,16 +26,16 @@ export const recordSyncResult = internalMutation({
       .unique();
     if (!row || row.status !== "active" || row.generation !== args.generation) return false;
     if ((row.lastSyncAttemptAt ?? 0) > args.attemptedAt) return false;
-    if (args.result === "success") {
+    if (args.result.status === "success") {
       await ctx.db.patch(row._id, {
         lastSyncAttemptAt: args.attemptedAt,
-        lastSyncedAt: args.succeededAt,
+        lastSyncedAt: args.result.succeededAt,
         lastSyncError: undefined,
       });
     } else {
       await ctx.db.patch(row._id, {
         lastSyncAttemptAt: args.attemptedAt,
-        lastSyncError: args.error,
+        lastSyncError: args.result.error,
       });
     }
     return true;

@@ -183,9 +183,10 @@ describe("Strava initial sync", () => {
     expect((upserts[0]?.[1] as { activities: unknown[] }).activities).toHaveLength(100);
     expect((upserts[1]?.[1] as { activities: unknown[] }).activities).toHaveLength(1);
     const syncRecords = mutationCalls(runMutation, "strava/syncState:recordSyncResult");
-    expect(syncRecords[0]?.[1]).toMatchObject({ result: "success", succeededAt: NOW });
+    expect(syncRecords[0]?.[1]).toMatchObject({
+      result: { status: "success", succeededAt: NOW },
+    });
   });
-
   it("rejects a malformed page before persistence and records a safe error", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(NOW);
@@ -290,8 +291,7 @@ describe("Strava initial sync", () => {
     const records = mutationCalls(current.runMutation, "strava/syncState:recordSyncResult");
     expect(records).toHaveLength(1);
     expect(records[0]?.[1]).toMatchObject({
-      result: "failure",
-      error: "Strava activity persistence failed.",
+      result: { status: "failure", error: "Strava activity persistence failed." },
     });
     expect(current.runAfter).toHaveBeenCalledWith(
       30_000,
