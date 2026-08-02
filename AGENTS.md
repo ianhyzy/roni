@@ -324,9 +324,12 @@ skip the primary path's quota/deletion/terminal-outcome/ordering guards,
 internal actions reachable
 without their tool schema that skip validating their own input, Convex
 tsconfig/runtime-boundary changes that let Node-only globals leak into
-default-runtime files, scheduling claim/lease and delete/relink guards that apply
-the lease-expiry rule inconsistently or reserve non-atomically across separate
-query/action transactions, statistical/threshold estimators that let incomplete
+default-runtime files, scheduling claim/lease and delete/relink guards that
+collapse the phase-specific expiry semantics into one predicate (acquisition
+reclaims an expired claim, authorization rejects it, completion accepts an
+expired-but-owned claim) or gate a destructive delete on mere claim presence
+instead of an expired-`checking`-only rule, or reserve non-atomically across
+separate query/action transactions, statistical/threshold estimators that let incomplete
 data count as a real zero or enforce a threshold without evidence of the effect it
 claims, and readers/validators over a widened persisted output shape that treat a
 newly added field as mandatory and so invalidate rows written before it existed).
