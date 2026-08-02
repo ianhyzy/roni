@@ -8,6 +8,7 @@ import { parseStravaWebhookEnvelope } from "./strava/webhook";
 import { verifyStravaWebhookSignature, verifyStravaWebhookToken } from "./strava/webhookSignature";
 import {
   garminWebhookFailureStatus,
+  parseGarminWebhookPath,
   verifyGarminWebhookSignature,
 } from "./garmin/webhookSignature";
 import { resolveAppOrigin, resolveFitbitAppOrigin, resolveStravaAppOrigin } from "./httpOrigin";
@@ -226,74 +227,90 @@ http.route({
  *      open after the payload was already recorded.
  */
 for (const eventType of GARMIN_PUSH_EVENT_TYPES) {
-  http.route({
-    path: `/garmin/webhook/${eventType}`,
-    method: "POST",
-    handler: httpAction(async (ctx, req) => {
-      const rawBody = await req.text();
-      const sigCheck = await verifyGarminWebhookSignature(req, rawBody);
-      if (!sigCheck.valid) {
-        return new Response(sigCheck.reason, {
-          status: garminWebhookFailureStatus(sigCheck.reason),
-        });
+  const handler = httpAction(async (ctx, req) => {
+    const pathname = new URL(req.url).pathname;
+    if (pathname.startsWith(`/garmin/webhook/${eventType}/`)) {
+      const pathMatch = parseGarminWebhookPath(req);
+      if (!pathMatch || pathMatch.eventType !== eventType) {
+        return new Response("Not found", { status: 404 });
       }
+    }
 
-      // Validate JSON up front so we reject malformed bodies before
-      // allocating storage. The parsed object is discarded; downstream
-      // functions re-parse after fetching from storage.
+    const rawBody = await req.text();
+    const sigCheck = await verifyGarminWebhookSignature(req, rawBody);
+    if (!sigCheck.valid) {
+      return new Response(sigCheck.reason, {
+        status: garminWebhookFailureStatus(sigCheck.reason),
+      });
+    }
+
+    // Validate JSON up front so we reject malformed bodies before
+    // allocating storage. The parsed object is discarded; downstream
+    // functions re-parse after fetching from storage.
+    try {
+      JSON.parse(rawBody);
+    } catch {
+      return new Response("Invalid JSON", { status: 400 });
+    }
+
+    // Stash the full body in Convex file storage. Document fields
+    // and function args are both capped at 1 MiB; multi-day dailies
+    // backfill pushes routinely exceed that. Storage accepts up to
+    // 1 GB per file.
+    const rawPayloadStorageId = await ctx.storage.store(
+      new Blob([rawBody], { type: "application/json" }),
+    );
+
+    const eventId = await (async () => {
       try {
-        JSON.parse(rawBody);
-      } catch {
-        return new Response("Invalid JSON", { status: 400 });
-      }
-
-      // Stash the full body in Convex file storage. Document fields
-      // and function args are both capped at 1 MiB; multi-day dailies
-      // backfill pushes routinely exceed that. Storage accepts up to
-      // 1 GB per file.
-      const rawPayloadStorageId = await ctx.storage.store(
-        new Blob([rawBody], { type: "application/json" }),
-      );
-
-      const eventId = await (async () => {
-        try {
-          return await ctx.runMutation(internal.garmin.webhookEvents.recordReceived, {
-            eventType,
-            rawPayloadStorageId,
-          });
-        } catch (err) {
-          console.error("[garmin] failed to record webhook payload", {
-            rawPayloadStorageId,
-            error: err,
-          });
-          // Without a webhookEvents row there is no eventId to dispatch or
-          // reconcile, so fail this request and let Garmin retry the delivery.
-          throw err;
-        }
-      })();
-
-      try {
-        await ctx.scheduler.runAfter(0, internal.garmin.webhookDispatch.dispatchGarminWebhook, {
-          eventId,
+        return await ctx.runMutation(internal.garmin.webhookEvents.recordReceived, {
           eventType,
           rawPayloadStorageId,
         });
       } catch (err) {
-        try {
-          await ctx.runMutation(internal.garmin.webhookEvents.updateStatus, {
-            eventId,
-            status: "error",
-            errorReason:
-              err instanceof Error ? err.message : "Garmin webhook dispatch scheduling failed",
-          });
-        } catch {
-          // The payload is already durably stored; ACK to avoid retry storms
-          // even if marking the log row fails.
-        }
+        console.error("[garmin] failed to record webhook payload", {
+          rawPayloadStorageId,
+          error: err,
+        });
+        // Without a webhookEvents row there is no eventId to dispatch or
+        // reconcile, so fail this request and let Garmin retry the delivery.
+        throw err;
       }
+    })();
 
-      return new Response(null, { status: 200 });
-    }),
+    try {
+      await ctx.scheduler.runAfter(0, internal.garmin.webhookDispatch.dispatchGarminWebhook, {
+        eventId,
+        eventType,
+        rawPayloadStorageId,
+      });
+    } catch (err) {
+      try {
+        await ctx.runMutation(internal.garmin.webhookEvents.updateStatus, {
+          eventId,
+          status: "error",
+          errorReason:
+            err instanceof Error ? err.message : "Garmin webhook dispatch scheduling failed",
+        });
+      } catch {
+        // The payload is already durably stored; ACK to avoid retry storms
+        // even if marking the log row fails.
+      }
+    }
+
+    return new Response(null, { status: 200 });
+  });
+
+  http.route({
+    path: `/garmin/webhook/${eventType}`,
+    method: "POST",
+    handler,
+  });
+
+  http.route({
+    pathPrefix: `/garmin/webhook/${eventType}/`,
+    method: "POST",
+    handler,
   });
 }
 

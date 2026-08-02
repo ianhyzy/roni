@@ -3,13 +3,15 @@
  *
  * Garmin Push webhooks do not arrive with an HMAC header in the partner
  * docs available to us. We therefore require an app-owned shared secret in
- * the registered webhook URL, e.g.
- * `/garmin/webhook/activities?secret=<GARMIN_WEBHOOK_SECRET>`.
+ * the registered webhook URL, e.g. `/garmin/webhook/activities/<secret>`.
+ * Legacy query and replay-header credentials remain supported.
  *
  * For temporary dev-deployment testing before Garmin Portal URLs are
  * updated, GARMIN_ALLOW_UNAUTHENTICATED_WEBHOOKS=true bypasses this check
  * only when GARMIN_WEBHOOK_SECRET is unset.
  */
+
+import { GARMIN_PUSH_EVENT_TYPES, type GarminPushEventType } from "./webhookDispatch";
 
 export type SignatureCheckResult = { valid: true } | { valid: false; reason: string };
 const EMPTY_BODY_REASON = "Empty Garmin webhook body";
@@ -44,6 +46,28 @@ function constantTimeEqual(a: string, b: string): boolean {
   return diff === 0;
 }
 
+export function parseGarminWebhookPath(
+  req: Request,
+): { eventType: GarminPushEventType; secret: string } | null {
+  const pathSegments = new URL(req.url).pathname.split("/");
+  if (
+    pathSegments.length !== 5 ||
+    pathSegments[1] !== "garmin" ||
+    pathSegments[2] !== "webhook" ||
+    pathSegments[4] === ""
+  ) {
+    return null;
+  }
+  const eventType = GARMIN_PUSH_EVENT_TYPES.find((candidate) => candidate === pathSegments[3]);
+  if (!eventType) return null;
+
+  try {
+    return { eventType, secret: decodeURIComponent(pathSegments[4]) };
+  } catch {
+    return null;
+  }
+}
+
 export async function verifyGarminWebhookSignature(
   req: Request,
   rawBody: string,
@@ -60,8 +84,9 @@ export async function verifyGarminWebhookSignature(
   }
 
   const url = new URL(req.url);
+  const pathSecret = parseGarminWebhookPath(req)?.secret ?? null;
   const providedSecret =
-    url.searchParams.get("secret") ?? req.headers.get("x-roni-garmin-webhook-secret");
+    pathSecret ?? url.searchParams.get("secret") ?? req.headers.get("x-roni-garmin-webhook-secret");
   if (!providedSecret || !constantTimeEqual(providedSecret, configuredSecret)) {
     return { valid: false, reason: "Invalid Garmin webhook secret" };
   }
