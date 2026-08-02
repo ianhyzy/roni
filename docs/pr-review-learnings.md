@@ -864,20 +864,29 @@ does not accept an idempotency key.
 **Follow-up (#619).** Preserving scheduled state across the delete/relink guards
 surfaced four further gaps worth pre-empting when you touch these paths:
 
-- **Apply the lease-expiry rule consistently across the acquisition/authorization
-  and read/delete guards — but deliberately _not_ the completion path.**
-  `acquireClaim` (the `busy` check) and `authorizePost` (`leaseExpiresAt <= now` →
-  retryable) already reject an expired lease, yet `getDeleteWorkoutBlocker` blocked
-  _any_ stored `tonalSchedulingClaim` regardless of expiry. A read/delete guard that
-  ignores the shared expiry rule can strand a plan forever when the claim lifecycle
-  fails, so gate those on a single `leaseExpiresAt > now` active-claim check
-  (covering the exact-boundary `==` case). **Exclude `completeClaim` from that
-  helper on purpose:** it checks claim _ownership_ only (`claimId`/`workoutId`/
-  `scheduledDate`) and must persist an externally observed signup receipt even on an
-  expired-but-owned claim — adding an expiry rejection there would discard proof that
-  a POST actually completed. The distinction is acquisition/authorization/read
-  expiry (reject) versus completion/receipt-persistence and ambiguous-phase
-  reconciliation (keep the evidence).
+- **Each claim phase treats an _expired_ lease differently — don't collapse them
+  into one "reject expiry" rule.** The three lifecycle helpers in
+  `convex/tonal/schedulingReceipts.ts` diverge exactly on `leaseExpiresAt`:
+  - `acquireClaim` **reclaims** an expired lease — only an _active_ claim
+    (`leaseExpiresAt > now`) returns `busy`; an expired one is overwritten and the
+    caller gets `acquired`.
+  - `authorizePost` **rejects** an expired lease (`leaseExpiresAt <= now` →
+    retryable error), because the single POST must not fire on a stale
+    authorization.
+  - `completeClaim` **accepts** an expired-but-owned claim (it checks
+    `claimId`/`workoutId`/`scheduledDate` ownership only), so it can persist an
+    externally observed signup receipt — never add an expiry rejection there or you
+    discard proof that a POST actually completed.
+
+  The common primitive is "is a claim _active_?" (`leaseExpiresAt > now`), not "is a
+  claim present?" `getDeleteWorkoutBlocker` originally blocked _any_ stored
+  `tonalSchedulingClaim` regardless of expiry, which can strand a plan forever when
+  the lifecycle fails; gate the read/delete guard on the same active-claim test
+  `acquireClaim` uses (covering the exact-boundary `==` case) so an expired claim is
+  reclaimable rather than a permanent blocker. In short: reason about _active vs.
+  expired_, and remember expiry means **reclaim** at acquisition, **reject** at
+  authorization, and **accept** at completion.
+
 - **An expired _ambiguous_ claim phase must still block.** Only an expired initial
   `checking` claim is known to predate POST authorization; an expired `reconciling`
   or `post_authorized` claim may mean the calendar tile was created but its receipt
