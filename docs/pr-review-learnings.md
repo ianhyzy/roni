@@ -1,6 +1,6 @@
 # PR Review Learnings
 
-Last reviewed: 2026-07-29
+Last reviewed: 2026-07-31
 
 A running log of recurring, legitimate issues raised in pull-request review that
 agents (and humans) should pre-empt. Each entry records the **problem**, **why
@@ -860,6 +860,108 @@ does not accept an idempotency key.
   assignment: protect the outgoing workout, and verify the incoming workout's
   ownership and scheduling state before the first write. An unchanged owned link
   may still accept metadata-only updates.
+- **Lease expiry is not the same as "safe to release" — the claim's lifecycle
+  phase decides (#619).** A follow-up to #616 first relaxed the delete guard to
+  block only claims with `leaseExpiresAt > now`, but an expired claim already in
+  a post-authorization phase (`reconciling` / `post_authorized`) may have created
+  the Tonal calendar tile and died before persisting its receipt. Only an expired
+  _initial_ `checking` claim is known to predate POST authorization and is safe
+  to treat as abandoned; later-phase expired claims must stay blockers (or be
+  reconciled against the live calendar) so `delete_workout` can't erase a workout
+  that already has a tile. When you add lease-expiry to a guard, branch on the
+  phase relative to the external side effect — never let "the lease timed out"
+  alone imply the side effect never happened.
+- **Reserve the target atomically before an external mutation issued from a
+  separate transaction (#619).** A delete preflight query that returns "clean,"
+  then a Tonal DELETE run from a later action, is a TOCTOU window: an approval or
+  week-plan link acquired in between is never observed. Reserve/lock the row in
+  Convex and make the scheduling/link mutations reject a reserved row before the
+  external call, rather than trusting a preflight read to still hold.
+
+## 20. Adding a required field to a persisted-payload shape check retroactively invalidates every row written before the field existed
+
+**Seen in:** #619 (1 P2 review thread)
+
+**Problem.** #619 added `schedulingFailed` and `deferred` counters to the
+`approve_week_plan` tool result and tightened the banner extractor
+(`bannerExtractors.ts`) to require _both_ new counters for its `hasCounts` guard.
+But chat threads persist tool outputs: an `approve_week_plan` result emitted
+_before_ calendar scheduling existed has `success`/`pushed`/`failed` and neither
+new counter. Requiring the new fields made `hasCounts` false for those stored
+rows, so `ToolCallIndicator` re-rendered a previously **confirmed successful
+push** as "This change could not be confirmed." The fix normalized only
+absent/`undefined` new counters to legacy zero while still rejecting genuinely
+malformed values (`null`, strings, fractions, negatives).
+
+**Why it matters.** A validator/extractor that reads _persisted_ payloads has two
+input populations: freshly-written rows (new shape) and historical rows (old
+shape). Tightening the shape check to demand a newly-added field silently
+reclassifies every old row as malformed — the regression surfaces in already-
+completed conversations, far from the PR's diff, and downgrades real successes to
+errors. This is the read-side mirror of §7/§15 (counts and telemetry): here the
+danger is not what you _write_ but what you _re-read_ from history.
+
+**Preventive checks.**
+
+- When adding a field that a stored-payload reader keys on, treat **absent** as
+  the legacy default (usually zero/empty) rather than as invalid — but keep
+  rejecting **present-but-malformed** values (`null`, wrong type, out-of-range).
+  Distinguish "field never existed" from "field is garbage."
+- Enumerate the shapes already sitting in the database for any tool output /
+  message payload before making its reader stricter; a version written last month
+  is still live in old threads.
+- Add a regression that feeds the reader a **pre-migration legacy payload** (new
+  counters absent) and asserts it still renders the historical success, alongside
+  the malformed-value rejection case — not just the new-shape happy path.
+
+## 21. A data-derived enforcement threshold must exclude incomplete/not-yet-synced observations and require the data actually demonstrate the effect it gates on
+
+**Seen in:** #608 (2 P2 review threads)
+
+**Problem.** #608 estimated personal MRV (maximum recoverable volume) set
+thresholds from training history and could mark one
+`qualified_for_enforcement` — i.e. the estimate becomes a hard programming gate,
+not just advice. Two ways the estimate qualified on data that didn't support it:
+
+- **"Not yet projected" was counted as a real zero.** When a completed activity
+  hadn't finished projecting its `exercisePerformance` rows, `setsByWeek` had no
+  entry and the fallback recorded the muscle as **zero sets** for that week. The
+  repo tracks exactly this state with `completedWorkouts.performanceSyncComplete`,
+  but the query never read it — so partial/legacy syncs supplied enough false
+  zero-volume weeks to cross the enforcement threshold. Fix: read the flag and
+  exclude (or withhold estimates for) any week containing an activity whose
+  performance projection is incomplete.
+- **A comparison an unrelated trend also passes was treated as proof.** The
+  qualify condition accepted a candidate when the higher-volume band declined
+  _more_ than the lower band even when **both** bands were losing strength
+  (e.g. medians −1 below the cap, −2 above). That never demonstrates a
+  _recoverable_ volume range — it can just be a general downward trend. Fix:
+  require the at-or-below-threshold median strength change to be nonnegative
+  before qualifying; otherwise stay advisory.
+
+**Why it matters.** An estimate that only informs can tolerate noisy inputs; one
+that **enforces** (blocks or caps programming) cannot. Feeding it observations
+that are merely "not synced yet" as if they were measured zeros, or letting it
+qualify on a statistic that an unrelated decline also satisfies, converts a
+missing-data or coincidental-trend artifact into a hard constraint on the user's
+training. This is the aggregation-layer sibling of §15 (never let a default/
+initial value count as a measurement) and §17 (structurally-complete ≠ fresh),
+applied to a statistical gate rather than telemetry or a cache.
+
+**Preventive checks.**
+
+- Before an aggregation feeds an **enforcement** decision, read the completeness
+  flag the schema already exposes (`performanceSyncComplete`, sync watermarks) and
+  **exclude incomplete/unsynced units** instead of letting a missing entry fall
+  through to a counted zero. A false zero is worse than a dropped sample here.
+- State what the qualifying statistic must _demonstrate_, and reject inputs that
+  satisfy the arithmetic without demonstrating it (two declining bands don't show
+  a recoverable range). Add a guard for the "matching-arithmetic, wrong-meaning"
+  case.
+- Default to **advisory** unless the data clears both bars; make enforcement the
+  narrow, well-evidenced case.
+- Cover the false-zero path (an incomplete-projection week must not qualify) and
+  the both-declining path (must stay advisory) with regression tests.
 
 ## 20. Type-safe Convex argument validators can still be undeployable
 
@@ -894,9 +996,12 @@ or `v.any()`.
   telemetry/metrics (what to count, which samples to exclude), cached/projected
   read fast-paths in front of a live source (freshness, watermark, verification),
   new async/secondary steps attached to a coach turn or sync (inheriting quota /
-  deletion / terminal-outcome / ordering guards), or Convex tsconfig /
-  runtime-boundary changes (Node globals in default-runtime files)**, skim the
-  matching section above.
+  deletion / terminal-outcome / ordering guards), readers/extractors over
+  persisted tool-output or message payloads (legacy shapes written before a new
+  field existed), data-derived enforcement thresholds (excluding
+  incomplete/unsynced observations and requiring the data demonstrate the gated
+  effect), or Convex tsconfig / runtime-boundary changes (Node globals in
+  default-runtime files)**, skim the matching section above.
 - When a review surfaces a _new_ recurring, legitimate gap (not stylistic, not
   one-off), add an entry here with the PR reference so the next agent inherits
   the lesson.

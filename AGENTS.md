@@ -322,14 +322,21 @@ failed/partial samples, cached/projected read fast-paths that skip freshness
 verification or never advance their watermark, new async/secondary steps that
 skip the primary path's quota/deletion/terminal-outcome/ordering guards,
 internal actions reachable
-without their tool schema that skip validating their own input, and Convex
+without their tool schema that skip validating their own input, lease/claim
+guards that treat expiry as safe-to-release regardless of the claim's
+side-effect phase, readers over persisted tool-output/message payloads that
+reject legacy shapes written before a new field existed, data-derived
+enforcement thresholds that count not-yet-synced observations as real zeros or
+qualify on a statistic an unrelated trend also satisfies, and Convex
 tsconfig/runtime-boundary changes that let Node-only globals leak into
 default-runtime files). Skim the
 matching section before touching Tonal fetch helpers, AI cost/budget paths, test
 fixtures, scheduled sweeps, error boundaries around optional integrations,
 credential/format validators, payload filter/transform steps, retry/fallback and
 normalization paths, AI tool-call name/ID resolution, tool-input (Zod) schemas,
-internal actions callable without the tool schema, model-tier routing, keyword
+internal actions callable without the tool schema, scheduling/idempotency lease
+guards, persisted-payload readers, data-derived enforcement thresholds,
+model-tier routing, keyword
 tool-gating classifiers, AI telemetry/metrics, cached read fast-paths, new
 async/secondary coach-turn or sync steps, or Convex
 tsconfig/runtime-boundary changes -- and
