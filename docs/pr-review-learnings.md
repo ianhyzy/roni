@@ -864,12 +864,20 @@ does not accept an idempotency key.
 **Follow-up (#619).** Preserving scheduled state across the delete/relink guards
 surfaced four further gaps worth pre-empting when you touch these paths:
 
-- **Apply the lease-expiry rule uniformly across _every_ guard.** `acquireClaim`,
-  `authorizePost`, and `completeClaim` already treat `leaseExpiresAt <= now` as
-  expired, but `getDeleteWorkoutBlocker` blocked _any_ stored `tonalSchedulingClaim`.
-  A guard that ignores the shared expiry rule can strand a plan forever when the
-  claim lifecycle fails. Use one `leaseExpiresAt > now` active-claim helper in
-  every guard, and cover the exact-boundary (`==`) case.
+- **Apply the lease-expiry rule consistently across the acquisition/authorization
+  and read/delete guards — but deliberately _not_ the completion path.**
+  `acquireClaim` (the `busy` check) and `authorizePost` (`leaseExpiresAt <= now` →
+  retryable) already reject an expired lease, yet `getDeleteWorkoutBlocker` blocked
+  _any_ stored `tonalSchedulingClaim` regardless of expiry. A read/delete guard that
+  ignores the shared expiry rule can strand a plan forever when the claim lifecycle
+  fails, so gate those on a single `leaseExpiresAt > now` active-claim check
+  (covering the exact-boundary `==` case). **Exclude `completeClaim` from that
+  helper on purpose:** it checks claim _ownership_ only (`claimId`/`workoutId`/
+  `scheduledDate`) and must persist an externally observed signup receipt even on an
+  expired-but-owned claim — adding an expiry rejection there would discard proof that
+  a POST actually completed. The distinction is acquisition/authorization/read
+  expiry (reject) versus completion/receipt-persistence and ambiguous-phase
+  reconciliation (keep the evidence).
 - **An expired _ambiguous_ claim phase must still block.** Only an expired initial
   `checking` claim is known to predate POST authorization; an expired `reconciling`
   or `post_authorized` claim may mean the calendar tile was created but its receipt
