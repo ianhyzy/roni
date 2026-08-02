@@ -878,22 +878,25 @@ surfaced four further gaps worth pre-empting when you touch these paths:
     externally observed signup receipt — never add an expiry rejection there or you
     discard proof that a POST actually completed.
 
-  The common primitive is "is a claim _active_?" (`leaseExpiresAt > now`), not "is a
-  claim present?" `getDeleteWorkoutBlocker` originally blocked _any_ stored
-  `tonalSchedulingClaim` regardless of expiry, which can strand a plan forever when
-  the lifecycle fails; gate the read/delete guard on the same active-claim test
-  `acquireClaim` uses (covering the exact-boundary `==` case) so an expired claim is
-  reclaimable rather than a permanent blocker. In short: reason about _active vs.
-  expired_, and remember expiry means **reclaim** at acquisition, **reject** at
-  authorization, and **accept** at completion.
+  The shared primitive is "is a claim _active_?" (`leaseExpiresAt > now`), not "is a
+  claim present?" — but expiry is necessary, not sufficient, for the _destructive_
+  delete guard, which must additionally be **phase-aware** (see the next bullet). The
+  lesson: reason about _active vs. expired_ with the reclaim/reject/accept split
+  above, and never let a guard block on mere claim _presence_.
 
-- **An expired _ambiguous_ claim phase must still block.** Only an expired initial
-  `checking` claim is known to predate POST authorization; an expired `reconciling`
-  or `post_authorized` claim may mean the calendar tile was created but its receipt
-  was never persisted. Treating those later phases as "safe to delete" lets
-  `delete_workout` remove a workout Tonal actually scheduled. Keep ambiguous
-  post-authorization phases as blockers (or reconcile them against the live
-  calendar first), even after the lease expires.
+- **A destructive delete guard must be phase-aware, not expiry-only.** This is the
+  one place the plain active-claim predicate is insufficient. `getDeleteWorkoutPlanState`
+  originally blocked on _any_ stored `tonalSchedulingClaim` regardless of expiry
+  (stranding a plan forever when the lifecycle fails), but gating it on
+  `leaseExpiresAt > now` _alone_ overcorrects: only an expired initial `checking`
+  claim is known to predate POST authorization and is safe to reclaim/delete. An
+  expired `reconciling` or `post_authorized` claim may mean the calendar tile was
+  created but its receipt was never persisted, so treating it as "safe to delete"
+  lets `delete_workout` remove a workout Tonal actually scheduled. Reclaim/delete
+  only on an expired `checking` claim; keep ambiguous post-authorization phases as
+  blockers (or reconcile them against the live calendar first), even after the lease
+  expires. (Acquisition can reclaim any expired claim because it transitions to
+  `reconciling` and reconciles; deletion is irreversible and cannot.)
 - **Reserve atomically — a clean preflight in one transaction is stale by the next.**
   The delete preflight (query) and the external `DELETE` (action) run in separate
   transactions, so a scheduling claim or day-link acquired in between is never
