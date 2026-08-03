@@ -72,7 +72,7 @@
     "@convex-dev/workflow": "^0.4.4",
     "@convex-dev/workpool": "^0.4.8",
     "@opentelemetry/api": "^1.9.1",
-    "@opentelemetry/sdk-trace-node": "^2.8.0",
+    "@opentelemetry/sdk-trace-node": "^2.10.0",
     "@sentry/nextjs": "^10.68.0",
     "@vercel/analytics": "^2.0.1",
     "@vercel/speed-insights": "^2.0.0",
