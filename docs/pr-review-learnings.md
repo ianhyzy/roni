@@ -1021,11 +1021,18 @@ far from the assumption that caused it.
 
 **Preventive checks.**
 
-- **Authenticate a webhook using a mechanism the provider actually supplies.**
-  Confirm from the provider's webhook docs which headers/fields real deliveries
-  carry (Strava sends none of its own signature header; verification relies on
-  the `hub.verify_token` challenge). Don't require a credential the callback
-  won't contain.
+- **Authenticate a webhook using a mechanism the provider actually supplies —
+  and don't conflate one-time callback verification with per-event
+  authentication.** Confirm from the provider's webhook docs which headers/fields
+  real deliveries carry. Strava's `hub.verify_token`/`hub.challenge` exchange
+  authenticates only the **one-time GET subscription handshake**; the subsequent
+  event POSTs carry no signature and are **unauthenticated notifications**. Treat
+  each event body as an untrusted hint: re-validate its subscription/owner/object
+  IDs against the active connection and confirm the change against the provider's
+  authoritative API before applying any effect — especially a destructive delete,
+  where a forged POST with plausible IDs would otherwise remove real data. Don't
+  require a credential the callback won't contain, and don't let the GET challenge
+  stand in for POST authentication.
 - **Use the provider's documented parameter/field names verbatim** for OAuth
   token, revoke, and filter requests (`access_token`, documented filter keys),
   and add a test asserting the exact wire name — an assumed name yields a
@@ -1146,7 +1153,14 @@ guards, not just the CRUD.**
 
 - **Page every account-scoped read that can grow unbounded** (export collectors,
   list queries) in fixed batches; never `collect()` a per-user history — mirror
-  the batch size the sibling exporters in the same domain already use.
+  the batch size the sibling exporters in the same domain already use. But paging
+  the _reads_ only resets the per-transaction document-read limit: if a
+  `collectPages`-style helper concatenates every page into one array that a single
+  action returns, a long-lived account still exceeds Convex's return-value/array
+  cap (8,192 elements — `convex/_generated/ai/guidelines.md`) and loses the entire
+  export. Bound the _output_ too — stream to file storage, chunk into multiple
+  responses, or set an explicit supported limit; fixed-size DB pages that are then
+  re-accumulated into one value are not the lifecycle guard.
 - **Give every list UI a pagination / load-more / search path** so no stored
   record becomes unreachable past a fixed window.
 - **Scope every reader to the active generation/connection** the way the
@@ -1154,9 +1168,17 @@ guards, not just the CRUD.**
   runs async or can fail must not leave stale-generation rows visible to any
   reader.
 - **Deduplicate an activity that can arrive from two ingestion sources**
-  (direct-connection vs Tonal history) before inserting — reconcile on a
-  provider-stable key across generations, not on the current-generation prefixed
-  ID.
+  (direct-connection vs Tonal history) — reconcile on a provider-stable key
+  across generations, not on the current-generation prefixed ID. But don't
+  collapse the two copies into one _stored_ row: the direct-Strava row is keyed by
+  `stravaConnectionGeneration` and purged/deleted per-generation on disconnect,
+  while the Tonal-derived row is deliberately generationless so Tonal keeps
+  supplying it. Merging them destroys one lifecycle — add the generation and a
+  direct disconnect deletes an activity Tonal still owns; leave it generationless
+  and a direct webhook delete can no longer target the row while direct-only
+  fields linger past disconnect. Prefer **read-time** deduplication, or store
+  explicit multi-source provenance / per-field ownership, so each source keeps its
+  own deletion lifecycle.
 - **Give every new user-facing route a persistent nav/dashboard entry**, not only
   a conditional bell/badge that disappears when its count is zero.
 - **Surface a stored `lastSyncError` in the public status contract and the
@@ -1202,6 +1224,57 @@ was never a real "this-week" observation is counted as one.
   is chosen instead, asserting a future entry is not labeled current in the coach
   snapshot.
 
+## 27. A guard written for one boundary can be silently defeated at the next — verify it holds across the sibling phase, the output limit, and the second lifecycle
+
+**Seen in:** #626 (3 review threads, all P2 — raised against the preventive
+checks in this very log)
+
+**Problem.** Three preventive checks added to this log were each correct at the
+boundary they were written for, yet subtly wrong one step past it:
+
+- **A guard scoped to the wrong phase.** "Authenticate the webhook with a
+  mechanism the provider supplies" (§23) was framed around Strava's
+  `hub.verify_token` challenge — but that challenge authenticates only the
+  one-time GET subscription handshake. Event POSTs are unauthenticated, so the
+  check as written would bless forged delete notifications that never carry the
+  challenge.
+- **A guard that bounds the input but not the output.** "Page every unbounded
+  read" (§25) resets the per-transaction _read_ limit, but a `collectPages` helper
+  that concatenates every page into one action return value still blows Convex's
+  array/return cap on a long-lived account — the export the paging was meant to
+  save still fails.
+- **A guard that fixes one lifecycle and breaks the other.** "Dedup an activity
+  arriving from two sources" (§25) is right, but reconciling the two copies into a
+  single stored row collapses two _different_ deletion lifecycles (per-generation
+  direct purge vs. generationless Tonal supply), trading a double-count for a
+  wrong-delete or a stale-row leak.
+
+**Why it matters.** A preventive check reads as authoritative — the next agent
+applies it verbatim. If it's scoped to the acquisition phase but not the delete
+phase, to the read but not the return, or to one source's cleanup but not the
+other's, the agent ships a fix that is _internally_ consistent and still wrong for
+the case just outside its frame. This is the same second-boundary blindness as §7
+(a filter desyncs the count it feeds), §18/§25 (a secondary step skips the primary
+path's guards), and §19 (one predicate can't serve three claim phases) — now
+observed in the log's own guidance.
+
+**Preventive checks.**
+
+- When a guard names a specific credential/challenge/handshake, state **which
+  phase** it authenticates (one-time setup vs. every event) and require the other
+  phase to be validated on its own terms — never let a setup-time proof stand in
+  for per-event trust.
+- When a guard bounds a _read_, confirm the **output** it feeds is bounded too: a
+  paged read whose pages are concatenated into one response still hits the
+  return-value/array cap. Bound both, or stream/chunk/limit the result.
+- When a guard **merges** records from two sources, check that both sources'
+  **deletion/update lifecycles** survive the merge; if they diverge (different
+  generation scoping, different purge owners), keep the rows separate and dedup at
+  read time or record explicit per-field provenance.
+- Treat every entry in this log the way you treat the code it describes: before
+  relying on a preventive check, test it against the sibling phase, the size
+  limit, and the second lifecycle it doesn't mention.
+
 ---
 
 ## How to use this log
@@ -1231,7 +1304,9 @@ was never a real "this-week" observation is counted as one.
   user-data domain (inheriting bounded pagination, active-generation scoping,
   cross-source dedup, reachable navigation, and surfaced sync errors), or
   user-entered "completed" dates/timestamps (bounding future values so they
-  aren't read back as current)**, skim the matching section above.
+  aren't read back as current), or a preventive check in this log itself
+  (verifying it holds across the sibling phase, the output-size limit, and the
+  second lifecycle it doesn't name)**, skim the matching section above.
 - When a review surfaces a _new_ recurring, legitimate gap (not stylistic, not
   one-off), add an entry here with the PR reference so the next agent inherits
   the lesson.
