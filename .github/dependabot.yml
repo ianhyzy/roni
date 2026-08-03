@@ -16,6 +16,17 @@ updates:
         dependency-type: production
         update-types:
           - patch
+    ignore:
+      # AI SDK 7/Phoenix client 7 require a coordinated migration with Convex Agent.
+      - dependency-name: ai
+        update-types:
+          - version-update:semver-major
+      - dependency-name: "@ai-sdk/*"
+        update-types:
+          - version-update:semver-major
+      - dependency-name: "@arizeai/phoenix-client"
+        update-types:
+          - version-update:semver-major
     reviewers:
       - JeffOtano
 
