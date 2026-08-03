@@ -2,6 +2,33 @@
 
 All notable changes to this project are documented here. This file is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commits on `main`. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.13.0](https://github.com/JeffOtano/roni/compare/v0.12.0...v0.13.0) (2026-08-03)
+
+
+### Features
+
+* add unified recovery and Strava activity tracking ([#623](https://github.com/JeffOtano/roni/issues/623)) ([87a0582](https://github.com/JeffOtano/roni/commit/87a05822397939a6030f07b94d6460e5eb778cc7))
+* estimate personal MRV set thresholds ([#608](https://github.com/JeffOtano/roni/issues/608)) ([cc14ece](https://github.com/JeffOtano/roni/commit/cc14eceaff69522f5068df75c2411135809bea4b))
+* refresh landing page ([#615](https://github.com/JeffOtano/roni/issues/615)) ([0d674d6](https://github.com/JeffOtano/roni/commit/0d674d6399f6dd3b893d44690c6ecca6fae39469))
+* schedule approved workouts on Tonal calendar ([#616](https://github.com/JeffOtano/roni/issues/616)) ([4e062e0](https://github.com/JeffOtano/roni/commit/4e062e0826bd6cdafcc7fa02f41ca06ece08d740))
+
+
+### Bug Fixes
+
+* make Strava sync args deployable ([#624](https://github.com/JeffOtano/roni/issues/624)) ([a52bf3f](https://github.com/JeffOtano/roni/commit/a52bf3f05598bf6ef46efde4476375f44e7d4da5))
+* preserve Gemini BYOK errors ([6595a34](https://github.com/JeffOtano/roni/commit/6595a3439cc7503468d17b9183ee6447745ba583))
+* preserve scheduled workout state ([#619](https://github.com/JeffOtano/roni/issues/619)) ([1326e2c](https://github.com/JeffOtano/roni/commit/1326e2c81e6943d1ec1bdc622cdc4e65f7a9ce03))
+* restore workout approval chat flow ([#609](https://github.com/JeffOtano/roni/issues/609)) ([13bf9e1](https://github.com/JeffOtano/roni/commit/13bf9e12be0fc999585d9be0d42577ff27d9a089))
+* resume workout approvals without search ([#612](https://github.com/JeffOtano/roni/issues/612)) ([b090da1](https://github.com/JeffOtano/roni/commit/b090da1daca11924b9d6db55427aa8ea40542bdb))
+* secure Garmin webhook paths ([#625](https://github.com/JeffOtano/roni/issues/625)) ([8f738cb](https://github.com/JeffOtano/roni/commit/8f738cb56e142a113def40a1a34c7edd7be2e01b))
+* use documented Fitbit filter names ([#611](https://github.com/JeffOtano/roni/issues/611)) ([33280d0](https://github.com/JeffOtano/roni/commit/33280d043d935f963c9a2a388cf738e821c12727))
+
+
+### Documentation
+
+* capture PR review learnings from [#619](https://github.com/JeffOtano/roni/issues/619) and [#608](https://github.com/JeffOtano/roni/issues/608) ([#621](https://github.com/JeffOtano/roni/issues/621)) ([38676b5](https://github.com/JeffOtano/roni/commit/38676b548171de53b900a586f4260c97fe7c00ac))
+* capture PR review learnings from [#623](https://github.com/JeffOtano/roni/issues/623) and [#625](https://github.com/JeffOtano/roni/issues/625) ([639cfe8](https://github.com/JeffOtano/roni/commit/639cfe89148d4b4bd22c8f7e7f30c496ced1b55b))
+
 ## [0.12.0](https://github.com/JeffOtano/roni/compare/v0.11.5...v0.12.0) (2026-07-29)
 
 
