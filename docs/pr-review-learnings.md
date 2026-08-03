@@ -1,6 +1,6 @@
 # PR Review Learnings
 
-Last reviewed: 2026-07-31
+Last reviewed: 2026-08-02
 
 A running log of recurring, legitimate issues raised in pull-request review that
 agents (and humans) should pre-empt. Each entry records the **problem**, **why
@@ -589,8 +589,8 @@ the wrong direction.
 
 ## 15. Per-turn telemetry must record what actually happened — never let default/initial values, pre-trim intent, or context-expansion artifacts count as measurements
 
-**Seen in:** #595 (2 P2 threads), #598 (2 P2 threads), and the broader intent of
-#591 ("repair AI telemetry integrity")
+**Seen in:** #595 (2 P2 threads), #598 (2 P2 threads), and the broader intent
+of #591 ("repair AI telemetry integrity")
 
 **Problem.** New AI metrics were biased because the recorded value diverged from
 the thing being measured:
@@ -963,7 +963,7 @@ applied to a statistical gate rather than telemetry or a cache.
 - Cover the false-zero path (an incomplete-projection week must not qualify) and
   the both-declining path (must stay advisory) with regression tests.
 
-## 20. Type-safe Convex argument validators can still be undeployable
+## 22. Type-safe Convex argument validators can still be undeployable
 
 **Seen in:** #624
 
@@ -978,6 +978,229 @@ or `v.any()`.
   unions inside a required object field.
 - When changing a function's argument shape, assert the exported metadata shape
   and required fields, then run a real Convex dev push before merging.
+
+## 23. Integrate a third-party webhook/OAuth provider against its actual documented protocol, not an assumed one — a wrong contract silently rejects every real delivery
+
+**Seen in:** #623 (3 review threads: 2 P1 + 1 P2), #625 (1 P1); corroborated
+by #611 ("use documented Fitbit filter names").
+
+**Problem.** New Strava/Garmin integration code was written against an _assumed_
+provider contract, so the happy-path unit tests passed while every real
+provider interaction failed:
+
+- **Requiring an auth header the provider doesn't send (#623, P1).** The Strava
+  event webhook rejected any POST lacking an `X-Strava-Signature` HMAC header —
+  but Strava's Event API callbacks don't include that header at all, so _every_
+  real create/update/delete/deauthorization event hit the null-header branch and
+  got 403. Activities never updated after the initial sync and revocations were
+  never processed.
+- **Sending the wrong parameter name (#623, P1).** The Strava deauthorization
+  request posted the token as `token`, but Strava's endpoint expects
+  `access_token`. Every disconnect/account-deletion reported "revocation failed"
+  while the authorization stayed live. (Same failure family as #611: a filter
+  request that used undocumented names returned nothing.)
+- **Credential stripped by the transport the provider uses (#625, P1).** The
+  Garmin webhook was hardened to read a path-segment secret, but
+  `.env.example` still told operators to register
+  `/garmin/webhook/activities?secret=<secret>` — a query string the Garmin
+  Portal strips before delivery, so registered deliveries reach the legacy route
+  with no credential and get 401. The route changed; the canonical setup example
+  (and its bypass wording) did not.
+- **A bootstrap step blocked by a not-yet-existing config value (#623, P2).**
+  `getStravaWebhookConfig()` required `STRAVA_WEBHOOK_SUBSCRIPTION_ID` for _all_
+  paths, but Strava verifies the GET callback _before_ returning the subscription
+  ID it creates. A fresh deployment following the setup steps couldn't complete
+  verification (503) unless an operator invented a placeholder ID.
+
+**Why it matters.** These bugs are invisible to code review and to
+happy-path tests that construct a "correct" request — the request is
+internally consistent but doesn't match what the provider actually sends,
+names, strips, or sequences. The feature ships "done," yet the integration is
+non-functional for every real user, and the failure surfaces as opaque 4xx/5xx
+far from the assumption that caused it.
+
+**Preventive checks.**
+
+- **Authenticate a webhook using a mechanism the provider actually supplies.**
+  Confirm from the provider's webhook docs which headers/fields real deliveries
+  carry (Strava sends none of its own signature header; verification relies on
+  the `hub.verify_token` challenge). Don't require a credential the callback
+  won't contain.
+- **Use the provider's documented parameter/field names verbatim** for OAuth
+  token, revoke, and filter requests (`access_token`, documented filter keys),
+  and add a test asserting the exact wire name — an assumed name yields a
+  rejected request, not a typecheck error.
+- **Match the credential channel to how the provider transmits it.** If a portal
+  strips query strings, put the secret in the path (or a header); then update
+  **every** canonical setup artifact — `.env.example`, README, bypass wording —
+  in the same PR so new deployments register the working URL (ties to §6:
+  documentation/validator drift defeats the fix at a different boundary).
+- **Load only the config a given path needs, when it needs it.** Split
+  verification-time requirements (verify token) from event-time requirements
+  (subscription ID) so the first-time setup/verify handshake isn't gated on a
+  value the provider only returns _after_ verification.
+- Cover the real protocol shape: an unsigned/header-less webhook POST is
+  accepted, the GET verification challenge succeeds before a subscription ID
+  exists, and the revoke request carries the documented parameter name.
+
+## 24. A projection or replacement formatter between storage and a consumer must carry through every field the consumer relies on
+
+**Seen in:** #623 (3 review threads, all P2)
+
+**Problem.** #623 added storage for rich Strava/Garmin metrics but lost them at a
+projection or formatting step that sits between the persisted row and the
+consumer:
+
+- **A replacement formatter dropped preserved signals.** Garmin observations
+  still carried `avgSpo2`, `avgRespirationRate`, and `skinTempDeviationCelsius`
+  all the way through `readRecoveryInputs` → `deriveRecoveryState`, but the new
+  `recoverySnapshot.ts` formatter — which _replaced_ the previous Garmin
+  formatter — returned without serializing any of them, so users with those
+  measurements silently lost all three from the coach context even though the
+  data was fresh and retained.
+- **A persistence projection dropped provider fields.** The Strava
+  `average_heartrate`/`max_heartrate` fields were parsed away before persistence,
+  so the dashboard never showed Strava heart rate and the coach's external-load
+  logic could never classify a Strava session as vigorous — the primary
+  mechanism by which external activity factors into recovery/volume decisions.
+- **An export projection omitted newly-stored fields.** Strava imports persisted
+  `elevationGainMeters` and derived `avgPaceSecondsPerKm`, but `collectUserData`
+  projected external activities without either field, so JSON/CSV exports
+  silently omitted part of every affected record even though it remained stored
+  and used elsewhere.
+
+**Why it matters.** Storing a field is only half the contract; a projection,
+formatter, or export step chosen for a _different_ purpose quietly narrows the
+field set, and the loss is invisible because the data is still in the database.
+It bites hardest when a new formatter _replaces_ an old one (the omission reads
+as intentional) or when the consumer is a downstream classifier (missing HR ⇒
+never "vigorous") rather than a visible screen. This is the projection-layer
+sibling of §7 (filters desync counts) and §15 (telemetry mis-measures).
+
+**Preventive checks.**
+
+- When you **replace** a formatter/serializer, diff the field set it emits
+  against the one it supersedes and the fields the source now carries; a
+  replacement must be a superset for every metric still flowing into it, not just
+  the ones the PR foregrounds.
+- For any projection between persistence and a consumer (snapshot, export,
+  dashboard read), list the consumers and the fields each needs; confirm each
+  newly-persisted field is either projected through or deliberately excluded with
+  a reason — don't let a projection written for one caller silently starve
+  another.
+- When a field feeds a downstream _decision_ (heart rate → vigorous
+  classification), test that the decision changes when the field is present, not
+  just that the field round-trips.
+- Add coverage asserting each new metric appears in the coach snapshot and in the
+  export contract, using an input that actually sets it.
+
+## 25. A new user-data domain must inherit the platform's data-lifecycle guards — bounded reads/exports, active-generation scoping in every reader, cross-source dedup, reachable navigation, and surfaced sync errors
+
+**Seen in:** #623 (6 review threads: all P2)
+
+**Problem.** #623 introduced whole new data domains (direct Strava activities,
+daily recovery check-ins, lifting sessions) that reused the platform's building
+blocks but skipped guards the established Tonal/Fitbit domains already enforce:
+
+- **Unbounded `collect()` on export.** `recoveryExport.ts` collected every daily
+  recovery record in one query; an account with enough rows to exceed a Convex
+  transaction's document-read limit fails the _entire_ account export — while the
+  lifting and nutrition exporters added in the same PR already page in batches of 500.
+- **A list UI with no pagination.** `LiftingSessionList` permanently requested the
+  newest 50 sessions with no load-more/search/direct-ID path, so the 51st session
+  made the oldest record unreachable — un-viewable, un-correctable, un-deletable —
+  though it stayed stored and exported.
+- **Readers that don't scope to the active generation.** `dashboard.getExternalActivities`
+  read every Strava row by user and `coachState.readRecentExternalActivities`
+  filtered only Fitbit generations, so old-generation Strava rows left behind by a
+  pending/failed disconnect purge stayed visible to the dashboard and coach — data
+  the disconnect flow claimed was removed. Direct Fitbit reads already scope to the
+  active generation.
+- **The same activity double-counted across two ingestion sources.** When a
+  Tonal-connected user also connects Strava directly, Tonal history sync can
+  already persist the activity with canonical source `strava`; the direct path
+  only looked up rows for the current direct-connection generation (and its
+  prefixed ID prevented matching the raw provider ID), so both rows appeared —
+  double-counting the workout and its training load.
+- **A feature reachable only through a transient entry point.** The `/check-ins`
+  recovery form was linked _only_ by `CheckInBell`, which returns `null` at zero
+  unread — and the route was absent from `AppShell` nav and the dashboard. New
+  users couldn't open the daily recovery form and existing users lost access once
+  they read their messages, unless they knew the URL.
+- **A background sync failure not surfaced.** Failed initial Strava syncs stored a
+  user-facing `lastSyncError` on the connection, but the public status contract
+  omitted it, so the settings card showed only "Connected" with no last-sync time
+  or warning even when every import retry failed — unlike the Fitbit flow, which
+  surfaces the stored error.
+
+**Why it matters.** Each of these is a guard the _existing_ domains already got
+right; a new domain that reuses the mechanics inherits none of them unless you
+re-check each. The gaps don't fail loudly — they surface as an export that dies
+only on long-lived accounts, a record that vanishes at row 51, "removed" data
+that lingers, a workout counted twice, a shipped feature nobody can reach, and a
+silent import failure. This is §18 (a secondary step must inherit the primary
+path's guards) applied at the granularity of a whole data domain: **copy the
+guards, not just the CRUD.**
+
+**Preventive checks.**
+
+- **Page every account-scoped read that can grow unbounded** (export collectors,
+  list queries) in fixed batches; never `collect()` a per-user history — mirror
+  the batch size the sibling exporters in the same domain already use.
+- **Give every list UI a pagination / load-more / search path** so no stored
+  record becomes unreachable past a fixed window.
+- **Scope every reader to the active generation/connection** the way the
+  established provider (Fitbit) already does; a disconnect/reconnect purge that
+  runs async or can fail must not leave stale-generation rows visible to any
+  reader.
+- **Deduplicate an activity that can arrive from two ingestion sources**
+  (direct-connection vs Tonal history) before inserting — reconcile on a
+  provider-stable key across generations, not on the current-generation prefixed
+  ID.
+- **Give every new user-facing route a persistent nav/dashboard entry**, not only
+  a conditional bell/badge that disappears when its count is zero.
+- **Surface a stored `lastSyncError` in the public status contract and the
+  connection card**, matching the sibling provider — a background sync that can
+  fail silently must have a visible failure state.
+
+## 26. Bound user-entered "completed" dates/timestamps to now — an unbounded future entry sorts ahead of real history and is read back as "this week"
+
+**Seen in:** #623 (2 review threads, both P2)
+
+**Problem.** Two "log what you already did" inputs — the nutrition daily-log date
+picker and the lifting-session timestamp — had no maximum, and their validators
+(`nutritionContract.ts`, `liftingSessionContract.ts`) accepted any valid future
+value. Because recent history is ordered by the entered date (`performedAt` /
+log date) and the recency calculation treats a negative day-difference as
+_less than seven_, a future entry:
+
+- sorts **ahead of** genuine recent history, and
+- is injected into coach context labeled `THIS WEEK` by `formatLiftingSnapshot` /
+  the nutrition recency path,
+
+so a planned or mistyped future entry is presented to the AI coach as **completed
+fatigue / consumed nutrition** the user never actually logged.
+
+**Why it matters.** A field described in the UI as "totals you already tracked"
+implicitly means "at or before today," but nothing enforced it. The recency
+math's sign bug turns any future date into the _most recent_ observation, so a
+single fat-fingered year or an intentionally pre-planned entry silently corrupts
+the coach's picture of current load — the exact input the feature exists to
+report accurately. This is the input-boundary sibling of §15/§21: a value that
+was never a real "this-week" observation is counted as one.
+
+**Preventive checks.**
+
+- **Reject completed-activity dates/timestamps after the current instant**, with
+  an appropriate timezone tolerance, at the validator boundary — and cap the date
+  picker's `max` in the UI so the two agree.
+- When ordering or recency logic keys on a user-entered timestamp, confirm the
+  **negative/out-of-range case** (future date) is excluded rather than treated as
+  "very recent"; a `daysDiff < 7` test that ignores the sign admits future rows
+  into `THIS WEEK`.
+- Add coverage feeding a future date to the validator (rejected) and, if a clamp
+  is chosen instead, asserting a future entry is not labeled current in the coach
+  snapshot.
 
 ---
 
@@ -1000,8 +1223,15 @@ or `v.any()`.
   persisted tool-output or message payloads (legacy shapes written before a new
   field existed), data-derived enforcement thresholds (excluding
   incomplete/unsynced observations and requiring the data demonstrate the gated
-  effect), or Convex tsconfig / runtime-boundary changes (Node globals in
-  default-runtime files)**, skim the matching section above.
+  effect), Convex tsconfig / runtime-boundary changes (Node globals in
+  default-runtime files), third-party webhook/OAuth integrations (auth header,
+  parameter names, credential channel, bootstrap ordering against the provider's
+  real protocol), projection/formatter steps between storage and a consumer
+  (fields dropped when replacing a formatter or projecting for export), a new
+  user-data domain (inheriting bounded pagination, active-generation scoping,
+  cross-source dedup, reachable navigation, and surfaced sync errors), or
+  user-entered "completed" dates/timestamps (bounding future values so they
+  aren't read back as current)**, skim the matching section above.
 - When a review surfaces a _new_ recurring, legitimate gap (not stylistic, not
   one-off), add an entry here with the PR reference so the next agent inherits
   the lesson.

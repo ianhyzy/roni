@@ -327,9 +327,16 @@ guards that treat expiry as safe-to-release regardless of the claim's
 side-effect phase, readers over persisted tool-output/message payloads that
 reject legacy shapes written before a new field existed, data-derived
 enforcement thresholds that count not-yet-synced observations as real zeros or
-qualify on a statistic an unrelated trend also satisfies, and Convex
+qualify on a statistic an unrelated trend also satisfies, Convex
 tsconfig/runtime-boundary changes that let Node-only globals leak into
-default-runtime files). Skim the
+default-runtime files, third-party webhook/OAuth integrations built against an
+assumed contract instead of the provider's real protocol (auth header,
+parameter names, credential channel, bootstrap ordering), projection/formatter
+steps that drop fields a consumer needs when replacing a formatter or projecting
+for export, new user-data domains that skip the platform's data-lifecycle guards
+(bounded pagination, active-generation scoping, cross-source dedup, reachable
+navigation, surfaced sync errors), and user-entered "completed" dates/timestamps
+left unbounded so future values are read back as current). Skim the
 matching section before touching Tonal fetch helpers, AI cost/budget paths, test
 fixtures, scheduled sweeps, error boundaries around optional integrations,
 credential/format validators, payload filter/transform steps, retry/fallback and
@@ -338,8 +345,10 @@ internal actions callable without the tool schema, scheduling/idempotency lease
 guards, persisted-payload readers, data-derived enforcement thresholds,
 model-tier routing, keyword
 tool-gating classifiers, AI telemetry/metrics, cached read fast-paths, new
-async/secondary coach-turn or sync steps, or Convex
-tsconfig/runtime-boundary changes -- and
+async/secondary coach-turn or sync steps, Convex
+tsconfig/runtime-boundary changes, third-party webhook/OAuth integration code,
+projection/formatter steps between storage and a consumer, a new user-data
+domain, or user-entered "completed" date/timestamp inputs -- and
 append a new entry when review surfaces a fresh recurring gap.
 
 <!-- convex-ai-start -->
