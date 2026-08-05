@@ -4,17 +4,21 @@ import type { Agent, MessageDoc } from "@convex-dev/agent";
 import type { ModelMessage } from "@ai-sdk/provider-utils";
 import { saveMessage } from "@convex-dev/agent";
 import { stepCountIs } from "ai";
-import type { PrepareStepFunction, StepResult, TelemetrySettings, ToolSet } from "ai";
+import type { PrepareStepFunction, StepResult, ToolSet } from "ai";
 import { components, internal } from "../_generated/api";
 import type { ActionCtx } from "../_generated/server";
 import type { Id } from "../_generated/dataModel";
 import { budgetCapStopCondition, type BudgetCapTrip } from "./budgetCap";
+import {
+  type AiBudgetPolicy,
+  DEFAULT_PROVIDER_BUDGET_LIMITS_USD,
+} from "../../lib/aiBudgetPreferences";
 import { COACH_MAX_STEPS } from "./coach";
 import { type ProviderId } from "./providers";
 import { type AttemptOutcome, runWithPrimaryCircuitBreaker } from "./resilienceCircuitBreaker";
 import { type AccumulatorInit, RunAccumulator } from "./runTelemetry";
 import { classifyByokError, consumeCapturedError, resetCapturedError } from "./byokErrors";
-import { runInRunSpan } from "./otel";
+import { buildCoachTelemetryConfig, runInRunSpan } from "./otel";
 import { isQuotaError, isTransientError } from "./transientErrors";
 import {
   type AgentTurnRef,
@@ -46,6 +50,7 @@ interface StreamWithRetryArgs {
   prompt?: string | Array<ModelMessage>;
   promptMessageId: string;
   isByok: boolean;
+  budgetPolicy?: AiBudgetPolicy;
   provider: ProviderId;
   source: "chat" | "approval_continuation";
   environment: "dev" | "prod";
@@ -126,6 +131,7 @@ export async function streamWithRetry(
         promptVersion,
         hasImages,
         isByok,
+        budgetPolicy: args.budgetPolicy,
       };
 
       const accInit: AccumulatorInit = {
@@ -228,6 +234,7 @@ interface TelemetryArgs {
   promptVersion?: string;
   hasImages?: boolean;
   isByok: boolean;
+  budgetPolicy?: AiBudgetPolicy;
 }
 
 interface AttemptStreamOptions {
@@ -266,21 +273,34 @@ async function attemptStream({
       : error;
   try {
     const { thread } = await agent.continueThread(ctx, { threadId, userId });
-    const stopWhen = telemetry.isByok
-      ? [
-          stepCountIs(COACH_MAX_STEPS),
-          budgetCapStopCondition(telemetry.provider, (trip) => {
-            budgetTrip = trip;
-          }),
-        ]
-      : stepCountIs(COACH_MAX_STEPS);
+    const budgetPolicy =
+      telemetry.budgetPolicy ??
+      (telemetry.isByok
+        ? {
+            kind: "limit" as const,
+            maxInteractionUsd: DEFAULT_PROVIDER_BUDGET_LIMITS_USD[telemetry.provider],
+          }
+        : { kind: "disabled" as const });
+    const stopWhen =
+      budgetPolicy.kind === "limit"
+        ? [
+            stepCountIs(COACH_MAX_STEPS),
+            budgetCapStopCondition({
+              provider: telemetry.provider,
+              maxInteractionUsd: budgetPolicy.maxInteractionUsd,
+              onTrip: (trip) => {
+                budgetTrip = trip;
+              },
+            }),
+          ]
+        : stepCountIs(COACH_MAX_STEPS);
     const streamPromise = thread.streamText(
       {
         ...promptArgs,
         abortSignal: controller.signal,
         stopWhen,
         prepareStep,
-        experimental_telemetry: buildTelemetryConfig(telemetry),
+        experimental_telemetry: buildCoachTelemetryConfig(telemetry),
         experimental_context: { runId: telemetry.runId },
         // @ai-sdk/google restores missing thought signatures on replay; minimal thinking keeps Gemini 3 coach turns responsive.
         providerOptions:
@@ -370,30 +390,4 @@ function getAttemptFinalizeCode(error: unknown, isByok: boolean): string {
     isTransientError(error) &&
     (!isByok || classifyByokError(error) === null);
   return isRetryable ? RETRYING_MESSAGE_ERROR : getFinalizeCodeForError(error);
-}
-
-// Raw inputs/outputs go to Phoenix Cloud for conversation capture. BYOK keys
-// and Tonal tokens are sanitized upstream in byokErrors/chatHelpers so AI SDK
-// messages never carry secrets by the time they reach this layer.
-function buildTelemetryConfig(telemetry: TelemetryArgs): TelemetrySettings {
-  const metadata: Record<string, string | boolean> = {
-    runId: telemetry.runId,
-    threadId: telemetry.threadId,
-    userId: telemetry.userId,
-    provider: telemetry.provider,
-    source: telemetry.source,
-    environment: telemetry.environment,
-    isByok: telemetry.isByok,
-  };
-  if (telemetry.release) metadata.release = telemetry.release;
-  if (telemetry.promptVersion) metadata.promptVersion = telemetry.promptVersion;
-  if (typeof telemetry.hasImages === "boolean") metadata.hasImages = telemetry.hasImages;
-
-  return {
-    isEnabled: true,
-    functionId: "coach-agent",
-    recordInputs: true,
-    recordOutputs: true,
-    metadata,
-  };
 }

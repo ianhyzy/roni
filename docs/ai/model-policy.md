@@ -1,6 +1,6 @@
 # AI Model Policy
 
-Last reviewed: 2026-07-28
+Last reviewed: 2026-08-05
 
 This policy defines the default production model tiers used by the coach. The source of truth in code is `convex/ai/providers.ts`; this document explains the intent, default model IDs, and standard pricing assumptions.
 
@@ -77,6 +77,8 @@ Prices are standard USD per 1M tokens. Cached input is the provider's cache-read
 Legacy entries remain configured because explicit OpenRouter overrides can still report those model families and the cost guardrail needs an exact known price when they do.
 
 Budget-cap estimation uses the reported model ID from each AI SDK step. If a step omits model metadata or reports an unknown model, the estimator falls back to the most expensive configured tier for that provider.
+
+Personal API keys default to a $0.10 cumulative cost limit for each provider attempt. A retry or fallback starts a new attempt and therefore a new guard. Users can set a different limit for the selected provider in Settings, or enable **Ignore budget** to omit the cost stop condition entirely. The configured limits remain stored while the toggle is enabled, but do not apply until budget enforcement is restored. Shared hosted AI does not use this personal-key guard.
 
 ## prepareStep
 

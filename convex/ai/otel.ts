@@ -15,6 +15,7 @@ import {
 } from "@opentelemetry/api";
 import type { NodeTracerProvider } from "@opentelemetry/sdk-trace-node";
 import { register } from "@arizeai/phoenix-otel";
+import type { TelemetrySettings } from "ai";
 
 // Temporary: surface OTLP exporter failures (auth, network) to convex logs.
 // Remove once Phoenix tracing is verified end-to-end.
@@ -74,6 +75,12 @@ export interface RunSpanMetadata {
   promptVersion?: string;
   hasImages?: boolean;
   isByok?: boolean;
+}
+
+interface CoachTelemetryMetadata extends RunSpanMetadata {
+  runId: string;
+  provider: string;
+  isByok: boolean;
 }
 
 export interface RunSpanHandle {
@@ -143,6 +150,30 @@ export async function runInRunSpan<T>(
   } finally {
     await handle.end();
   }
+}
+
+// Raw inputs/outputs go to Phoenix Cloud for conversation capture. BYOK keys
+// and Tonal tokens are sanitized upstream before AI SDK messages reach here.
+export function buildCoachTelemetryConfig(meta: CoachTelemetryMetadata): TelemetrySettings {
+  const metadata: Record<string, string | boolean> = {
+    runId: meta.runId,
+    threadId: meta.threadId,
+    userId: meta.userId,
+    provider: meta.provider,
+    source: meta.source,
+    environment: meta.environment,
+    isByok: meta.isByok,
+  };
+  if (meta.release) metadata.release = meta.release;
+  if (meta.promptVersion) metadata.promptVersion = meta.promptVersion;
+  if (typeof meta.hasImages === "boolean") metadata.hasImages = meta.hasImages;
+  return {
+    isEnabled: true,
+    functionId: "coach-agent",
+    recordInputs: true,
+    recordOutputs: true,
+    metadata,
+  };
 }
 
 function buildSpanAttributes(meta: RunSpanMetadata): Record<string, string | boolean> {

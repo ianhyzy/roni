@@ -1,9 +1,17 @@
-import { action, internalQuery } from "./_generated/server";
+import { v } from "convex/values";
+import { action, internalQuery, mutation } from "./_generated/server";
+import type { Doc } from "./_generated/dataModel";
+import type { MutationCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { getEffectiveUserId } from "./lib/auth";
 import { rateLimiter } from "./rateLimits";
 import { decrypt } from "./tonal/encryption";
 import { isValidProvider, type ProviderId } from "./ai/providers";
+import {
+  isValidProviderBudgetLimitUsd,
+  MIN_PROVIDER_BUDGET_LIMIT_USD,
+  resolveAiBudgetPreferences,
+} from "../lib/aiBudgetPreferences";
 import type { ProviderKeyInfo, ProviderSettings } from "./byok";
 
 type RawKeyEntry = { encrypted?: string; addedAt?: number };
@@ -25,6 +33,10 @@ export const _getAllProviderKeysRaw = internalQuery({
     return {
       selectedProvider: sp,
       modelOverride: p.modelOverride ?? null,
+      budgetPreferences: resolveAiBudgetPreferences({
+        ignoreBudget: p.ignoreAiProviderBudget,
+        providerLimitOverridesUsd: p.aiProviderBudgetLimitsUsd,
+      }),
       keys: {
         gemini: { encrypted: p.geminiApiKeyEncrypted, addedAt: p.geminiApiKeyAddedAt },
         claude: { encrypted: p.claudeApiKeyEncrypted, addedAt: p.claudeApiKeyAddedAt },
@@ -63,7 +75,55 @@ export const getProviderSettings = action({
     return {
       selectedProvider: raw.selectedProvider as ProviderId,
       modelOverride: raw.modelOverride,
+      budgetPreferences: raw.budgetPreferences,
       keys,
     };
   },
 });
+
+export const setIgnoreBudget = mutation({
+  args: { ignoreBudget: v.boolean() },
+  handler: async (ctx, { ignoreBudget }) => {
+    const profile = await getAuthenticatedProfile(ctx);
+    await ctx.db.patch(profile._id, { ignoreAiProviderBudget: ignoreBudget });
+    return resolveAiBudgetPreferences({
+      ignoreBudget,
+      providerLimitOverridesUsd: profile.aiProviderBudgetLimitsUsd,
+    });
+  },
+});
+
+export const setSelectedProviderBudgetLimit = mutation({
+  args: { budgetLimitUsd: v.number() },
+  handler: async (ctx, { budgetLimitUsd }) => {
+    const profile = await getAuthenticatedProfile(ctx);
+    if (!isValidProviderBudgetLimitUsd(budgetLimitUsd)) {
+      throw new Error(`Budget limit must be at least $${MIN_PROVIDER_BUDGET_LIMIT_USD.toFixed(2)}`);
+    }
+
+    const provider: ProviderId =
+      profile.selectedProvider && isValidProvider(profile.selectedProvider)
+        ? profile.selectedProvider
+        : "gemini";
+    const providerLimitOverridesUsd = {
+      ...profile.aiProviderBudgetLimitsUsd,
+      [provider]: budgetLimitUsd,
+    };
+    await ctx.db.patch(profile._id, { aiProviderBudgetLimitsUsd: providerLimitOverridesUsd });
+    return resolveAiBudgetPreferences({
+      ignoreBudget: profile.ignoreAiProviderBudget,
+      providerLimitOverridesUsd,
+    });
+  },
+});
+
+async function getAuthenticatedProfile(ctx: MutationCtx): Promise<Doc<"userProfiles">> {
+  const userId = await getEffectiveUserId(ctx);
+  if (!userId) throw new Error("Not authenticated");
+  const profile = await ctx.db
+    .query("userProfiles")
+    .withIndex("by_userId", (q) => q.eq("userId", userId))
+    .unique();
+  if (!profile) throw new Error("User profile not found");
+  return profile;
+}
