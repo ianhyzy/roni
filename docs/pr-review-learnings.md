@@ -1021,11 +1021,22 @@ far from the assumption that caused it.
 
 **Preventive checks.**
 
-- **Authenticate a webhook using a mechanism the provider actually supplies.**
+- **Authenticate a webhook using a mechanism the provider actually supplies —
+  and don't confuse subscription verification with event authentication.**
   Confirm from the provider's webhook docs which headers/fields real deliveries
-  carry (Strava sends none of its own signature header; verification relies on
-  the `hub.verify_token` challenge). Don't require a credential the callback
-  won't contain.
+  carry (Strava sends none of its own signature header). The `hub.verify_token`
+  challenge authenticates only the one-time GET subscription handshake; it is
+  _not_ replayed on the subsequent event POSTs, so it does not authenticate
+  deliveries. Don't require a credential the callback won't contain — but don't
+  read "no signature to verify" as "the event is trusted" either (next bullet).
+- **Treat provider event POSTs as unauthenticated notifications, not
+  authenticated commands.** A delivery that carries no signature (Strava) is an
+  untrusted claim: validate that its subscription/owner/object IDs match stored
+  values, and before applying any destructive effect (a delete notification
+  especially), confirm the change against the authoritative provider API rather
+  than acting on the POST body alone. A future fix that drops the "nonexistent
+  signature" check and treats the GET challenge as event auth would let forged
+  events with plausible IDs reach processing — including destructive deletes.
 - **Use the provider's documented parameter/field names verbatim** for OAuth
   token, revoke, and filter requests (`access_token`, documented filter keys),
   and add a test asserting the exact wire name — an assumed name yields a
@@ -1040,8 +1051,10 @@ far from the assumption that caused it.
   (subscription ID) so the first-time setup/verify handshake isn't gated on a
   value the provider only returns _after_ verification.
 - Cover the real protocol shape: an unsigned/header-less webhook POST is
-  accepted, the GET verification challenge succeeds before a subscription ID
-  exists, and the revoke request carries the documented parameter name.
+  accepted _but still validated_ against the stored subscription/owner IDs (and a
+  destructive event is confirmed against the API before it is applied), the GET
+  verification challenge succeeds before a subscription ID exists, and the revoke
+  request carries the documented parameter name.
 
 ## 24. A projection or replacement formatter between storage and a consumer must carry through every field the consumer relies on
 
@@ -1146,7 +1159,14 @@ guards, not just the CRUD.**
 
 - **Page every account-scoped read that can grow unbounded** (export collectors,
   list queries) in fixed batches; never `collect()` a per-user history — mirror
-  the batch size the sibling exporters in the same domain already use.
+  the batch size the sibling exporters in the same domain already use. Paging the
+  _reads_ only resets per-transaction document-read limits; it does not bound the
+  _returned value_. An exporter that still concatenates every page into one array
+  and returns it from a single action hits Convex's 8,192-element array cap
+  (`convex/_generated/ai/guidelines.md`), so a long-lived account loses its whole
+  export anyway. A full-account export must be chunked, streamed, or
+  storage-backed (write pages to file storage and return a handle), or declare an
+  explicit supported bound — not merely DB-paged.
 - **Give every list UI a pagination / load-more / search path** so no stored
   record becomes unreachable past a fixed window.
 - **Scope every reader to the active generation/connection** the way the
@@ -1154,9 +1174,16 @@ guards, not just the CRUD.**
   runs async or can fail must not leave stale-generation rows visible to any
   reader.
 - **Deduplicate an activity that can arrive from two ingestion sources**
-  (direct-connection vs Tonal history) before inserting — reconcile on a
-  provider-stable key across generations, not on the current-generation prefixed
-  ID.
+  (direct-connection vs Tonal history) — reconcile on a provider-stable key
+  across generations, not on the current-generation prefixed ID. But don't
+  collapse the two copies into one shared row by that key alone: the sources
+  carry different deletion lifecycles (a direct row is purged by
+  `stravaConnectionGeneration` on disconnect; the Tonal-derived row deliberately
+  has none so it survives a direct disconnect). A merged row either inherits the
+  generation — and a direct disconnect deletes activity Tonal still supplies — or
+  omits it and keeps direct-only fields the direct webhook can no longer delete.
+  Prefer read-time dedup, or an explicit multi-source provenance / field-ownership
+  model, over an insert-time merge keyed only on the provider ID.
 - **Give every new user-facing route a persistent nav/dashboard entry**, not only
   a conditional bell/badge that disappears when its count is zero.
 - **Surface a stored `lastSyncError` in the public status contract and the
