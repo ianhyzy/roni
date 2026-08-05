@@ -1,12 +1,14 @@
 import { spawnSync } from "node:child_process";
+import { parseEnv } from "node:util";
 
-const CONVEX_ENV_LIST_LINE = /^([A-Z_][A-Z0-9_]*)=(.*)$/;
+const CONVEX_ENV_NAME = /^[A-Z_][A-Z0-9_]*$/;
+const INVALID_CONVEX_ENV_OUTPUT =
+  "npx convex env list returned an unexpected format; setup cannot safely inspect the deployment.";
 
 /**
  * Run `npx convex env list` and return a map of variable name -> value.
- * Asserts that every non-blank line matches the documented `KEY=value` shape
- * so a CLI output-format change fails loud instead of silently returning a
- * partial view.
+ * Parse the CLI's documented dotenv output as a whole so quoted multiline
+ * values round-trip without exposing their continuation lines in errors.
  */
 export function listConvexEnv(): Map<string, string> {
   const result = spawnSync("npx", ["convex", "env", "list"], {
@@ -20,38 +22,44 @@ export function listConvexEnv(): Map<string, string> {
     );
   }
 
-  const env = new Map<string, string>();
-  for (const line of result.stdout.split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    const match = trimmed.match(CONVEX_ENV_LIST_LINE);
-    if (!match) {
-      throw new Error(
-        `npx convex env list returned unexpected line format; ` +
-          `setup cannot safely inspect the deployment. Line: ${JSON.stringify(trimmed)}`,
-      );
+  let entries: Array<[string, string]>;
+  try {
+    entries = [];
+    for (const [key, value] of Object.entries(parseEnv(result.stdout))) {
+      if (value === undefined) throw new Error(INVALID_CONVEX_ENV_OUTPUT);
+      entries.push([key, value]);
     }
-    env.set(match[1], match[2]);
+  } catch {
+    throw new Error(INVALID_CONVEX_ENV_OUTPUT);
   }
-  return env;
+  const hasUnexpectedOutput =
+    (result.stdout.trim().length > 0 && entries.length === 0) ||
+    entries.some(([key]) => !CONVEX_ENV_NAME.test(key));
+  if (hasUnexpectedOutput) {
+    throw new Error(INVALID_CONVEX_ENV_OUTPUT);
+  }
+  return new Map(entries);
 }
 
 /**
  * Set a single Convex environment variable.
+ * Values go through stdin so option-like PEM content is not parsed as CLI flags
+ * and secrets are not exposed in process arguments.
  * Throws on failure. Deliberately does NOT include stderr in the error
  * message because Convex CLI may echo the submitted value back on
  * validation errors, which would leak the secret into logs.
  */
 export function setConvexEnv(key: string, value: string): void {
-  const result = spawnSync("npx", ["convex", "env", "set", key, value], {
+  const result = spawnSync("npx", ["convex", "env", "set", key], {
     encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
+    input: value,
+    stdio: ["pipe", "pipe", "pipe"],
   });
 
   if (result.status !== 0) {
     throw new Error(
       `npx convex env set ${key} failed (exit ${result.status}). ` +
-        `Re-run with 'npx convex env set ${key} <value>' to see the CLI error directly.`,
+        `Run 'npx convex env set ${key}' interactively to diagnose without putting the value in shell history.`,
     );
   }
 }
