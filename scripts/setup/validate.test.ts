@@ -9,6 +9,7 @@ const VALID_JWKS = JSON.stringify({ keys: [{ kty: "RSA", n: "x", e: "AQAB" }] })
 const VALID_PEM = "-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----";
 const VALID_HEX = "a".repeat(64);
 const VALID_GOOGLE = "AIza" + "X".repeat(35);
+const VALID_AQ_DOT_GOOGLE = "AQ." + "X".repeat(36);
 
 function validConvexEnv(): Map<string, string> {
   return convex({
@@ -35,6 +36,16 @@ describe("validate", () => {
     expect(result.missingEnvFile).toEqual([]);
   });
 
+  it("accepts a current AQ-dot-prefixed Google key", () => {
+    const env = validConvexEnv();
+    env.set("GOOGLE_GENERATIVE_AI_API_KEY", VALID_AQ_DOT_GOOGLE);
+
+    const result = validate(env, validEnvFile);
+
+    expect(result.ok).toBe(true);
+    expect(result.invalidConvex).not.toContain("GOOGLE_GENERATIVE_AI_API_KEY");
+  });
+
   it("flags a missing Convex secret", () => {
     const env = validConvexEnv();
     env.delete("JWT_PRIVATE_KEY");
@@ -45,7 +56,7 @@ describe("validate", () => {
     expect(result.missingConvex).toContain("JWT_PRIVATE_KEY");
   });
 
-  it("flags a Google key that does not match the AIza prefix", () => {
+  it("flags a key that does not match a supported Google format", () => {
     const env = validConvexEnv();
     env.set("GOOGLE_GENERATIVE_AI_API_KEY", "sk-wrong-provider-key");
 
