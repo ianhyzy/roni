@@ -1,3 +1,4 @@
+import { GEMINI_API_KEY_PATTERN } from "../../lib/geminiApiKey";
 import type { EnvMap } from "./envFile";
 
 export const REQUIRED_CONVEX_SECRETS = [
@@ -25,7 +26,7 @@ function isInvalidFormat(key: string, value: string): boolean {
   if (!value.trim()) return true;
   switch (key) {
     case "GOOGLE_GENERATIVE_AI_API_KEY":
-      return !/^AIza[A-Za-z0-9_-]{20,}$/.test(value);
+      return !GEMINI_API_KEY_PATTERN.test(value);
     case "TOKEN_ENCRYPTION_KEY":
     case "EMAIL_CHANGE_CODE_PEPPER":
       return !/^[0-9a-f]{64}$/.test(value);

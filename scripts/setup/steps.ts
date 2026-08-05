@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { GEMINI_API_KEY_PATTERN } from "../../lib/geminiApiKey";
 import { listConvexEnv, runConvexDevOnce, setConvexEnv } from "./convex";
 import { mergeEnv, parseEnvFile, readEnvFile, writeEnvFile } from "./envFile";
 import { generateJwtKeypair, randomHex } from "./keygen";
@@ -97,8 +98,10 @@ export async function stepSetGoogleKey(
   console.log(`  Get an API key from https://aistudio.google.com/app/apikey`);
   const key = await promptRequiredSecret(prompter, `  Enter GOOGLE_GENERATIVE_AI_API_KEY: `);
   if (!key) throw new Error("GOOGLE_GENERATIVE_AI_API_KEY is required");
-  if (!/^AIza[A-Za-z0-9_-]{20,}$/.test(key)) {
-    throw new Error("GOOGLE_GENERATIVE_AI_API_KEY does not match the expected 'AIza...' format");
+  if (!GEMINI_API_KEY_PATTERN.test(key)) {
+    throw new Error(
+      "GOOGLE_GENERATIVE_AI_API_KEY does not match the expected 'AQ...' or 'AIza...' format",
+    );
   }
   setConvexEnv("GOOGLE_GENERATIVE_AI_API_KEY", key);
   console.log(`  [OK] Set in Convex`);
