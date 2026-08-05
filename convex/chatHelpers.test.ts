@@ -10,6 +10,7 @@ import {
   shouldNotifyScheduledFailure,
 } from "./chatHelpers";
 import { BYOK_REQUIRED_AFTER } from "./byok";
+import { encrypt } from "./tonal/encryption";
 
 vi.mock("@convex-dev/agent", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@convex-dev/agent")>()),
@@ -141,13 +142,48 @@ describe("provider credential quota", () => {
       });
       expect(runMutation).not.toHaveBeenCalled();
 
-      await resolveUserProviderConfig(ctx, "user-1");
+      await expect(resolveUserProviderConfig(ctx, "user-1")).resolves.toMatchObject({
+        budgetPolicy: { kind: "disabled" },
+      });
       expect(runMutation).toHaveBeenCalledTimes(1);
     } finally {
       if (originalHouseKey === undefined) delete process.env.GOOGLE_GENERATIVE_AI_API_KEY;
       else process.env.GOOGLE_GENERATIVE_AI_API_KEY = originalHouseKey;
       if (originalKillSwitch === undefined) delete process.env.BYOK_DISABLED;
       else process.env.BYOK_DISABLED = originalKillSwitch;
+    }
+  });
+
+  it("resolves the selected personal-key limit unless budget enforcement is ignored", async () => {
+    const originalEncryptionKey = process.env.TOKEN_ENCRYPTION_KEY;
+    const encryptionKey = "44".repeat(32);
+    process.env.TOKEN_ENCRYPTION_KEY = encryptionKey;
+    try {
+      const profile = {
+        selectedProvider: "gemini",
+        geminiApiKeyEncrypted: await encrypt("AIzaTestPersonalKey", encryptionKey),
+        aiProviderBudgetLimitsUsd: { gemini: 0.6 },
+        ignoreAiProviderBudget: false,
+      };
+      const ctx = {
+        runQuery: vi.fn(async () => ({
+          profile,
+          userCreationTime: BYOK_REQUIRED_AFTER + 1,
+        })),
+        runMutation: vi.fn(),
+      } as unknown as ActionCtx;
+
+      await expect(resolveUserProviderConfig(ctx, "user-1")).resolves.toMatchObject({
+        budgetPolicy: { kind: "limit", maxInteractionUsd: 0.6 },
+      });
+
+      profile.ignoreAiProviderBudget = true;
+      await expect(resolveUserProviderConfig(ctx, "user-1")).resolves.toMatchObject({
+        budgetPolicy: { kind: "disabled" },
+      });
+    } finally {
+      if (originalEncryptionKey === undefined) delete process.env.TOKEN_ENCRYPTION_KEY;
+      else process.env.TOKEN_ENCRYPTION_KEY = originalEncryptionKey;
     }
   });
 });

@@ -185,7 +185,6 @@ export const processMessage = internalAction({
   ) => {
     const processingStartedAt = Date.now();
     const userTimezone = sanitizeTimezone(rawTz);
-
     // Pre-save the user message once so retries use promptMessageId
     // instead of re-saving, re-embedding, and duplicating the message.
     const { messageId } = await saveMessage(ctx, components.agent, {
@@ -260,6 +259,7 @@ export const processMessage = internalAction({
           promptMessageId: messageId,
           prompt: typeof resolvedPrompt === "string" ? undefined : resolvedPrompt,
           isByok: !providerConfig.isHouseKey,
+          budgetPolicy: providerConfig.budgetPolicy,
           provider: providerConfig.provider,
           source: "chat",
           environment: ENVIRONMENT,
@@ -322,7 +322,6 @@ export const continueAfterApproval = internalAction({
   handler: async (ctx, { threadId, messageId, userId, userTimezone: rawTz, toolMode = "all" }) => {
     const userTimezone = sanitizeTimezone(rawTz);
     await assertThreadOwnership(ctx, threadId, userId);
-
     let provider: ProviderId | undefined;
     let accumulator: RunAccumulator | undefined;
     const contextTiming: CoachContextTiming = {};
@@ -362,6 +361,7 @@ export const continueAfterApproval = internalAction({
           userId,
           promptMessageId: messageId,
           isByok: !providerConfig.isHouseKey,
+          budgetPolicy: providerConfig.budgetPolicy,
           provider: providerConfig.provider,
           source: "approval_continuation",
           environment: ENVIRONMENT,

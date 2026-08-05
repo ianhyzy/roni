@@ -5,13 +5,7 @@ import {
   type ModelPricing,
   type ProviderId,
 } from "./providers";
-
-const PROVIDER_BUDGET_CAPS: Record<ProviderId, number> = {
-  gemini: 0.1,
-  claude: 0.1,
-  openai: 0.1,
-  openrouter: 0.1,
-};
+import { DEFAULT_PROVIDER_BUDGET_LIMITS_USD } from "../../lib/aiBudgetPreferences";
 
 export interface BudgetCapTrip {
   estimatedCostUsd: number;
@@ -63,11 +57,16 @@ function getPricingForStep(provider: ProviderId, step: StepModelInput): ModelPri
   return getModelPricing(provider, modelId) ?? getConservativeModelPricing(provider);
 }
 
-export function budgetCapStopCondition(
-  provider: ProviderId,
-  onTrip?: (trip: BudgetCapTrip) => void,
-): StopCondition<ToolSet> {
-  const maxInteractionUsd = PROVIDER_BUDGET_CAPS[provider];
+export function budgetCapStopCondition(args: {
+  provider: ProviderId;
+  maxInteractionUsd?: number;
+  onTrip?: (trip: BudgetCapTrip) => void;
+}): StopCondition<ToolSet> {
+  const {
+    provider,
+    maxInteractionUsd = DEFAULT_PROVIDER_BUDGET_LIMITS_USD[args.provider],
+    onTrip,
+  } = args;
   let tripped = false;
 
   return ({ steps }) => {

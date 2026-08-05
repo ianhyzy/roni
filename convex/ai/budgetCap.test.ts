@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { budgetCapStopCondition, estimateInteractionCostUsd } from "./budgetCap";
 
 describe("budgetCapStopCondition", () => {
@@ -80,8 +80,11 @@ describe("budgetCapStopCondition", () => {
           stepCount: number;
         }
       | undefined;
-    const stopWhen = budgetCapStopCondition("openai", (value) => {
-      trip = value;
+    const stopWhen = budgetCapStopCondition({
+      provider: "openai",
+      onTrip: (value) => {
+        trip = value;
+      },
     });
 
     const firstStop = stopWhen({
@@ -124,5 +127,51 @@ describe("budgetCapStopCondition", () => {
       stepCount: 2,
     });
     expect(trip?.estimatedCostUsd).toBeCloseTo(0.1125, 6);
+  });
+
+  it("uses the configured provider budget limit", () => {
+    const onTrip = vi.fn();
+    const stopWhen = budgetCapStopCondition({
+      provider: "openai",
+      maxInteractionUsd: 0.05,
+      onTrip,
+    });
+
+    const shouldStop = stopWhen({
+      steps: [
+        {
+          usage: { inputTokens: 10_000, outputTokens: 2_000 },
+          model: { provider: "openai", modelId: "gpt-5.4" },
+        } as unknown as Parameters<typeof stopWhen>[0]["steps"][number],
+      ],
+    });
+
+    expect(shouldStop).toBe(true);
+    expect(onTrip).toHaveBeenCalledOnce();
+  });
+
+  it("allows cost above the default when the configured limit is higher", () => {
+    const onTrip = vi.fn();
+    const stopWhen = budgetCapStopCondition({
+      provider: "openai",
+      maxInteractionUsd: 0.2,
+      onTrip,
+    });
+
+    const shouldStop = stopWhen({
+      steps: [
+        {
+          usage: { inputTokens: 10_000, outputTokens: 2_000 },
+          model: { provider: "openai", modelId: "gpt-5.4" },
+        },
+        {
+          usage: { inputTokens: 5_000, outputTokens: 3_000 },
+          model: { provider: "openai", modelId: "gpt-5.4" },
+        },
+      ] as Parameters<typeof stopWhen>[0]["steps"],
+    });
+
+    expect(shouldStop).toBe(false);
+    expect(onTrip).not.toHaveBeenCalled();
   });
 });
