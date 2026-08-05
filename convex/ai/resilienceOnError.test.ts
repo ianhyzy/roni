@@ -15,6 +15,7 @@ vi.mock("@convex-dev/agent", async (importOriginal) => ({
 }));
 
 vi.mock("./otel", () => ({
+  buildCoachTelemetryConfig: () => ({ isEnabled: false }),
   runInRunSpan: async (
     _metadata: unknown,
     fn: (span: { runId: string; recordError: (error: string) => void }) => Promise<unknown>,

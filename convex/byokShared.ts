@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
 import { getProviderConfig, type ProviderId } from "./ai/providers";
+import type { AiBudgetPreferences } from "../lib/aiBudgetPreferences";
 
 export const providerIdValidator = v.union(
   v.literal("gemini"),
@@ -23,6 +24,7 @@ export type ProviderSettings = {
   selectedProvider: ProviderId;
   modelOverride: string | null;
   keys: Record<ProviderId, ProviderKeyInfo>;
+  budgetPreferences: AiBudgetPreferences;
 };
 
 export const KEY_FIELD_MAP: Record<ProviderId, keyof Doc<"userProfiles">> = {

@@ -1202,6 +1202,39 @@ was never a real "this-week" observation is counted as one.
   is chosen instead, asserting a future entry is not labeled current in the coach
   snapshot.
 
+## 27. Secret-shaped test fixtures fail history-wide scans even when they contain no credential
+
+**Seen in:** fork PR #1 (Gitleaks)
+
+**Problem.** A setup regression test used a synthetic multiline value with a
+literal private-key PEM boundary. The body was clearly fake, but Gitleaks
+correctly matched the credential signature and failed the PR. Because the
+workflow scans every commit in the PR range, adding a later commit that deletes
+the fixture does not clear the finding: the flagged addition remains in branch
+history until the offending commit is amended or rebased away.
+
+**Why it matters.** Secret scanning must stay strict enough to catch credentials
+in tests and examples, where accidental leaks are common. Broadly allowlisting a
+test file or credential rule to silence a synthetic fixture weakens that guard
+for real secrets. A false positive discovered only after push also creates noisy
+alerts and requires history rewriting to remove cleanly.
+
+**Preventive checks.**
+
+- Test the relevant behavior with a low-entropy, non-credential-shaped value.
+  For CLI option parsing, a multiline string beginning with hyphens proves the
+  behavior without reproducing a real PEM boundary.
+- When an exact credential shape is essential to the test, construct the marker
+  from harmless fragments at runtime so the committed source never contains a
+  complete scanner signature.
+- Do not exempt an entire test file or credential rule just to make a synthetic
+  fixture pass. Keep any unavoidable allowlist entry exact and explain why it
+  cannot mask a real credential.
+- Run the repository's configured secret scanner before pushing credential or
+  fixture changes. If a history-wide scan catches a newly pushed fixture, amend
+  or rebase the offending unmerged commit and use `--force-with-lease`; a normal
+  follow-up commit cannot remove the finding from the scanned history.
+
 ---
 
 ## How to use this log
@@ -1231,7 +1264,9 @@ was never a real "this-week" observation is counted as one.
   user-data domain (inheriting bounded pagination, active-generation scoping,
   cross-source dedup, reachable navigation, and surfaced sync errors), or
   user-entered "completed" dates/timestamps (bounding future values so they
-  aren't read back as current)**, skim the matching section above.
+  aren't read back as current), or secret-shaped test fixtures (avoiding
+  history-wide scanner false positives without weakening detection)**, skim the
+  matching section above.
 - When a review surfaces a _new_ recurring, legitimate gap (not stylistic, not
   one-off), add an entry here with the PR reference so the next agent inherits
   the lesson.

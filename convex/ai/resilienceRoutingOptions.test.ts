@@ -1,6 +1,7 @@
 import type { Agent } from "@convex-dev/agent";
 import type { PrepareStepFunction, ToolSet } from "ai";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { internal } from "../_generated/api";
 import type { ActionCtx } from "../_generated/server";
 import type { ProviderId } from "./providers";
 import { streamWithRetry } from "./resilience";
@@ -8,6 +9,7 @@ import { streamWithRetry } from "./resilience";
 const runWithPrimaryCircuitBreakerMock = vi.hoisted(() => vi.fn());
 
 vi.mock("./otel", () => ({
+  buildCoachTelemetryConfig: () => ({ isEnabled: false }),
   runInRunSpan: async (
     _metadata: unknown,
     fn: (span: { runId: string; recordError: (error: string) => void }) => Promise<unknown>,
@@ -18,13 +20,14 @@ vi.mock("./resilienceCircuitBreaker", () => ({
   runWithPrimaryCircuitBreaker: runWithPrimaryCircuitBreakerMock,
 }));
 
-function makeSuccessAgent(): {
+function makeSuccessAgent(onStreamText?: (options: Record<string, unknown>) => void): {
   agent: Agent;
   captureStreamTextOptions: () => Record<string, unknown> | undefined;
 } {
   let captured: Record<string, unknown> | undefined;
   const streamText = vi.fn(async (options: Record<string, unknown>) => {
     captured = options;
+    onStreamText?.(options);
     return { text: Promise.resolve("") };
   });
   const agent = {
@@ -141,4 +144,79 @@ describe("Gemini thinking minimized via providerOptions", () => {
       expect(captureStreamTextOptions()?.providerOptions).toBeUndefined();
     },
   );
+});
+
+describe("BYOK budget policy", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    runWithPrimaryCircuitBreakerMock.mockImplementation(
+      async (options: { primaryAgent: Agent; runAttempt: unknown }) => {
+        const runAttempt = options.runAttempt as (agent: Agent) => Promise<unknown>;
+        return await runAttempt(options.primaryAgent);
+      },
+    );
+  });
+
+  it("omits the budget stop condition when the guard is disabled", async () => {
+    let expensiveStepShouldStop: boolean | undefined;
+    const { agent, captureStreamTextOptions } = makeSuccessAgent((options) => {
+      const stopWhen = options.stopWhen;
+      if (typeof stopWhen !== "function") throw new Error("Expected only the step-count guard");
+      expensiveStepShouldStop = (
+        stopWhen as (args: { steps: Array<Record<string, unknown>> }) => boolean
+      )({
+        steps: [
+          {
+            usage: { inputTokens: 100_000, outputTokens: 20_000 },
+            model: { provider: "openai", modelId: "gpt-5.4" },
+          },
+        ],
+      });
+    });
+    const ctx = makePromptCtx();
+
+    await streamWithRetry(ctx, {
+      primaryAgent: agent,
+      fallbackAgent: agent,
+      ...baseStreamWithRetryArgs("openai"),
+      isByok: true,
+      budgetPolicy: { kind: "disabled" },
+    });
+
+    expect(Array.isArray(captureStreamTextOptions()?.stopWhen)).toBe(false);
+    expect(expensiveStepShouldStop).toBe(false);
+    expect(ctx.runMutation).not.toHaveBeenCalledWith(
+      internal.aiUsage.recordBudgetStop,
+      expect.anything(),
+    );
+  });
+
+  it("installs a stop condition with the configured provider limit", async () => {
+    const { agent, captureStreamTextOptions } = makeSuccessAgent();
+
+    await streamWithRetry(makePromptCtx(), {
+      primaryAgent: agent,
+      fallbackAgent: agent,
+      ...baseStreamWithRetryArgs("openai"),
+      isByok: true,
+      budgetPolicy: { kind: "limit", maxInteractionUsd: 0.2 },
+    });
+
+    const stopWhen = captureStreamTextOptions()?.stopWhen;
+    expect(Array.isArray(stopWhen)).toBe(true);
+    if (!Array.isArray(stopWhen)) throw new Error("Expected budget stop conditions");
+    const conditions = stopWhen as Array<(args: { steps: unknown[] }) => boolean>;
+    const steps = [
+      {
+        usage: { inputTokens: 10_000, outputTokens: 2_000 },
+        model: { provider: "openai", modelId: "gpt-5.4" },
+      },
+      {
+        usage: { inputTokens: 5_000, outputTokens: 3_000 },
+        model: { provider: "openai", modelId: "gpt-5.4" },
+      },
+    ];
+
+    expect(conditions.some((condition) => condition({ steps }))).toBe(false);
+  });
 });

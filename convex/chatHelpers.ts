@@ -2,12 +2,17 @@ import { saveMessage } from "@convex-dev/agent";
 import type { ModelMessage } from "@ai-sdk/provider-utils";
 import { components, internal } from "./_generated/api";
 import type { ActionCtx, MutationCtx, QueryCtx } from "./_generated/server";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import { type ProviderKeyResult, resolveProviderKey } from "./byok";
 // Import directly from byokErrors — importing through ./ai/resilience would
 // pull Phoenix-otel's Node-only deps into this V8-runtime module's graph.
 import { buildByokErrorMessage, type ByokErrorCode, classifyByokError } from "./ai/byokErrors";
 import type { ProviderId } from "./ai/providers";
+import {
+  type AiBudgetPolicy,
+  resolveAiBudgetPolicy,
+  resolveAiBudgetPreferences,
+} from "../lib/aiBudgetPreferences";
 import {
   buildProviderTransientMessage,
   classifyTransientError,
@@ -15,6 +20,13 @@ import {
 } from "./ai/transientErrors";
 
 export const MAX_IMAGES_PER_MESSAGE = 4;
+
+interface ProviderResolutionContext {
+  readonly userCreationTime: number;
+  readonly profile: Doc<"userProfiles"> | null;
+}
+
+export type UserProviderConfig = ProviderKeyResult & { readonly budgetPolicy: AiBudgetPolicy };
 
 export async function assertThreadOwnership(
   ctx: QueryCtx | MutationCtx | ActionCtx,
@@ -30,18 +42,25 @@ export async function assertThreadOwnership(
 }
 
 export async function validateUserProviderKey(ctx: ActionCtx, userId: string): Promise<void> {
-  const context = await ctx.runQuery(internal.byok._getKeyResolutionContext, {
-    userId: userId as Id<"users">,
-  });
-  if (!context) throw new Error("byok_user_not_found");
+  const context = await getProviderResolutionContext(ctx, userId);
   await resolveProviderKey(context.profile, context.userCreationTime);
 }
 
 export async function resolveUserProviderConfig(
   ctx: ActionCtx,
   userId: string,
-): Promise<ProviderKeyResult> {
-  const result = await resolveUserProviderCredentials(ctx, userId);
+): Promise<UserProviderConfig> {
+  const context = await getProviderResolutionContext(ctx, userId);
+  const result = await resolveProviderKey(context.profile, context.userCreationTime);
+  const preferences = resolveAiBudgetPreferences({
+    ignoreBudget: context.profile?.ignoreAiProviderBudget,
+    providerLimitOverridesUsd: context.profile?.aiProviderBudgetLimitsUsd,
+  });
+  const budgetPolicy = resolveAiBudgetPolicy({
+    isHouseKey: result.isHouseKey === true,
+    provider: result.provider,
+    preferences,
+  });
 
   const killSwitchActive = process.env.BYOK_DISABLED === "true";
   if (result.isHouseKey && !killSwitchActive) {
@@ -58,18 +77,26 @@ export async function resolveUserProviderConfig(
     }
   }
 
-  return result;
+  return { ...result, budgetPolicy };
 }
 
 export async function resolveUserProviderCredentials(
   ctx: ActionCtx,
   userId: string,
 ): Promise<ProviderKeyResult> {
+  const context = await getProviderResolutionContext(ctx, userId);
+  return await resolveProviderKey(context.profile, context.userCreationTime);
+}
+
+async function getProviderResolutionContext(
+  ctx: ActionCtx,
+  userId: string,
+): Promise<ProviderResolutionContext> {
   const context = await ctx.runQuery(internal.byok._getKeyResolutionContext, {
     userId: userId as Id<"users">,
   });
   if (!context) throw new Error("byok_user_not_found");
-  return await resolveProviderKey(context.profile, context.userCreationTime);
+  return context;
 }
 
 /**

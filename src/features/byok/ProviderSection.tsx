@@ -10,6 +10,7 @@ import type { ProviderSettings } from "../../../convex/byok";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
+import { BudgetPreferences } from "./BudgetPreferences";
 import { ModelOverrideSection } from "./ModelOverrideSection";
 import { ProviderKeyDisplay } from "./ProviderKeyDisplay";
 
@@ -41,6 +42,10 @@ export function ProviderSection() {
   const removeKey = useMutation(api.byok.removeProviderKey);
   const selectProvider = useMutation(api.byok.setSelectedProvider);
   const setModelOverrideMut = useMutation(api.byok.setModelOverride);
+  const setIgnoreBudget = useMutation(api.byokProvider.setIgnoreBudget);
+  const setSelectedProviderBudgetLimit = useMutation(
+    api.byokProvider.setSelectedProviderBudgetLimit,
+  );
 
   const [settings, setSettings] = useState<ProviderSettings | null>(null);
   const [viewProvider, setViewProvider] = useState<ProviderId>("gemini");
@@ -242,6 +247,22 @@ export function ProviderSection() {
         removing={removing}
         removeError={removeError}
       />
+
+      {settings && byokStatus.hasKey && (
+        <BudgetPreferences
+          provider={settings.selectedProvider}
+          ignoreBudget={settings.budgetPreferences.ignoreBudget}
+          budgetLimitUsd={settings.budgetPreferences.providerLimitsUsd[settings.selectedProvider]}
+          onIgnoreBudgetChange={async (ignoreBudget) => {
+            await setIgnoreBudget({ ignoreBudget });
+            await refreshSettings(byokStatus.hasKey);
+          }}
+          onBudgetLimitSave={async (budgetLimitUsd) => {
+            await setSelectedProviderBudgetLimit({ budgetLimitUsd });
+            await refreshSettings(byokStatus.hasKey);
+          }}
+        />
+      )}
 
       {viewProvider === "openrouter" && (
         <ModelOverrideSection

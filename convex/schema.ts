@@ -124,6 +124,16 @@ export default defineSchema({
     openrouterApiKeyEncrypted: v.optional(v.string()),
     openrouterApiKeyAddedAt: v.optional(v.number()),
     modelOverride: v.optional(v.string()),
+    /** Personal-key cost guard preferences. Omitted values inherit provider defaults. */
+    ignoreAiProviderBudget: v.optional(v.boolean()),
+    aiProviderBudgetLimitsUsd: v.optional(
+      v.object({
+        gemini: v.optional(v.number()),
+        claude: v.optional(v.number()),
+        openai: v.optional(v.number()),
+        openrouter: v.optional(v.number()),
+      }),
+    ),
     /** Timestamp when a token refresh started. Used to prevent concurrent refreshes. */
     tokenRefreshInProgress: v.optional(v.number()),
     syncStatus: v.optional(
