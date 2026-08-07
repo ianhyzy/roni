@@ -176,7 +176,7 @@ export const getWeekPlanDetailsTool = createGetWeekPlanDetailsTool();
 export function createDeleteWeekPlanTool(userTimezone?: string) {
   return createTool({
     description:
-      "Delete the current week's training plan and all linked draft workouts. Use when the user wants to discard the current weekly draft or start the week over. Do not use to delete a standalone Tonal custom workout or to remove only one exercise from a draft day. Inputs are empty; returns deleted:true or a message when no current week plan exists.",
+      "Delete the current week's training plan, including any of its workouts already pushed to Tonal (they are removed from the machine too). Use when the user wants to discard the current week or start it over. Do not use to delete a standalone Tonal custom workout or to remove only one exercise from a day. Inputs are empty; returns deleted:true, or a message when no plan exists, the week has completed sessions, or scheduling is mid-flight.",
     inputSchema: z.object({}),
     needsApproval: true,
     execute: withToolTracking(
@@ -185,7 +185,9 @@ export function createDeleteWeekPlanTool(userTimezone?: string) {
         ctx,
         _input,
         _options,
-      ): Promise<{ deleted: true } | { deleted: false; message: string }> => {
+      ): Promise<
+        { deleted: true; removedFromTonal: number } | { deleted: false; message: string }
+      > => {
         const userId = requireUserId(ctx);
         const weekStartDate = getWeekStartDateStringInTimezone(new Date(), userTimezone);
 
@@ -198,16 +200,10 @@ export function createDeleteWeekPlanTool(userTimezone?: string) {
           return { deleted: false, message: "No week plan found for the current week." };
         }
 
-        const deletion = (await ctx.runMutation(internal.weekPlans.deleteWeekPlanInternal, {
+        return (await ctx.runAction(internal.weekPlanDeletion.deleteWeekPlanWithTonal, {
           userId,
           weekPlanId: weekPlan._id,
-        })) as { ok: true; deleted: boolean } | { ok: false; error: string };
-
-        if (!deletion.ok) return { deleted: false, message: deletion.error };
-        if (!deletion.deleted) {
-          return { deleted: false, message: "The week plan was already removed." };
-        }
-        return { deleted: true };
+        })) as { deleted: true; removedFromTonal: number } | { deleted: false; message: string };
       },
     ),
   });

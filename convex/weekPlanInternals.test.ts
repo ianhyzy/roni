@@ -52,7 +52,7 @@ describe("deleteWeekPlanInternal", () => {
     });
 
     await expect(
-      t.mutation(internal.weekPlanInternals.deleteWeekPlanInternal, { userId, weekPlanId }),
+      t.mutation(internal.weekPlanDeletion.deleteWeekPlanInternal, { userId, weekPlanId }),
     ).resolves.toEqual({ ok: true, deleted: true });
 
     await expect(t.run((ctx) => ctx.db.get(weekPlanId))).resolves.toBeNull();
@@ -64,9 +64,9 @@ describe("deleteWeekPlanInternal", () => {
     const userId = await t.run(async (ctx) => ctx.db.insert("users", {}));
     const weekPlanId = await seedWeekPlan(t, userId);
 
-    await t.mutation(internal.weekPlanInternals.deleteWeekPlanInternal, { userId, weekPlanId });
+    await t.mutation(internal.weekPlanDeletion.deleteWeekPlanInternal, { userId, weekPlanId });
     await expect(
-      t.mutation(internal.weekPlanInternals.deleteWeekPlanInternal, { userId, weekPlanId }),
+      t.mutation(internal.weekPlanDeletion.deleteWeekPlanInternal, { userId, weekPlanId }),
     ).resolves.toEqual({ ok: true, deleted: false });
   });
 
@@ -77,7 +77,7 @@ describe("deleteWeekPlanInternal", () => {
     const weekPlanId = await seedWeekPlan(t, ownerId);
 
     await expect(
-      t.mutation(internal.weekPlanInternals.deleteWeekPlanInternal, {
+      t.mutation(internal.weekPlanDeletion.deleteWeekPlanInternal, {
         userId: attackerId,
         weekPlanId,
       }),
@@ -149,7 +149,7 @@ describe("deleteWeekPlanInternal", () => {
     });
 
     await expect(
-      t.mutation(internal.weekPlanInternals.deleteWeekPlanInternal, { userId, weekPlanId }),
+      t.mutation(internal.weekPlanDeletion.deleteWeekPlanInternal, { userId, weekPlanId }),
     ).resolves.toEqual({ ok: false, error });
     const rows = await t.run(async (ctx) =>
       Promise.all([ctx.db.get(weekPlanId), ctx.db.get(safeDraftId), ctx.db.get(guardedWorkoutId)]),
@@ -179,7 +179,7 @@ describe("deleteWeekPlanInternal", () => {
     });
 
     await expect(
-      t.mutation(internal.weekPlanInternals.deleteWeekPlanInternal, { userId, weekPlanId }),
+      t.mutation(internal.weekPlanDeletion.deleteWeekPlanInternal, { userId, weekPlanId }),
     ).resolves.toEqual({ ok: false, error: "Linked workout not found" });
     await expect(t.run((ctx) => ctx.db.get(weekPlanId))).resolves.not.toBeNull();
     await expect(t.run((ctx) => ctx.db.get(missingWorkoutPlanId))).resolves.toBeNull();
@@ -207,7 +207,7 @@ describe("deleteWeekPlanInternal", () => {
     });
 
     await expect(
-      t.mutation(internal.weekPlanInternals.deleteWeekPlanInternal, { userId, weekPlanId }),
+      t.mutation(internal.weekPlanDeletion.deleteWeekPlanInternal, { userId, weekPlanId }),
     ).resolves.toEqual({ ok: false, error: "Linked workout access denied" });
     await expect(t.run((ctx) => ctx.db.get(weekPlanId))).resolves.not.toBeNull();
     await expect(t.run((ctx) => ctx.db.get(workoutPlanId))).resolves.not.toBeNull();

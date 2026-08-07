@@ -246,6 +246,7 @@ import type * as userProfiles from "../userProfiles.js";
 import type * as users from "../users.js";
 import type * as validators from "../validators.js";
 import type * as weekPlanActions from "../weekPlanActions.js";
+import type * as weekPlanDeletion from "../weekPlanDeletion.js";
 import type * as weekPlanEnriched from "../weekPlanEnriched.js";
 import type * as weekPlanHelpers from "../weekPlanHelpers.js";
 import type * as weekPlanInternals from "../weekPlanInternals.js";
@@ -502,6 +503,7 @@ declare const fullApi: ApiFromModules<{
   users: typeof users;
   validators: typeof validators;
   weekPlanActions: typeof weekPlanActions;
+  weekPlanDeletion: typeof weekPlanDeletion;
   weekPlanEnriched: typeof weekPlanEnriched;
   weekPlanHelpers: typeof weekPlanHelpers;
   weekPlanInternals: typeof weekPlanInternals;

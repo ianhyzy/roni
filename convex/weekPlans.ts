@@ -85,11 +85,13 @@ export {
   batchUpdateDayStatusesInternal,
   createDraftWorkoutInternal,
   replaceDayDraftWorkoutInternal,
-  deleteWeekPlanInternal,
   getWeekPlanById,
   deleteDraftWorkout,
   replaceDraftWithPushed,
 } from "./weekPlanInternals";
+// Lives in weekPlanDeletion (with the Tonal-clearing action) but keeps its
+// internal.weekPlans.* path so existing callers are unaffected.
+export { deleteWeekPlanInternal } from "./weekPlanDeletion";
 
 /** Get the current week's plan for the authenticated user. */
 export const getCurrentWeekPlan = query({

@@ -273,53 +273,6 @@ export const replaceDayDraftWorkoutInternal = internalMutation({
 });
 
 /** Internal: delete a week plan and its linked draft workouts. */
-export const deleteWeekPlanInternal = internalMutation({
-  args: {
-    userId: v.id("users"),
-    weekPlanId: v.id("weekPlans"),
-  },
-  returns: v.union(
-    v.object({ ok: v.literal(true), deleted: v.boolean() }),
-    v.object({ ok: v.literal(false), error: v.string() }),
-  ),
-  handler: async (ctx, args) => {
-    const plan = await ctx.db.get(args.weekPlanId);
-    if (!plan) return { ok: true as const, deleted: false };
-    if (plan.userId !== args.userId) {
-      return { ok: false as const, error: "Week plan access denied" };
-    }
-
-    const workoutPlanIds = [
-      ...new Set(plan.days.flatMap((day) => (day.workoutPlanId ? [day.workoutPlanId] : []))),
-    ];
-    for (const workoutPlanId of workoutPlanIds) {
-      const workout = await ctx.db.get(workoutPlanId);
-      if (!workout) {
-        return { ok: false as const, error: "Linked workout not found" };
-      }
-      if (workout.userId !== args.userId) {
-        return { ok: false as const, error: "Linked workout access denied" };
-      }
-      const blocker = getDraftWorkoutMutationBlocker(workout);
-      if (blocker === "non_draft") {
-        return { ok: false as const, error: "Only draft week plans can be deleted" };
-      }
-      if (blocker === "scheduled") {
-        return { ok: false as const, error: "Scheduled workouts cannot be deleted" };
-      }
-      if (blocker === "claimed") {
-        return { ok: false as const, error: "Workout scheduling is in progress" };
-      }
-    }
-
-    for (const workoutPlanId of workoutPlanIds) {
-      await ctx.db.delete(workoutPlanId);
-    }
-    await ctx.db.delete(args.weekPlanId);
-    return { ok: true as const, deleted: true };
-  },
-});
-
 /** Internal: get week plan by ID with ownership check. */
 export const getWeekPlanById = internalQuery({
   args: { weekPlanId: v.id("weekPlans"), userId: v.id("users") },
