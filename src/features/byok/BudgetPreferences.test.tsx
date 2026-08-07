@@ -102,7 +102,9 @@ describe("BudgetPreferences", () => {
     if (!form) throw new Error("Expected budget limit form");
     fireEvent.submit(form);
 
-    expect(screen.getByRole("alert")).toHaveTextContent("Budget limit must be at least $0.01");
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Budget limit must be between $0.01 and $100.00",
+    );
     expect(mockBudgetLimitSave).not.toHaveBeenCalled();
   });
 });

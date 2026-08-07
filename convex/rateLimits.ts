@@ -156,6 +156,12 @@ export const rateLimiter = new RateLimiter(components.rateLimiter, {
     period: MINUTE,
     capacity: 10,
   },
+  setBudgetPreference: {
+    kind: "token bucket",
+    rate: 20,
+    period: MINUTE,
+    capacity: 10,
+  },
   newSignup: {
     kind: "token bucket",
     rate: NEW_SIGNUP_RATE_PER_HOUR,

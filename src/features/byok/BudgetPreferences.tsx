@@ -4,7 +4,10 @@ import { type FormEvent, useState } from "react";
 import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import type { ProviderId } from "../../../convex/ai/providers";
-import { MIN_PROVIDER_BUDGET_LIMIT_USD } from "../../../lib/aiBudgetPreferences";
+import {
+  MAX_PROVIDER_BUDGET_LIMIT_USD,
+  MIN_PROVIDER_BUDGET_LIMIT_USD,
+} from "../../../lib/aiBudgetPreferences";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -65,10 +68,14 @@ export function BudgetPreferences({
     if (savingOperation !== null) return;
 
     const parsedLimit = Number(draftLimit);
-    if (!Number.isFinite(parsedLimit) || parsedLimit < MIN_PROVIDER_BUDGET_LIMIT_USD) {
+    if (
+      !Number.isFinite(parsedLimit) ||
+      parsedLimit < MIN_PROVIDER_BUDGET_LIMIT_USD ||
+      parsedLimit > MAX_PROVIDER_BUDGET_LIMIT_USD
+    ) {
       setValidationState({
         sourceKey,
-        message: `Budget limit must be at least $${MIN_PROVIDER_BUDGET_LIMIT_USD.toFixed(2)}`,
+        message: `Budget limit must be between $${MIN_PROVIDER_BUDGET_LIMIT_USD.toFixed(2)} and $${MAX_PROVIDER_BUDGET_LIMIT_USD.toFixed(2)}`,
       });
       return;
     }
@@ -137,6 +144,7 @@ export function BudgetPreferences({
               type="number"
               inputMode="decimal"
               min={MIN_PROVIDER_BUDGET_LIMIT_USD}
+              max={MAX_PROVIDER_BUDGET_LIMIT_USD}
               step="0.01"
               value={draftLimit}
               onChange={(event) => {

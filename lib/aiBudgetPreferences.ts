@@ -1,4 +1,5 @@
 export const MIN_PROVIDER_BUDGET_LIMIT_USD = 0.01;
+export const MAX_PROVIDER_BUDGET_LIMIT_USD = 100;
 
 export const DEFAULT_PROVIDER_BUDGET_LIMITS_USD = {
   gemini: 0.1,
@@ -25,7 +26,11 @@ interface ResolveAiBudgetPreferencesArgs {
 }
 
 export function isValidProviderBudgetLimitUsd(value: number): boolean {
-  return Number.isFinite(value) && value >= MIN_PROVIDER_BUDGET_LIMIT_USD;
+  return (
+    Number.isFinite(value) &&
+    value >= MIN_PROVIDER_BUDGET_LIMIT_USD &&
+    value <= MAX_PROVIDER_BUDGET_LIMIT_USD
+  );
 }
 
 export function resolveAiBudgetPreferences({

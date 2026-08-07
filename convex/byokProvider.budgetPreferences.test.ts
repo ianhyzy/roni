@@ -6,6 +6,10 @@ import { api } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import schema from "./schema";
 import { encrypt } from "./tonal/encryption";
+import {
+  DEFAULT_PROVIDER_BUDGET_LIMITS_USD,
+  MAX_PROVIDER_BUDGET_LIMIT_USD,
+} from "../lib/aiBudgetPreferences";
 
 const modules = import.meta.glob("./**/*.*s");
 
@@ -94,7 +98,13 @@ describe("AI provider budget preferences", () => {
 
     await expect(
       authed.mutation(api.byokProvider.setSelectedProviderBudgetLimit, { budgetLimitUsd: 0 }),
-    ).rejects.toThrow("Budget limit must be at least $0.01");
+    ).rejects.toThrow("Budget limit must be between $0.01 and $100.00");
+
+    await expect(
+      authed.mutation(api.byokProvider.setSelectedProviderBudgetLimit, {
+        budgetLimitUsd: MAX_PROVIDER_BUDGET_LIMIT_USD + 1,
+      }),
+    ).rejects.toThrow("Budget limit must be between $0.01 and $100.00");
   });
 
   test("rejects unauthenticated writes", async () => {
@@ -137,7 +147,7 @@ describe("AI provider budget preferences", () => {
         selectedProvider: "openai",
         budgetPreferences: {
           ignoreBudget: false,
-          providerLimitsUsd: { openai: 0.1 },
+          providerLimitsUsd: { openai: DEFAULT_PROVIDER_BUDGET_LIMITS_USD.openai },
         },
         keys: { openai: { hasKey: true, maskedLast4: "6789" } },
       });

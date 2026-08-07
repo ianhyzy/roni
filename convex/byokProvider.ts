@@ -9,6 +9,7 @@ import { decrypt } from "./tonal/encryption";
 import { isValidProvider, type ProviderId } from "./ai/providers";
 import {
   isValidProviderBudgetLimitUsd,
+  MAX_PROVIDER_BUDGET_LIMIT_USD,
   MIN_PROVIDER_BUDGET_LIMIT_USD,
   resolveAiBudgetPreferences,
 } from "../lib/aiBudgetPreferences";
@@ -85,6 +86,7 @@ export const setIgnoreBudget = mutation({
   args: { ignoreBudget: v.boolean() },
   handler: async (ctx, { ignoreBudget }) => {
     const profile = await getAuthenticatedProfile(ctx);
+    await rateLimiter.limit(ctx, "setBudgetPreference", { key: profile.userId, throws: true });
     await ctx.db.patch(profile._id, { ignoreAiProviderBudget: ignoreBudget });
     return resolveAiBudgetPreferences({
       ignoreBudget,
@@ -97,8 +99,11 @@ export const setSelectedProviderBudgetLimit = mutation({
   args: { budgetLimitUsd: v.number() },
   handler: async (ctx, { budgetLimitUsd }) => {
     const profile = await getAuthenticatedProfile(ctx);
+    await rateLimiter.limit(ctx, "setBudgetPreference", { key: profile.userId, throws: true });
     if (!isValidProviderBudgetLimitUsd(budgetLimitUsd)) {
-      throw new Error(`Budget limit must be at least $${MIN_PROVIDER_BUDGET_LIMIT_USD.toFixed(2)}`);
+      throw new Error(
+        `Budget limit must be between $${MIN_PROVIDER_BUDGET_LIMIT_USD.toFixed(2)} and $${MAX_PROVIDER_BUDGET_LIMIT_USD.toFixed(2)}`,
+      );
     }
 
     const provider: ProviderId =
