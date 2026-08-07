@@ -20,6 +20,7 @@ import { buildInstructions } from "./promptSections";
 import { createModelTierPrepareStep, type ModelTierPrepareStep } from "./coachModelPolicy";
 import { sanitizeTimezone } from "./timeDecay";
 import { bindProviderErrorCapture, createProviderErrorCapture } from "./byokErrors";
+import { COACH_MAX_STEPS } from "./turnLimits";
 
 export { createModelTierPrepareStep, selectCoachPrepareStepTier } from "./coachModelPolicy";
 export type { ModelTierPrepareStep } from "./coachModelPolicy";
@@ -32,7 +33,6 @@ const sharedEmbeddingModel = serverProvider.textEmbeddingModel("gemini-embedding
 
 const STATIC_INSTRUCTIONS = buildInstructions();
 const RECENT_MESSAGES_LIMIT = 40;
-export const COACH_MAX_STEPS = 25;
 
 /**
  * Cheap fingerprint of the static system prompt. Surfaces in `aiRun.promptVersion`

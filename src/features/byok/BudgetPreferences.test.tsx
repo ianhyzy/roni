@@ -39,6 +39,10 @@ describe("BudgetPreferences", () => {
     expect(screen.getByLabelText("Per-attempt budget threshold for OpenAI (USD)")).toHaveValue(
       0.42,
     );
+    expect(screen.getByLabelText("Per-attempt budget threshold for OpenAI (USD)")).toHaveAttribute(
+      "max",
+      "200",
+    );
     expect(screen.getByText(/OpenAI is currently selected/i)).toBeVisible();
     expect(screen.getByText(/checked after each completed model step/i)).toBeVisible();
     expect(
@@ -113,7 +117,7 @@ describe("BudgetPreferences", () => {
     fireEvent.submit(form);
 
     expect(screen.getByRole("alert")).toHaveTextContent(
-      "Budget threshold must be between $0.01 and $100.00",
+      "Budget threshold must be between $0.01 and $200.00",
     );
     expect(mockBudgetLimitSave).not.toHaveBeenCalled();
   });

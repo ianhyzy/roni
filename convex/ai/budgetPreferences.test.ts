@@ -2,11 +2,22 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_PROVIDER_BUDGET_LIMITS_USD,
   isValidProviderBudgetLimitUsd,
+  MAX_PROVIDER_BUDGET_LIMIT_USD,
   resolveAiBudgetPolicy,
   resolveAiBudgetPreferences,
 } from "../../lib/aiBudgetPreferences";
 
 describe("resolveAiBudgetPreferences", () => {
+  it("uses the documented reference-scenario defaults for every provider", () => {
+    expect(DEFAULT_PROVIDER_BUDGET_LIMITS_USD).toEqual({
+      gemini: 25,
+      claude: 101,
+      openai: 101,
+      openrouter: 101,
+    });
+    expect(MAX_PROVIDER_BUDGET_LIMIT_USD).toBe(200);
+  });
+
   it("uses the provider defaults when preferences are absent", () => {
     expect(resolveAiBudgetPreferences()).toEqual({
       ignoreBudget: false,
@@ -72,6 +83,8 @@ describe("resolveAiBudgetPolicy", () => {
 describe("isValidProviderBudgetLimitUsd", () => {
   it.each([
     [0.01, true],
+    [200, true],
+    [200.01, false],
     [0, false],
     [-1, false],
     [Number.NaN, false],
