@@ -10,6 +10,7 @@ import { ToolApprovalCard } from "./ToolApprovalCard";
 import { ToolCallIndicator } from "./ToolCallIndicator";
 import { WeekPlanCard } from "./WeekPlanCard";
 import { hasRetryLease } from "./chatTurnState";
+import { isWeekPlanCardToolName } from "./weekPlanCardData";
 import { weekPlanPresentationSchema } from "../../../convex/ai/schemas";
 
 function formatTime(timestamp: number): string {
@@ -155,7 +156,7 @@ export function ChatMessage({ message, isGrouped, threadId }: ChatMessageProps) 
             const plan = extractWeekPlan(text);
             if (plan && !isStreaming) {
               const remainingText = text
-                .replace(/```(?:week-plan|json)\s*\n[\s\S]*?\n```/, "")
+                .replace(/```(?:week-plan|json)\s*\n[\s\S]*?\n```/g, "")
                 .replace(/\{[\s\S]*"weekStartDate"[\s\S]*"days"[\s\S]*\}\s*$/, "")
                 .trim();
               return (
@@ -218,22 +219,33 @@ export function ChatMessage({ message, isGrouped, threadId }: ChatMessageProps) 
           </div>
         )}
 
-        {/* Tool calls */}
+        {/* Tool calls. Week-plan cards are full-width blocks, so they render
+            above the chip row instead of wrapping as flex items inside it. */}
         {(() => {
           const toolParts = message.parts.filter(isToolUIPart);
           if (toolParts.length === 0) return null;
 
+          const cardParts = toolParts.filter((part) => isWeekPlanCardToolName(getToolName(part)));
+          const chipParts = toolParts.filter((part) => !isWeekPlanCardToolName(getToolName(part)));
+
+          const renderIndicator = (part: (typeof toolParts)[number]) => (
+            <ToolCallIndicator
+              key={part.toolCallId}
+              toolName={getToolName(part)}
+              state={part.state}
+              output={"output" in part ? part.output : undefined}
+            />
+          );
+
           return (
-            <div className="mt-1.5 flex flex-wrap gap-1.5">
-              {toolParts.map((part) => (
-                <ToolCallIndicator
-                  key={part.toolCallId}
-                  toolName={getToolName(part)}
-                  state={part.state}
-                  output={"output" in part ? part.output : undefined}
-                />
-              ))}
-            </div>
+            <>
+              {cardParts.map(renderIndicator)}
+              {chipParts.length > 0 && (
+                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                  {chipParts.map(renderIndicator)}
+                </div>
+              )}
+            </>
           );
         })()}
       </div>

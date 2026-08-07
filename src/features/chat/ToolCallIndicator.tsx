@@ -4,9 +4,14 @@ import { AlertTriangle } from "lucide-react";
 import { WeekPlanCard } from "./WeekPlanCard";
 import { ActionConfirmationBanner } from "./ActionConfirmationBanner";
 import { extractBannerProps } from "./bannerExtractors";
-import { programWeekOutputSchema, weekPlanPresentationSchema } from "../../../convex/ai/schemas";
+import {
+  isFailedProgramWeekOutput,
+  isWeekPlanCardToolName,
+  toWeekPlanPresentation,
+  WEEK_PLAN_CARD_TOOL_NAMES,
+} from "./weekPlanCardData";
 
-export const SPECIAL_RENDERER_TOOL_NAMES = ["program_week"] as const;
+export const SPECIAL_RENDERER_TOOL_NAMES = WEEK_PLAN_CARD_TOOL_NAMES;
 export const STATE_CHANGING_TOOL_NAMES = [
   "create_workout",
   "delete_workout",
@@ -141,38 +146,19 @@ export function ToolCallIndicator({ toolName, state, output }: ToolCallIndicator
     );
   }
 
-  // Special case: program_week shows WeekPlanCard when done
-  if (toolName === "program_week" && isDone && output) {
-    const outputResult = programWeekOutputSchema.safeParse(output);
-    if (!outputResult.success) return unconfirmedResult;
+  // program_week and get_week_plan_details render the full week-plan card.
+  if (isWeekPlanCardToolName(toolName) && isDone && output) {
+    const plan = toWeekPlanPresentation(toolName, output);
+    if (plan) return <WeekPlanCard plan={plan} />;
 
-    const summary = outputResult.data.summary;
-    const planResult = weekPlanPresentationSchema.safeParse({
-      weekStartDate: summary.weekStartDate,
-      split: summary.preferredSplit,
-      days: summary.days.map((day) => ({
-        dayName: day.dayName,
-        sessionType: day.sessionType,
-        targetMuscles: [
-          ...new Set(day.exercises.flatMap((exercise) => exercise.muscleGroups)),
-        ].join(", "),
-        durationMinutes: day.estimatedDuration,
-        exercises: day.exercises.map((exercise) => ({
-          name: exercise.name,
-          sets: exercise.sets,
-          reps: exercise.reps,
-          duration: exercise.durationSeconds ?? exercise.duration,
-          targetWeight: exercise.targetWeight,
-          lastWeight: exercise.lastWeight,
-          note:
-            [exercise.suggestedTarget, exercise.lastTime].filter(Boolean).join(" | ") || undefined,
-        })),
-      })),
-      summary: `${summary.preferredSplit.toUpperCase()} split - ${summary.days.length} training days`,
-    });
-    if (!planResult.success) return unconfirmedResult;
-
-    return <WeekPlanCard plan={planResult.data} />;
+    // program_week is state-changing, so an unrenderable payload is worth
+    // flagging — unless the tool reported an outright failure, which the
+    // error banner below describes far better than "could not be confirmed".
+    if (toolName === "program_week" && !isFailedProgramWeekOutput(output)) {
+      return unconfirmedResult;
+    }
+    // get_week_plan_details is a read: "no plan this week" is a normal answer,
+    // so fall through to the plain chip rather than warning about it.
   }
 
   // State-changing tools: show confirmation banner when done

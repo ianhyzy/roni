@@ -116,4 +116,38 @@ export const programWeekOutputSchema = z.object({
   summary: programWeekSummarySchema,
 });
 
+/**
+ * Shape of `get_week_plan_details`' successful output. Deliberately separate
+ * from programWeekSummarySchema: this tool reads back whatever is stored, so
+ * sessionType is a free string and estimatedDuration may be absent, where the
+ * program_week summary is generated and can promise the strict enums.
+ */
+const weekPlanDetailsExerciseSchema = z.object({
+  movementId: z.string(),
+  name: z.string(),
+  muscleGroups: z.array(z.string()),
+  sets: z.number(),
+  reps: z.number().optional(),
+  durationSeconds: z.number().optional(),
+});
+
+const weekPlanDetailsDaySchema = z.object({
+  dayIndex: z.number().int().min(0).max(6),
+  dayName: z.string(),
+  sessionType: z.string(),
+  status: z.string(),
+  estimatedDuration: z.number().optional(),
+  exercises: z.array(weekPlanDetailsExerciseSchema),
+});
+
+export const weekPlanDetailsOutputSchema = z.object({
+  found: z.literal(true),
+  plan: z.object({
+    weekStartDate: z.string(),
+    preferredSplit: z.string(),
+    targetDays: z.number(),
+    days: z.array(weekPlanDetailsDaySchema),
+  }),
+});
+
 export type WeekPlanPresentation = z.infer<typeof weekPlanPresentationSchema>;
