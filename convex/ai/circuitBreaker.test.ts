@@ -46,7 +46,20 @@ describe("estimateAttemptCostUsd", () => {
         cacheReadTokens: 0,
         cacheWriteTokens: 0,
       }),
-    ).toBeCloseTo(0.03, 6);
+    ).toBeCloseTo(0.035, 6);
+  });
+
+  it("does not trust a known model family behind an unknown OpenRouter vendor", () => {
+    expect(
+      estimateAttemptCostUsd({
+        provider: "openrouter",
+        model: "attacker/gpt-5.4-nano",
+        inputTokens: 1_000,
+        outputTokens: 1_000,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
+      }),
+    ).toBeCloseTo(0.035, 6);
   });
 });
 
