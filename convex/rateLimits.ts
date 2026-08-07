@@ -101,17 +101,19 @@ export const rateLimiter = new RateLimiter(components.rateLimiter, {
     period: MINUTE,
     capacity: 3,
   },
+  // A 20-token burst supports bulk curation while each independent bucket
+  // keeps the existing 10/minute sustained rate.
   addExerciseExclusion: {
     kind: "token bucket",
     rate: 10,
     period: MINUTE,
-    capacity: 5,
+    capacity: 20,
   },
   removeExerciseExclusion: {
     kind: "token bucket",
     rate: 10,
     period: MINUTE,
-    capacity: 5,
+    capacity: 20,
   },
   createTonalWorkout: {
     kind: "token bucket",
