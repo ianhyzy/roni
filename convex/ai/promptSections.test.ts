@@ -62,6 +62,21 @@ describe("schema consistency", () => {
     expect(section![1]).not.toContain("```week-plan");
   });
 
+  it("forbids claiming an action succeeded without a successful tool result", () => {
+    expect(prompt).toContain("NEVER report an action as done unless the tool that performs it");
+    expect(prompt).toContain("execution-denied");
+  });
+
+  it("pairs the push success example with an actual approve_week_plan result", () => {
+    const section = prompt.match(/EXAMPLES:([\s\S]*?)$/);
+    expect(section, "EXAMPLES section not found").toBeTruthy();
+    // The old few-shot jumped straight from "Looks good, send it" to "Done —
+    // all 3 workouts are on your Tonal", teaching the model to treat the user's
+    // approval phrasing as proof the push happened.
+    expect(section![1]).toContain("[call approve_week_plan");
+    expect(section![1]).toContain("Push blocked or no result");
+  });
+
   it("frames volume-strength analysis as advisory rather than causal MRV", () => {
     expect(prompt).toContain("analyze_volume_strength");
     expect(prompt).toContain("observational");
