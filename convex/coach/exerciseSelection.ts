@@ -223,6 +223,7 @@ export interface WarmupCooldownInput {
   constraints?: {
     excludeAccessories?: string[];
     excludeMovementIds?: string[];
+    excludeNameSubstrings?: string[];
   };
 }
 
@@ -252,11 +253,16 @@ function selectByTrainingType(input: WarmupCooldownInput, fallbackChain: string[
   const targetSet = new Set(targetMuscleGroups.map((g) => g.toLowerCase()));
   const excludeMovementIdSet = new Set(constraints?.excludeMovementIds ?? []);
   const excludeAccessorySet = new Set(constraints?.excludeAccessories ?? []);
+  const excludeSubstrings = (constraints?.excludeNameSubstrings ?? []).map((s) => s.toLowerCase());
 
   const eligible = catalog.filter((m) => {
     if (!m.trainingTypes?.length) return false;
     if (excludeMovementIdSet.has(m.id)) return false;
     if (!m.muscleGroups.some((g) => targetSet.has(g.toLowerCase()))) return false;
+    if (excludeSubstrings.length) {
+      const nameLower = m.name.toLowerCase();
+      if (excludeSubstrings.some((sub) => nameLower.includes(sub))) return false;
+    }
     if (excludeAccessorySet.size > 0 && m.onMachineInfo?.accessory) {
       if (excludeAccessorySet.has(m.onMachineInfo.accessory)) return false;
     }
