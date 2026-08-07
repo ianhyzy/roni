@@ -268,23 +268,52 @@ describe("getWeekPlanDetailsTool", () => {
 });
 
 describe("deleteWeekPlanTool", () => {
-  test("reports a guarded deletion as deleted false with its message", async () => {
+  function buildTool(overrides: { weekPlan?: unknown; actionResult?: unknown }) {
+    const runAction = vi.fn(async () => overrides.actionResult);
     const tool = {
       ...deleteWeekPlanTool,
       ctx: {
         userId: "test-user",
-        runQuery: vi.fn(async () => ({ _id: "week-plan-1" })),
-        runMutation: vi.fn(async () => ({
-          ok: false as const,
-          error: "Scheduled workouts cannot be deleted",
-        })),
-        runAction: vi.fn(),
+        runQuery: vi.fn(async () => overrides.weekPlan ?? null),
+        runMutation: vi.fn(),
+        runAction,
       },
     };
+    return { tool, runAction };
+  }
+
+  test("reports a guarded deletion as deleted false with its message", async () => {
+    const { tool } = buildTool({
+      weekPlan: { _id: "week-plan-1" },
+      actionResult: { deleted: false, message: "This week has completed sessions" },
+    });
 
     await expect(tool.execute!({}, { toolCallId: "call-delete", messages: [] })).resolves.toEqual({
       deleted: false,
-      message: "Scheduled workouts cannot be deleted",
+      message: "This week has completed sessions",
     });
+  });
+
+  test("reports how many workouts came off Tonal on success", async () => {
+    const { tool, runAction } = buildTool({
+      weekPlan: { _id: "week-plan-1" },
+      actionResult: { deleted: true, removedFromTonal: 4 },
+    });
+
+    await expect(tool.execute!({}, { toolCallId: "call-delete", messages: [] })).resolves.toEqual({
+      deleted: true,
+      removedFromTonal: 4,
+    });
+    expect(runAction).toHaveBeenCalledOnce();
+  });
+
+  test("does not reach Tonal when there is no plan for the week", async () => {
+    const { tool, runAction } = buildTool({ weekPlan: null });
+
+    await expect(tool.execute!({}, { toolCallId: "call-delete", messages: [] })).resolves.toEqual({
+      deleted: false,
+      message: "No week plan found for the current week.",
+    });
+    expect(runAction).not.toHaveBeenCalled();
   });
 });
