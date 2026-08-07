@@ -60,7 +60,7 @@ describe("ToolCallIndicator", () => {
     }
     expect(new Set(ACTION_BANNER_TOOL_NAMES).size).toBe(ACTION_BANNER_TOOL_NAMES.length);
     expect(new Set(STATE_CHANGING_TOOL_NAMES).size).toBe(STATE_CHANGING_TOOL_NAMES.length);
-    expect(STATE_CHANGING_TOOL_NAMES).toHaveLength(18);
+    expect(STATE_CHANGING_TOOL_NAMES).toHaveLength(20);
     expect(SPECIAL_RENDERER_TOOL_NAMES).toEqual(["program_week", "get_week_plan_details"]);
   });
 
