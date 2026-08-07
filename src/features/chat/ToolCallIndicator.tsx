@@ -31,6 +31,8 @@ export const STATE_CHANGING_TOOL_NAMES = [
   "update_goal_progress",
   "report_injury",
   "resolve_injury",
+  "exclude_exercises",
+  "unexclude_exercises",
 ] as const;
 
 const STATE_CHANGING_TOOLS: ReadonlySet<string> = new Set(STATE_CHANGING_TOOL_NAMES);
@@ -107,6 +109,18 @@ const TOOL_MESSAGES: Record<string, { running: string; done: string }> = {
   get_workout_performance: {
     running: "Analyzing your performance...",
     done: "Performance analyzed",
+  },
+  exclude_exercises: {
+    running: "Excluding exercises...",
+    done: "Exercises excluded",
+  },
+  unexclude_exercises: {
+    running: "Removing exclusions...",
+    done: "Exclusions removed",
+  },
+  get_exercise_exclusions: {
+    running: "Checking excluded exercises...",
+    done: "Checked excluded exercises",
   },
 };
 

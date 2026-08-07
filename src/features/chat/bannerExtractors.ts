@@ -94,6 +94,8 @@ export const ACTION_BANNER_TOOL_NAMES = [
   "update_goal_progress",
   "report_injury",
   "resolve_injury",
+  "exclude_exercises",
+  "unexclude_exercises",
 ] as const;
 
 type ActionBannerToolName = (typeof ACTION_BANNER_TOOL_NAMES)[number];
@@ -133,6 +135,8 @@ const ACTION_EXTRACTORS: Record<ActionBannerToolName, Extractor> = {
   ),
   report_injury: booleanSentinel("recorded", "Injury recorded", "Failed to record injury"),
   resolve_injury: booleanSentinel("resolved", "Injury resolved", "Failed to resolve injury"),
+  exclude_exercises: successBoolean("Exercises excluded", "Failed to exclude exercises"),
+  unexclude_exercises: successBoolean("Exclusions removed", "Failed to remove exclusions"),
 };
 
 export function extractBannerProps(toolName: string, output: unknown): BannerProps | null {

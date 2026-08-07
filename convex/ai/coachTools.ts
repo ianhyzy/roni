@@ -16,6 +16,11 @@ import {
   updateGoalProgressTool,
 } from "./coachingTools";
 import { estimateDurationTool } from "./estimationTools";
+import {
+  excludeExercisesTool,
+  getExerciseExclusionsTool,
+  unexcludeExercisesTool,
+} from "./exclusionTools";
 import { estimateMessagesTokens } from "./contextWindow";
 import { createProgramWeekTool, programWeekTool } from "./programWeekTool";
 import { createRebuildDayTool, rebuildDayTool } from "./rebuildDayTool";
@@ -83,6 +88,9 @@ const RAW_COACH_TOOLS = {
   report_injury: reportInjuryTool,
   resolve_injury: resolveInjuryTool,
   get_injuries: getInjuriesTool,
+  exclude_exercises: excludeExercisesTool,
+  unexclude_exercises: unexcludeExercisesTool,
+  get_exercise_exclusions: getExerciseExclusionsTool,
   get_weekly_volume: getWeeklyVolumeTool,
   analyze_volume_strength: analyzeVolumeStrengthTool,
 } satisfies ToolSet;
