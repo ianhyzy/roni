@@ -117,6 +117,13 @@ export function stripOrphanedToolCalls(messages: ModelMessage[]): ModelMessage[]
     }
   }
 
+  // Approval ids whose originating tool-call survives, so request and response
+  // parts are dropped or kept as a pair.
+  const keptApprovalIds = new Set<string>();
+  for (const [approvalId, toolCallId] of approvalIdToToolCallId) {
+    if (keptAssistantToolCallIds.has(toolCallId)) keptApprovalIds.add(approvalId);
+  }
+
   return messages
     .map((msg) => {
       if (msg.role === "assistant") {
@@ -126,11 +133,19 @@ export function stripOrphanedToolCalls(messages: ModelMessage[]): ModelMessage[]
         const hasToolCalls = parts.some((p) => p.type === "tool-call");
         if (!hasToolCalls) return msg;
 
+        // A tool-approval-request must be dropped alongside the tool-call it
+        // points at. Left behind, @convex-dev/agent's autoDenyUnresolvedApprovals
+        // synthesizes a denial for it, and the AI SDK then either throws
+        // ToolCallNotFoundForApprovalError or writes an execution-denied result
+        // for a tool the user never declined.
+        const isKeptToolCall = (toolCallId: string | undefined): boolean =>
+          toolCallId !== undefined &&
+          (resolvedToolCallIds.has(toolCallId) || liveApprovalToolCallIds.has(toolCallId));
+
         const filtered = parts.filter(
           (p) =>
-            p.type !== "tool-call" ||
-            (p.toolCallId &&
-              (resolvedToolCallIds.has(p.toolCallId) || liveApprovalToolCallIds.has(p.toolCallId))),
+            (p.type !== "tool-call" && p.type !== "tool-approval-request") ||
+            isKeptToolCall(p.toolCallId),
         );
 
         if (filtered.length === 0) return null;
@@ -140,13 +155,19 @@ export function stripOrphanedToolCalls(messages: ModelMessage[]): ModelMessage[]
       if (msg.role === "tool") {
         if (typeof msg.content === "string" || !Array.isArray(msg.content)) return msg;
 
-        const parts = msg.content as Array<{ type: string; toolCallId?: string }>;
-        // tool-approval-response parts are keyed by approvalId, not toolCallId,
-        // so preserve them regardless of the kept-call set.
-        const filtered = parts.filter(
-          (p) =>
-            p.type === "tool-approval-response" ||
-            (p.toolCallId !== undefined && keptAssistantToolCallIds.has(p.toolCallId)),
+        const parts = msg.content as Array<{
+          type: string;
+          toolCallId?: string;
+          approvalId?: string;
+        }>;
+        // tool-approval-response parts are keyed by approvalId, not toolCallId.
+        // Keep one only when its originating request survived above — a response
+        // whose request was trimmed away makes the AI SDK throw
+        // InvalidToolApprovalError on the next turn.
+        const filtered = parts.filter((p) =>
+          p.type === "tool-approval-response"
+            ? p.approvalId !== undefined && keptApprovalIds.has(p.approvalId)
+            : p.toolCallId !== undefined && keptAssistantToolCallIds.has(p.toolCallId),
         );
 
         if (filtered.length === 0) return null;

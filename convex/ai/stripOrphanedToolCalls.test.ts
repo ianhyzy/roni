@@ -96,7 +96,46 @@ describe("stripOrphanedToolCalls", () => {
     const assistantContent = result[1].content as Array<{ type: string; toolCallId?: string }>;
     expect(assistantContent.some((p) => p.type === "tool-call")).toBe(false);
     expect(assistantContent.some((p) => p.type === "text")).toBe(true);
-    expect(assistantContent.some((p) => p.type === "tool-approval-request")).toBe(true);
+    // The approval-request goes with its tool-call. Leaving it behind lets
+    // @convex-dev/agent auto-deny it, which surfaces as a "Denied" badge on a
+    // push the user never declined.
+    expect(assistantContent.some((p) => p.type === "tool-approval-request")).toBe(false);
+  });
+
+  it("drops an approval response whose request was trimmed out of the window", () => {
+    const msgs: ModelMessage[] = [
+      { role: "user", content: "push it" },
+      {
+        role: "tool",
+        content: [{ type: "tool-approval-response", approvalId: "ap1", approved: true }],
+      },
+    ] as unknown as ModelMessage[];
+
+    const result = stripOrphanedToolCalls(msgs);
+
+    expect(result).toHaveLength(1);
+    expect(result[0].role).toBe("user");
+  });
+
+  it("keeps a resolved approval request and response together", () => {
+    const msgs: ModelMessage[] = [
+      { role: "user", content: "push it" },
+      {
+        role: "assistant",
+        content: [
+          { type: "tool-call", toolCallId: "tc1", toolName: "approve_week_plan", input: {} },
+          { type: "tool-approval-request", approvalId: "ap1", toolCallId: "tc1" },
+        ],
+      },
+      {
+        role: "tool",
+        content: [{ type: "tool-approval-response", approvalId: "ap1", approved: true }],
+      },
+    ] as unknown as ModelMessage[];
+
+    const result = stripOrphanedToolCalls(msgs);
+
+    expect(result).toEqual(msgs);
   });
 
   it("removes orphaned tool-call with no matching tool-result", () => {
