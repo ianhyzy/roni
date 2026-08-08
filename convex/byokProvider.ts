@@ -13,12 +13,39 @@ import {
   MIN_PROVIDER_BUDGET_LIMIT_USD,
   resolveAiBudgetPreferences,
 } from "../lib/aiBudgetPreferences";
-import type { ProviderKeyInfo, ProviderSettings } from "./byok";
+import {
+  aiBudgetPreferencesValidator,
+  providerIdValidator,
+  type ProviderKeyInfo,
+  type ProviderSettings,
+  providerSettingsValidator,
+} from "./byokShared";
 
 type RawKeyEntry = { encrypted?: string; addedAt?: number };
 
+const rawKeyEntryValidator = v.object({
+  encrypted: v.optional(v.string()),
+  addedAt: v.optional(v.number()),
+});
+
+const rawProviderSettingsValidator = v.union(
+  v.null(),
+  v.object({
+    selectedProvider: providerIdValidator,
+    modelOverride: v.union(v.string(), v.null()),
+    budgetPreferences: aiBudgetPreferencesValidator,
+    keys: v.object({
+      gemini: rawKeyEntryValidator,
+      claude: rawKeyEntryValidator,
+      openai: rawKeyEntryValidator,
+      openrouter: rawKeyEntryValidator,
+    }),
+  }),
+);
+
 export const _getAllProviderKeysRaw = internalQuery({
   args: {},
+  returns: rawProviderSettingsValidator,
   handler: async (ctx) => {
     const userId = await getEffectiveUserId(ctx);
     if (!userId) return null;
@@ -50,6 +77,7 @@ export const _getAllProviderKeysRaw = internalQuery({
 
 export const getProviderSettings = action({
   args: {},
+  returns: v.union(v.null(), providerSettingsValidator),
   handler: async (ctx): Promise<ProviderSettings | null> => {
     const userId = await ctx.runQuery(internal.lib.auth.resolveEffectiveUserId, {});
     if (!userId) return null;
@@ -74,7 +102,7 @@ export const getProviderSettings = action({
       }
     }
     return {
-      selectedProvider: raw.selectedProvider as ProviderId,
+      selectedProvider: raw.selectedProvider,
       modelOverride: raw.modelOverride,
       budgetPreferences: raw.budgetPreferences,
       keys,
@@ -84,6 +112,7 @@ export const getProviderSettings = action({
 
 export const setIgnoreBudget = mutation({
   args: { ignoreBudget: v.boolean() },
+  returns: aiBudgetPreferencesValidator,
   handler: async (ctx, { ignoreBudget }) => {
     const profile = await getAuthenticatedProfile(ctx);
     await rateLimiter.limit(ctx, "setBudgetPreference", { key: profile.userId, throws: true });
@@ -97,12 +126,13 @@ export const setIgnoreBudget = mutation({
 
 export const setSelectedProviderBudgetLimit = mutation({
   args: { budgetLimitUsd: v.number() },
+  returns: aiBudgetPreferencesValidator,
   handler: async (ctx, { budgetLimitUsd }) => {
     const profile = await getAuthenticatedProfile(ctx);
     await rateLimiter.limit(ctx, "setBudgetPreference", { key: profile.userId, throws: true });
     if (!isValidProviderBudgetLimitUsd(budgetLimitUsd)) {
       throw new Error(
-        `Budget limit must be between $${MIN_PROVIDER_BUDGET_LIMIT_USD.toFixed(2)} and $${MAX_PROVIDER_BUDGET_LIMIT_USD.toFixed(2)}`,
+        `Budget threshold must be between $${MIN_PROVIDER_BUDGET_LIMIT_USD.toFixed(2)} and $${MAX_PROVIDER_BUDGET_LIMIT_USD.toFixed(2)}`,
       );
     }
 

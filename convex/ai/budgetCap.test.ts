@@ -72,7 +72,7 @@ describe("budgetCapStopCondition", () => {
     expect(cost).toBeCloseTo(0.11, 6);
   });
 
-  it("fires once the cumulative BYOK cost crosses the provider cap", () => {
+  it("stops after a completed step crosses the cumulative-cost threshold", () => {
     let trip:
       | {
           estimatedCostUsd: number;
@@ -127,9 +127,10 @@ describe("budgetCapStopCondition", () => {
       stepCount: 2,
     });
     expect(trip?.estimatedCostUsd).toBeCloseTo(0.1125, 6);
+    expect(trip?.estimatedCostUsd).toBeGreaterThan(0.1);
   });
 
-  it("uses the configured provider budget limit", () => {
+  it("uses the configured provider budget threshold", () => {
     const onTrip = vi.fn();
     const stopWhen = budgetCapStopCondition({
       provider: "openai",

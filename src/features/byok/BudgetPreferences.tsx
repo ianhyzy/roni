@@ -79,7 +79,7 @@ export function BudgetPreferences({
     ) {
       setValidationState({
         sourceKey,
-        message: `Budget limit must be between $${MIN_PROVIDER_BUDGET_LIMIT_USD.toFixed(2)} and $${MAX_PROVIDER_BUDGET_LIMIT_USD.toFixed(2)}`,
+        message: `Budget threshold must be between $${MIN_PROVIDER_BUDGET_LIMIT_USD.toFixed(2)} and $${MAX_PROVIDER_BUDGET_LIMIT_USD.toFixed(2)}`,
       });
       return;
     }
@@ -89,9 +89,9 @@ export function BudgetPreferences({
     try {
       await onBudgetLimitSave(parsedLimit);
       setDraftState({ sourceKey, value: String(parsedLimit) });
-      toast.success("Budget limit saved");
+      toast.success("Budget threshold saved");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to save budget limit");
+      toast.error(error instanceof Error ? error.message : "Failed to save budget threshold");
     } finally {
       setSavingOperation(null);
     }
@@ -107,9 +107,9 @@ export function BudgetPreferences({
         <div>
           <p className="text-sm font-medium text-foreground">API budget guard</p>
           <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-            {providerLabel} is currently selected. The limit accumulates across model steps in one
-            attempt. A retry or fallback starts another model attempt and may spend up to this limit
-            again.
+            {providerLabel} is currently selected. The estimated cumulative cost is checked after
+            each completed model step. One step can take the estimated cost past the threshold. A
+            retry or fallback starts a new model attempt with a fresh threshold.
           </p>
         </div>
 
@@ -119,7 +119,7 @@ export function BudgetPreferences({
               Ignore budget for all providers
             </p>
             <p className="mt-1 text-xs text-muted-foreground">
-              Global setting: skip Roni&apos;s estimated-cost limits for every personal provider
+              Global setting: skip Roni&apos;s estimated-cost thresholds for every personal provider
               key.
             </p>
           </div>
@@ -143,7 +143,7 @@ export function BudgetPreferences({
         <form className="space-y-3 border-t border-border pt-4" onSubmit={handleLimitSave}>
           <div className="space-y-1.5">
             <Label htmlFor={inputId} className="text-xs text-muted-foreground">
-              Per-attempt budget limit for {providerLabel} (USD)
+              Per-attempt budget threshold for {providerLabel} (USD)
             </Label>
             <Input
               id={inputId}
@@ -181,8 +181,8 @@ export function BudgetPreferences({
               role="status"
               className="rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground"
             >
-              This provider limit remains saved, but no provider limits are enforced while Ignore
-              budget for all providers is on.
+              This provider threshold remains saved, but no provider thresholds are enforced while
+              Ignore budget for all providers is on.
             </p>
           )}
 
@@ -190,7 +190,7 @@ export function BudgetPreferences({
             {savingOperation === "limit" && (
               <Loader2 className="size-3.5 animate-spin" aria-hidden="true" />
             )}
-            Save limit
+            Save threshold
           </Button>
         </form>
       </CardContent>

@@ -135,9 +135,9 @@ describe("ProviderSection", () => {
 
     render(<ProviderSection />);
 
-    expect(await screen.findByLabelText("Per-attempt budget limit for OpenAI (USD)")).toHaveValue(
-      0.42,
-    );
+    expect(
+      await screen.findByLabelText("Per-attempt budget threshold for OpenAI (USD)"),
+    ).toHaveValue(0.42);
     fireEvent.click(screen.getByRole("switch", { name: "Ignore budget for all providers" }));
 
     await waitFor(() => {
@@ -180,17 +180,17 @@ describe("ProviderSection", () => {
     render(<ProviderSection />);
 
     const input = await screen.findByLabelText(
-      "Per-attempt budget limit for Anthropic Claude (USD)",
+      "Per-attempt budget threshold for Anthropic Claude (USD)",
     );
     expect(input).toBeEnabled();
     fireEvent.change(input, { target: { value: "0.55" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save limit" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save threshold" }));
 
     await waitFor(() => {
       expect(mockSetSelectedProviderBudgetLimit).toHaveBeenCalledWith({ budgetLimitUsd: 0.55 });
       expect(mockGetSettings).toHaveBeenCalledTimes(2);
       expect(
-        screen.getByLabelText("Per-attempt budget limit for Anthropic Claude (USD)"),
+        screen.getByLabelText("Per-attempt budget threshold for Anthropic Claude (USD)"),
       ).toHaveValue(0.55);
     });
   });

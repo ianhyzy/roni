@@ -34,7 +34,7 @@ import {
 
 export { getFinalizeCodeForError } from "./resilienceReporting";
 const BUDGET_CAP_MESSAGE =
-  "This model attempt reached your personal API budget limit, so I'm stopping here. A narrower follow-up starts a new attempt with a new limit.";
+  "This model attempt's estimated cumulative cost reached or passed your budget threshold after a completed step, so I'm stopping before another step. A narrower follow-up starts a new attempt with a fresh threshold.";
 const MASKED_UI_STREAM_ERROR = "An error occurred.";
 const MAX_OUTPUT_TOKENS = 4096;
 const RETRY_DELAY_MS = 3000;

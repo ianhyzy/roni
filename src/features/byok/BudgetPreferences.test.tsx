@@ -36,9 +36,18 @@ describe("BudgetPreferences", () => {
       "aria-checked",
       "false",
     );
-    expect(screen.getByLabelText("Per-attempt budget limit for OpenAI (USD)")).toHaveValue(0.42);
+    expect(screen.getByLabelText("Per-attempt budget threshold for OpenAI (USD)")).toHaveValue(
+      0.42,
+    );
     expect(screen.getByText(/OpenAI is currently selected/i)).toBeVisible();
-    expect(screen.getByText(/A retry or fallback starts another model attempt/i)).toBeVisible();
+    expect(screen.getByText(/checked after each completed model step/i)).toBeVisible();
+    expect(
+      screen.getByText(/one step can take the estimated cost past the threshold/i),
+    ).toBeVisible();
+    expect(
+      screen.getByText(/retry or fallback starts a new model attempt with a fresh threshold/i),
+    ).toBeVisible();
+    expect(screen.queryByText(/up to this limit/i)).not.toBeInTheDocument();
   });
 
   it("saves the ignore preference immediately", async () => {
@@ -73,17 +82,17 @@ describe("BudgetPreferences", () => {
       />,
     );
 
-    const input = screen.getByLabelText("Per-attempt budget limit for Anthropic Claude (USD)");
+    const input = screen.getByLabelText("Per-attempt budget threshold for Anthropic Claude (USD)");
     expect(input).toBeEnabled();
-    expect(screen.getByText(/no provider limits are enforced/i)).toBeVisible();
+    expect(screen.getByText(/no provider thresholds are enforced/i)).toBeVisible();
 
     fireEvent.change(input, { target: { value: "0.25" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save limit" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save threshold" }));
 
     await waitFor(() => {
       expect(mockBudgetLimitSave).toHaveBeenCalledWith(0.25);
     });
-    expect(toast.success).toHaveBeenCalledWith("Budget limit saved");
+    expect(toast.success).toHaveBeenCalledWith("Budget threshold saved");
   });
 
   it("rejects a provider limit below one cent", () => {
@@ -97,14 +106,14 @@ describe("BudgetPreferences", () => {
       />,
     );
 
-    const input = screen.getByLabelText("Per-attempt budget limit for OpenRouter (USD)");
+    const input = screen.getByLabelText("Per-attempt budget threshold for OpenRouter (USD)");
     fireEvent.change(input, { target: { value: "0.009" } });
-    const form = screen.getByRole("button", { name: "Save limit" }).closest("form");
-    if (!form) throw new Error("Expected budget limit form");
+    const form = screen.getByRole("button", { name: "Save threshold" }).closest("form");
+    if (!form) throw new Error("Expected budget threshold form");
     fireEvent.submit(form);
 
     expect(screen.getByRole("alert")).toHaveTextContent(
-      "Budget limit must be between $0.01 and $100.00",
+      "Budget threshold must be between $0.01 and $100.00",
     );
     expect(mockBudgetLimitSave).not.toHaveBeenCalled();
   });

@@ -1,7 +1,6 @@
-import { v } from "convex/values";
+import { type Infer, v } from "convex/values";
 import type { Doc } from "./_generated/dataModel";
 import { getProviderConfig, type ProviderId } from "./ai/providers";
-import type { AiBudgetPreferences } from "../lib/aiBudgetPreferences";
 
 export const providerIdValidator = v.union(
   v.literal("gemini"),
@@ -10,6 +9,37 @@ export const providerIdValidator = v.union(
   v.literal("openrouter"),
 );
 
+export const aiBudgetPreferencesValidator = v.object({
+  ignoreBudget: v.boolean(),
+  providerLimitsUsd: v.object({
+    gemini: v.number(),
+    claude: v.number(),
+    openai: v.number(),
+    openrouter: v.number(),
+  }),
+});
+
+const providerKeyInfoValidator = v.union(
+  v.object({ hasKey: v.literal(false) }),
+  v.object({
+    hasKey: v.literal(true),
+    maskedLast4: v.string(),
+    addedAt: v.number(),
+  }),
+);
+
+export const providerSettingsValidator = v.object({
+  selectedProvider: providerIdValidator,
+  modelOverride: v.union(v.string(), v.null()),
+  keys: v.object({
+    gemini: providerKeyInfoValidator,
+    claude: providerKeyInfoValidator,
+    openai: providerKeyInfoValidator,
+    openrouter: providerKeyInfoValidator,
+  }),
+  budgetPreferences: aiBudgetPreferencesValidator,
+});
+
 export type ProviderKeyResult = {
   provider: ProviderId;
   apiKey: string;
@@ -17,15 +47,9 @@ export type ProviderKeyResult = {
   isHouseKey?: boolean;
 };
 
-export type ProviderKeyInfo =
-  { hasKey: false } | { hasKey: true; maskedLast4: string; addedAt: number };
+export type ProviderKeyInfo = Infer<typeof providerKeyInfoValidator>;
 
-export type ProviderSettings = {
-  selectedProvider: ProviderId;
-  modelOverride: string | null;
-  keys: Record<ProviderId, ProviderKeyInfo>;
-  budgetPreferences: AiBudgetPreferences;
-};
+export type ProviderSettings = Infer<typeof providerSettingsValidator>;
 
 export const KEY_FIELD_MAP: Record<ProviderId, keyof Doc<"userProfiles">> = {
   gemini: "geminiApiKeyEncrypted",
