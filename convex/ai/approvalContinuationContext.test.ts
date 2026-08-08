@@ -77,7 +77,7 @@ async function buildThread() {
     }),
   );
 
-  return { t, userId, threadId };
+  return { t, userId, threadId, promptMessageId: promptMessages[0]._id };
 }
 
 async function fetchContext(
@@ -157,6 +157,44 @@ describe("approval continuation context", () => {
     expect(partTypes).not.toContain("tool-approval-request");
     expect(partTypes).not.toContain("tool-call");
     expect(messages[messages.length - 1]?.role).toBe("user");
+  });
+
+  it("does not auto-deny an approval when its tool result already exists without a response", async () => {
+    const { t, userId, threadId, promptMessageId } = await buildThread();
+    await t.run((ctx) =>
+      saveMessages(ctx, components.agent, {
+        threadId,
+        userId,
+        promptMessageId,
+        messages: [
+          {
+            role: "tool",
+            content: [
+              {
+                type: "tool-result",
+                toolCallId: "approve-week-1",
+                toolName: "approve_week_plan",
+                output: { type: "text", value: "pushed" },
+              },
+            ],
+          },
+        ],
+        metadata: [{ status: "success" }],
+      }),
+    );
+
+    const messages = await fetchContext(t, {
+      userId,
+      threadId,
+      prompt: "what happened with that push?",
+    });
+
+    expect(summarize(messages)).toEqual([
+      { role: "user", types: "text" },
+      { role: "assistant", types: ["tool-call"] },
+      { role: "tool", types: ["tool-result"] },
+      { role: "user", types: "text" },
+    ]);
   });
 });
 

@@ -4,6 +4,7 @@
  */
 
 import type { ModelMessage, UserContent } from "ai";
+import { readToolPartReference, withAssistantParts, withToolParts } from "./modelMessageToolParts";
 import { hasSearchProvenance, withSearchProvenance } from "./searchProvenance";
 
 // ---------------------------------------------------------------------------
@@ -42,18 +43,12 @@ export function mergeConsecutiveSameRole(messages: ModelMessage[]): ModelMessage
   return result;
 }
 
-// ---------------------------------------------------------------------------
-// Strip orphaned tool calls
-// ---------------------------------------------------------------------------
+// Strip orphaned tool calls.
 
 export function stripOrphanedToolCalls(messages: ModelMessage[]): ModelMessage[] {
-  // An approval-request is "live" only when no fresh user message follows it.
-  // If the user types a new prompt instead of clicking approve/deny, the
-  // pending tool-call is abandoned — keeping it in the LLM context produces
-  // Gemini's "function call turn comes immediately after a user turn or after
-  // a function response turn" error, since the fresh user message breaks the
-  // required tool-call → tool-result pairing. Approval responses are written
-  // on `role: "tool"`, so any `role: "user"` message is a fresh prompt.
+  // A request is live only while no fresh user prompt follows it. Otherwise
+  // the required tool-call → tool-result adjacency is broken and Gemini rejects
+  // the history. Approval responses use the tool role, not the user role.
   let lastFreshUserIdx = -1;
   for (let i = messages.length - 1; i >= 0; i--) {
     if (messages[i].role === "user") {
@@ -63,38 +58,40 @@ export function stripOrphanedToolCalls(messages: ModelMessage[]): ModelMessage[]
   }
 
   const approvalIdToToolCallId = new Map<string, string>();
+  const liveApprovalIds = new Set<string>();
   const liveApprovalToolCallIds = new Set<string>();
-  const resolvedToolCallIds = new Set<string>();
+  const toolResultIds = new Set<string>();
+  const approvalResponseIds = new Set<string>();
   for (let i = 0; i < messages.length; i++) {
     const msg = messages[i];
     if (typeof msg.content === "string" || !Array.isArray(msg.content)) continue;
-    for (const part of msg.content as Array<{
-      type: string;
-      approvalId?: string;
-      toolCallId?: string;
-    }>) {
-      if (part.type === "tool-approval-request" && part.approvalId && part.toolCallId) {
-        approvalIdToToolCallId.set(part.approvalId, part.toolCallId);
+    for (const part of msg.content) {
+      const reference = readToolPartReference(part);
+      if (!reference) continue;
+      if (
+        reference.type === "tool-approval-request" &&
+        reference.approvalId &&
+        reference.toolCallId
+      ) {
+        approvalIdToToolCallId.set(reference.approvalId, reference.toolCallId);
         if (i > lastFreshUserIdx) {
-          liveApprovalToolCallIds.add(part.toolCallId);
+          liveApprovalIds.add(reference.approvalId);
+          liveApprovalToolCallIds.add(reference.toolCallId);
         }
       }
-      if (part.type === "tool-result" && part.toolCallId) {
-        resolvedToolCallIds.add(part.toolCallId);
+      if (reference.type === "tool-result" && reference.toolCallId) {
+        toolResultIds.add(reference.toolCallId);
+      }
+      if (reference.type === "tool-approval-response" && reference.approvalId) {
+        approvalResponseIds.add(reference.approvalId);
       }
     }
   }
 
-  for (const msg of messages) {
-    if (typeof msg.content === "string" || !Array.isArray(msg.content)) continue;
-    for (const part of msg.content as Array<{ type: string; approvalId?: string }>) {
-      if (part.type === "tool-approval-response" && part.approvalId) {
-        const toolCallId = approvalIdToToolCallId.get(part.approvalId);
-        if (toolCallId) {
-          resolvedToolCallIds.add(toolCallId);
-        }
-      }
-    }
+  const resolvedToolCallIds = new Set(toolResultIds);
+  for (const approvalId of approvalResponseIds) {
+    const toolCallId = approvalIdToToolCallId.get(approvalId);
+    if (toolCallId) resolvedToolCallIds.add(toolCallId);
   }
 
   // Build the set of tool-call ids that survive the assistant-message filter
@@ -106,22 +103,29 @@ export function stripOrphanedToolCalls(messages: ModelMessage[]): ModelMessage[]
   for (const msg of messages) {
     if (msg.role !== "assistant") continue;
     if (typeof msg.content === "string" || !Array.isArray(msg.content)) continue;
-    for (const part of msg.content as Array<{ type: string; toolCallId?: string }>) {
-      if (part.type !== "tool-call" || !part.toolCallId) continue;
+    for (const part of msg.content) {
+      const reference = readToolPartReference(part);
+      if (reference?.type !== "tool-call" || !reference.toolCallId) continue;
       if (
-        resolvedToolCallIds.has(part.toolCallId) ||
-        liveApprovalToolCallIds.has(part.toolCallId)
+        resolvedToolCallIds.has(reference.toolCallId) ||
+        liveApprovalToolCallIds.has(reference.toolCallId)
       ) {
-        keptAssistantToolCallIds.add(part.toolCallId);
+        keptAssistantToolCallIds.add(reference.toolCallId);
       }
     }
   }
 
-  // Approval ids whose originating tool-call survives, so request and response
-  // parts are dropped or kept as a pair.
+  // A completed approval survives only with its response. A pending approval
+  // survives only while live and before a tool result proves execution moved on.
   const keptApprovalIds = new Set<string>();
   for (const [approvalId, toolCallId] of approvalIdToToolCallId) {
-    if (keptAssistantToolCallIds.has(toolCallId)) keptApprovalIds.add(approvalId);
+    if (!keptAssistantToolCallIds.has(toolCallId)) continue;
+    if (
+      approvalResponseIds.has(approvalId) ||
+      (liveApprovalIds.has(approvalId) && !toolResultIds.has(toolCallId))
+    ) {
+      keptApprovalIds.add(approvalId);
+    }
   }
 
   return messages
@@ -129,50 +133,47 @@ export function stripOrphanedToolCalls(messages: ModelMessage[]): ModelMessage[]
       if (msg.role === "assistant") {
         if (typeof msg.content === "string" || !Array.isArray(msg.content)) return msg;
 
-        const parts = msg.content as Array<{
-          type: string;
-          toolCallId?: string;
-          approvalId?: string;
-        }>;
-
         // A tool-approval-request must be dropped alongside the tool-call it
         // points at, even when persistence split them across assistant messages.
         // Left behind, @convex-dev/agent's autoDenyUnresolvedApprovals creates a
         // denial for a tool the user never declined.
-        const filtered = parts.filter((part) => {
-          if (part.type === "tool-call") {
-            return part.toolCallId !== undefined && keptAssistantToolCallIds.has(part.toolCallId);
+        const filtered = msg.content.filter((part) => {
+          const reference = readToolPartReference(part);
+          if (!reference) return false;
+          if (reference.type === "tool-call") {
+            return (
+              reference.toolCallId !== undefined &&
+              keptAssistantToolCallIds.has(reference.toolCallId)
+            );
           }
-          if (part.type === "tool-approval-request") {
-            return part.approvalId !== undefined && keptApprovalIds.has(part.approvalId);
+          if (reference.type === "tool-approval-request") {
+            return reference.approvalId !== undefined && keptApprovalIds.has(reference.approvalId);
           }
           return true;
         });
 
         if (filtered.length === 0) return null;
-        return { ...msg, content: filtered } as ModelMessage;
+        return withAssistantParts(msg, filtered);
       }
 
       if (msg.role === "tool") {
         if (typeof msg.content === "string" || !Array.isArray(msg.content)) return msg;
 
-        const parts = msg.content as Array<{
-          type: string;
-          toolCallId?: string;
-          approvalId?: string;
-        }>;
         // tool-approval-response parts are keyed by approvalId, not toolCallId.
         // Keep one only when its originating request survived above — a response
         // whose request was trimmed away makes the AI SDK throw
         // InvalidToolApprovalError on the next turn.
-        const filtered = parts.filter((p) =>
-          p.type === "tool-approval-response"
-            ? p.approvalId !== undefined && keptApprovalIds.has(p.approvalId)
-            : p.toolCallId !== undefined && keptAssistantToolCallIds.has(p.toolCallId),
-        );
+        const filtered = msg.content.filter((part) => {
+          const reference = readToolPartReference(part);
+          if (!reference) return false;
+          return reference.type === "tool-approval-response"
+            ? reference.approvalId !== undefined && keptApprovalIds.has(reference.approvalId)
+            : reference.toolCallId !== undefined &&
+                keptAssistantToolCallIds.has(reference.toolCallId);
+        });
 
         if (filtered.length === 0) return null;
-        return { ...msg, content: filtered } as ModelMessage;
+        return withToolParts(msg, filtered);
       }
 
       return msg;
