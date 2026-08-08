@@ -67,13 +67,19 @@ function fromWeekPlanDetails(output: unknown): WeekPlanPresentation | null {
   const trainingDays = plan.days.filter((day) => day.exercises.length > 0);
   if (trainingDays.length === 0) return null;
 
-  const pushedCount = trainingDays.filter((day) => day.status === "pushed").length;
-  const statusNote =
-    pushedCount === trainingDays.length
+  const hasCompleteWorkoutStatus = trainingDays.every((day) => day.workoutStatus !== undefined);
+  const pushedCount = trainingDays.filter(
+    (day) => day.workoutStatus === "pushed" || day.workoutStatus === "completed",
+  ).length;
+  const statusNote = !hasCompleteWorkoutStatus
+    ? undefined
+    : pushedCount === trainingDays.length
       ? "pushed to Tonal"
       : pushedCount > 0
         ? `${pushedCount} of ${trainingDays.length} pushed to Tonal`
-        : "draft - not pushed yet";
+        : trainingDays.every((day) => day.workoutStatus === "draft")
+          ? "draft - not pushed yet"
+          : "not fully pushed to Tonal";
 
   const presentation = weekPlanPresentationSchema.safeParse({
     weekStartDate: plan.weekStartDate,
@@ -90,7 +96,12 @@ function fromWeekPlanDetails(output: unknown): WeekPlanPresentation | null {
         duration: exercise.durationSeconds,
       })),
     })),
-    summary: `${plan.preferredSplit.toUpperCase()} split - ${trainingDays.length} training days - ${statusNote}`,
+    summary: [
+      `${plan.preferredSplit.toUpperCase()} split - ${trainingDays.length} training days`,
+      statusNote,
+    ]
+      .filter(Boolean)
+      .join(" - "),
   });
 
   return presentation.success ? presentation.data : null;

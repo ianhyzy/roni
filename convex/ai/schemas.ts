@@ -136,6 +136,9 @@ const weekPlanDetailsDaySchema = z.object({
   dayName: z.string(),
   sessionType: z.string(),
   status: z.string(),
+  workoutStatus: z
+    .enum(["draft", "pushing", "pushed", "completed", "deleted", "failed"])
+    .optional(),
   estimatedDuration: z.number().optional(),
   exercises: z.array(weekPlanDetailsExerciseSchema),
 });

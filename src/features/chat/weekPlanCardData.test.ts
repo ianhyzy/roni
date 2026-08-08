@@ -23,7 +23,8 @@ function weekPlanDetailsOutput(
           dayIndex: 0,
           dayName: "Monday",
           sessionType: "upper",
-          status: "draft",
+          status: "programmed",
+          workoutStatus: "draft",
           estimatedDuration: 30,
           exercises: [
             {
@@ -82,7 +83,8 @@ describe("toWeekPlanPresentation", () => {
           dayIndex: 0,
           dayName: "Monday",
           sessionType: "upper",
-          status: "pushed",
+          status: "programmed",
+          workoutStatus: "pushed",
           estimatedDuration: 45,
           exercises: [
             { movementId: "m1", name: "Bench Press", muscleGroups: ["Chest"], sets: 3, reps: 8 },
@@ -96,6 +98,27 @@ describe("toWeekPlanPresentation", () => {
     );
   });
 
+  it("does not invent a push state for legacy details without workout status", () => {
+    const output = weekPlanDetailsOutput({
+      days: [
+        {
+          dayIndex: 0,
+          dayName: "Monday",
+          sessionType: "upper",
+          status: "programmed",
+          estimatedDuration: 45,
+          exercises: [
+            { movementId: "m1", name: "Bench Press", muscleGroups: ["Chest"], sets: 3, reps: 8 },
+          ],
+        },
+      ],
+    });
+
+    expect(toWeekPlanPresentation("get_week_plan_details", output)?.summary).toBe(
+      "UPPER_LOWER split - 1 training days",
+    );
+  });
+
   it("defaults a missing estimatedDuration instead of failing the card", () => {
     const output = weekPlanDetailsOutput({
       days: [
@@ -103,7 +126,8 @@ describe("toWeekPlanPresentation", () => {
           dayIndex: 1,
           dayName: "Tuesday",
           sessionType: "lower",
-          status: "draft",
+          status: "programmed",
+          workoutStatus: "draft",
           exercises: [
             { movementId: "m3", name: "Racked Squat", muscleGroups: ["Quads"], sets: 3, reps: 10 },
           ],
@@ -123,7 +147,8 @@ describe("toWeekPlanPresentation", () => {
           dayIndex: 0,
           dayName: "Monday",
           sessionType: "upper",
-          status: "draft",
+          status: "programmed",
+          workoutStatus: "draft",
           estimatedDuration: 30,
           exercises: [
             {
