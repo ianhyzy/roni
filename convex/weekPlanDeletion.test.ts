@@ -43,15 +43,20 @@ async function seedWeekPlan(t: ReturnType<typeof convexTest>, workouts: WorkoutS
       weekStartDate: "2026-08-03",
       preferredSplit: "upper_lower",
       targetDays: workoutPlanIds.length,
-      days: workoutPlanIds.map((workoutPlanId) => ({
-        sessionType: "upper" as const,
-        status: "programmed" as const,
-        workoutPlanId,
-      })),
+      days: Array.from({ length: 7 }, (_, dayIndex) => {
+        const workoutPlanId = workoutPlanIds[dayIndex];
+        return workoutPlanId
+          ? {
+              sessionType: "upper" as const,
+              status: "programmed" as const,
+              workoutPlanId,
+            }
+          : { sessionType: "rest" as const, status: "programmed" as const };
+      }),
       createdAt: Date.now(),
       updatedAt: Date.now(),
     });
-    return { userId, weekPlanId };
+    return { userId, weekPlanId, workoutPlanIds };
   });
 }
 
@@ -80,6 +85,22 @@ describe("getWeekPlanDeletionState", () => {
       { status: "pushed", tonalWorkoutId: "tw-1" },
       { status: "completed", tonalWorkoutId: "tw-2" },
     ]);
+
+    await expect(
+      t.query(internal.weekPlanDeletion.getWeekPlanDeletionState, { userId, weekPlanId }),
+    ).resolves.toEqual({ ok: false, error: COMPLETED_WEEK_PLAN_DELETE_ERROR });
+  });
+
+  it("refuses a completed day even when its linked workout remains pushed", async () => {
+    const t = convexTest(schema, modules);
+    const { userId, weekPlanId } = await seedWeekPlan(t, [
+      { status: "pushed", tonalWorkoutId: "tw-1" },
+    ]);
+    await t.mutation(internal.weekPlans.setDayStatusInternal, {
+      weekPlanId,
+      dayIndex: 0,
+      status: "completed",
+    });
 
     await expect(
       t.query(internal.weekPlanDeletion.getWeekPlanDeletionState, { userId, weekPlanId }),
@@ -184,5 +205,55 @@ describe("deleteWeekPlanInternal allowPushed", () => {
         allowPushed: true,
       }),
     ).resolves.toEqual({ ok: false, error: "Workout scheduling is in progress" });
+  });
+
+  it("rechecks completed days after preflight before deleting local rows", async () => {
+    const t = convexTest(schema, modules);
+    const { userId, weekPlanId, workoutPlanIds } = await seedWeekPlan(t, [
+      { status: "pushed", tonalWorkoutId: "tw-1" },
+    ]);
+    await expect(
+      t.query(internal.weekPlanDeletion.getWeekPlanDeletionState, { userId, weekPlanId }),
+    ).resolves.toEqual({ ok: true, tonalWorkoutIds: ["tw-1"] });
+    await t.mutation(internal.weekPlans.setDayStatusInternal, {
+      weekPlanId,
+      dayIndex: 0,
+      status: "completed",
+    });
+
+    await expect(
+      t.mutation(internal.weekPlans.deleteWeekPlanInternal, {
+        userId,
+        weekPlanId,
+        allowPushed: true,
+      }),
+    ).resolves.toEqual({ ok: false, error: COMPLETED_WEEK_PLAN_DELETE_ERROR });
+    const retainedRows = await t.run(async (ctx) => ({
+      plan: await ctx.db.get(weekPlanId),
+      workout: await ctx.db.get(workoutPlanIds[0]),
+    }));
+    expect(retainedRows.plan).not.toBeNull();
+    expect(retainedRows.workout).not.toBeNull();
+  });
+
+  it("never lets allowPushed override a completed workout status", async () => {
+    const t = convexTest(schema, modules);
+    const { userId, weekPlanId, workoutPlanIds } = await seedWeekPlan(t, [
+      { status: "completed", tonalWorkoutId: "tw-1" },
+    ]);
+
+    await expect(
+      t.mutation(internal.weekPlans.deleteWeekPlanInternal, {
+        userId,
+        weekPlanId,
+        allowPushed: true,
+      }),
+    ).resolves.toEqual({ ok: false, error: COMPLETED_WEEK_PLAN_DELETE_ERROR });
+    const retainedRows = await t.run(async (ctx) => ({
+      plan: await ctx.db.get(weekPlanId),
+      workout: await ctx.db.get(workoutPlanIds[0]),
+    }));
+    expect(retainedRows.plan).not.toBeNull();
+    expect(retainedRows.workout).not.toBeNull();
   });
 });

@@ -4,6 +4,7 @@ import { describe, expect, test } from "vitest";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import schema from "./schema";
+import { COMPLETED_WEEK_PLAN_DELETE_ERROR } from "./weekPlanDeletion";
 import { getWorkoutApprovalFingerprint } from "./weekPlanHelpers";
 
 const modules = import.meta.glob("./**/*.*s");
@@ -94,7 +95,7 @@ describe("deleteWeekPlanInternal", () => {
     {
       name: "completed",
       workout: { status: "completed" as const, tonalWorkoutId: "tonal-1" },
-      error: "Only draft week plans can be deleted",
+      error: COMPLETED_WEEK_PLAN_DELETE_ERROR,
     },
     {
       name: "scheduled",
