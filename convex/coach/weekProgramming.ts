@@ -201,15 +201,6 @@ export const generateDraftWeekPlan = internalAction({
       eliminatedByMovementId: number;
       eliminatedByAccessory: number;
     }[] = [];
-    // Warmup/cooldown blocks are prepended to the same session, so they must
-    // honor every exclusion the main blocks do — a "no jumping" restriction
-    // that only filters main work still lands plyometrics in the warmup.
-    const warmupCooldownConstraints = {
-      excludeAccessories: data.constraints?.excludeAccessories,
-      excludeMovementIds: data.constraints?.excludeMovementIds,
-      excludeNameSubstrings: data.constraints?.excludeNameSubstrings,
-    };
-
     for (const { dayIndex, sessionType } of daySessions) {
       const targetMuscleGroups =
         SESSION_TYPE_MUSCLES[sessionType] ?? SESSION_TYPE_MUSCLES.full_body;
@@ -246,13 +237,13 @@ export const generateDraftWeekPlan = internalAction({
         catalog,
         targetMuscleGroups,
         maxExercises: wcCounts.warmup,
-        constraints: warmupCooldownConstraints,
+        constraints: data.constraints,
       });
       const cooldownIds = selectCooldownExercises({
         catalog,
         targetMuscleGroups,
         maxExercises: wcCounts.cooldown,
-        constraints: warmupCooldownConstraints,
+        constraints: data.constraints,
       });
 
       // Progressive overload suggestions
