@@ -4,7 +4,7 @@ import type { Prompter } from "./prompts";
 import { stepSetGoogleKey } from "./steps";
 
 vi.mock("./convex", () => ({
-  listConvexEnv: vi.fn(),
+  readConvexEnv: vi.fn(),
   runConvexDevOnce: vi.fn(),
   setConvexEnv: vi.fn(),
 }));
@@ -26,13 +26,13 @@ describe("stepSetGoogleKey", () => {
   it("stores a current AQ-dot-prefixed Google key", async () => {
     const key = "AQ." + "X".repeat(36);
 
-    await stepSetGoogleKey(createPrompter(key), new Map());
+    await stepSetGoogleKey(createPrompter(key), new Set());
 
     expect(setConvexEnv).toHaveBeenCalledWith("GOOGLE_GENERATIVE_AI_API_KEY", key);
   });
 
   it("rejects a key from another provider", async () => {
-    const result = stepSetGoogleKey(createPrompter("sk-wrong-provider-key"), new Map());
+    const result = stepSetGoogleKey(createPrompter("sk-wrong-provider-key"), new Set());
 
     await expect(result).rejects.toThrow(/expected 'AQ\.\.\.' or 'AIza\.\.\.' format/);
     expect(setConvexEnv).not.toHaveBeenCalled();

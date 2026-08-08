@@ -1,21 +1,17 @@
 import { spawnSync } from "node:child_process";
-import { parseEnv } from "node:util";
 
 const CONVEX_ENV_NAME = /^[A-Za-z][A-Za-z0-9_]*$/;
-// parseEnv silently skips malformed dotenv text, so validate the complete
-// round-trippable `convex env list` stream before parsing it.
-const CONVEX_ENV_LIST_OUTPUT =
-  /^(?:[A-Za-z][A-Za-z0-9_]*=(?:'(?:[^'\r\n]|\r?\n)*'|"(?:[^"\r\n]|\r?\n)*"|(?!['"`])[^#\r\n]*)(?:\r?\n|$))*$/;
+const CONVEX_ENV_NAMES_OUTPUT = /^(?:[A-Za-z][A-Za-z0-9_]*\r?\n)*$/;
 const INVALID_CONVEX_ENV_OUTPUT =
   "npx convex env list returned an unexpected format; setup cannot safely inspect the deployment.";
 
 /**
- * Run `npx convex env list` and return a map of variable name -> value.
- * Parse the CLI's documented dotenv output as a whole so quoted multiline
- * values round-trip without exposing their continuation lines in errors.
+ * List names without asking the CLI to print unrelated secret values.
+ * Requiring a complete newline-terminated stream catches truncated or foreign
+ * output instead of silently returning a partial view of the deployment.
  */
-export function listConvexEnv(): Map<string, string> {
-  const result = spawnSync("npx", ["convex", "env", "list"], {
+export function listConvexEnvNames(): Set<string> {
+  const result = spawnSync("npx", ["convex", "env", "list", "--names-only"], {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -24,27 +20,39 @@ export function listConvexEnv(): Map<string, string> {
     throw new Error(`npx convex env list failed (exit ${result.status}).`);
   }
 
-  if (!CONVEX_ENV_LIST_OUTPUT.test(result.stdout)) {
+  if (!CONVEX_ENV_NAMES_OUTPUT.test(result.stdout)) {
     throw new Error(INVALID_CONVEX_ENV_OUTPUT);
   }
 
-  let entries: Array<[string, string]>;
-  try {
-    entries = [];
-    for (const [key, value] of Object.entries(parseEnv(result.stdout))) {
-      if (value === undefined) throw new Error(INVALID_CONVEX_ENV_OUTPUT);
-      entries.push([key, value]);
+  if (!result.stdout) return new Set();
+  return new Set(result.stdout.split(/\r?\n/).slice(0, -1));
+}
+
+/** Read only the values that final setup validation needs to inspect. */
+export function readConvexEnv(namesToRead: readonly string[]): Map<string, string> {
+  if (namesToRead.some((name) => !CONVEX_ENV_NAME.test(name))) {
+    throw new Error("Invalid Convex environment variable name requested by setup.");
+  }
+
+  const existingNames = listConvexEnvNames();
+  const entries = new Map<string, string>();
+  for (const name of new Set(namesToRead)) {
+    if (!existingNames.has(name)) continue;
+    const result = spawnSync("npx", ["convex", "env", "get", name], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    if (result.status !== 0) {
+      throw new Error(`npx convex env get ${name} failed (exit ${result.status}).`);
     }
-  } catch {
-    throw new Error(INVALID_CONVEX_ENV_OUTPUT);
+    if (!result.stdout.endsWith("\n")) {
+      throw new Error(
+        `npx convex env get ${name} returned an unexpected format; setup cannot safely inspect the value.`,
+      );
+    }
+    entries.set(name, result.stdout.slice(0, -1));
   }
-  const hasUnexpectedOutput =
-    (result.stdout.trim().length > 0 && entries.length === 0) ||
-    entries.some(([key]) => !CONVEX_ENV_NAME.test(key));
-  if (hasUnexpectedOutput) {
-    throw new Error(INVALID_CONVEX_ENV_OUTPUT);
-  }
-  return new Map(entries);
+  return entries;
 }
 
 /**

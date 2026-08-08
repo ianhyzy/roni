@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { GEMINI_API_KEY_PATTERN } from "../../lib/geminiApiKey";
-import { listConvexEnv, runConvexDevOnce, setConvexEnv } from "./convex";
+import { readConvexEnv, runConvexDevOnce, setConvexEnv } from "./convex";
 import { mergeEnv, parseEnvFile, readEnvFile, writeEnvFile } from "./envFile";
 import { generateJwtKeypair, randomHex } from "./keygen";
 import type { Prompter } from "./prompts";
@@ -65,7 +65,7 @@ export function stepBootstrapConvex(): void {
 
 async function promptOverwriteIfSet(
   prompter: Prompter,
-  existing: Map<string, string> | Set<string>,
+  existing: ReadonlySet<string>,
   key: string,
 ): Promise<boolean> {
   if (!existing.has(key)) return true;
@@ -88,7 +88,7 @@ async function promptRequiredSecret(prompter: Prompter, question: string): Promi
 
 export async function stepSetGoogleKey(
   prompter: Prompter,
-  existing: Map<string, string>,
+  existing: ReadonlySet<string>,
 ): Promise<void> {
   const shouldSet = await promptOverwriteIfSet(prompter, existing, "GOOGLE_GENERATIVE_AI_API_KEY");
   if (!shouldSet) {
@@ -109,7 +109,7 @@ export async function stepSetGoogleKey(
 
 export async function stepSetRandomHex(
   prompter: Prompter,
-  existing: Map<string, string>,
+  existing: ReadonlySet<string>,
   key: string,
 ): Promise<void> {
   const shouldSet = await promptOverwriteIfSet(prompter, existing, key);
@@ -123,7 +123,7 @@ export async function stepSetRandomHex(
 
 export async function stepSetJwtKeys(
   prompter: Prompter,
-  existing: Map<string, string>,
+  existing: ReadonlySet<string>,
 ): Promise<void> {
   const hasPrivate = existing.has("JWT_PRIVATE_KEY");
   const hasJwks = existing.has("JWKS");
@@ -199,7 +199,7 @@ function writeToEnvLocal(key: string, value: string): void {
 
 async function runOneIntegration(
   prompter: Prompter,
-  existing: Map<string, string>,
+  existing: ReadonlySet<string>,
   integration: OptionalIntegration,
 ): Promise<void> {
   const alreadySet = existing.has(integration.key);
@@ -231,7 +231,7 @@ async function runOneIntegration(
 
 export async function stepOptionalIntegrations(
   prompter: Prompter,
-  existing: Map<string, string>,
+  existing: ReadonlySet<string>,
 ): Promise<void> {
   const failures: Array<{ integration: string; message: string }> = [];
   for (const integration of OPTIONAL_INTEGRATIONS) {
@@ -250,7 +250,7 @@ export async function stepOptionalIntegrations(
 }
 
 export function stepValidate(): void {
-  const convexEnv = listConvexEnv();
+  const convexEnv = readConvexEnv(REQUIRED_CONVEX_SECRETS);
   const envFile = parseEnvFile(readEnvFile(ENV_LOCAL_PATH));
   const result = validate(convexEnv, envFile);
 
