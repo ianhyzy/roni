@@ -1,11 +1,18 @@
 import { spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
+import path from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { listConvexEnvNames, readConvexEnv, setConvexEnv } from "./convex";
+import { listConvexEnvNames, readConvexEnv, runConvexDevOnce, setConvexEnv } from "./convex";
 
 const spawnResults = vi.hoisted(
   () => [] as Array<{ status: number; stderr: string; stdout: string }>,
 );
 const OPTION_LIKE_MULTILINE_VALUE = ["-----synthetic-option-like-value", "second-line"].join("\n");
+const EXPECTED_CONVEX_CLI_PATH = path.join(
+  path.dirname(createRequire(import.meta.url).resolve("convex/package.json")),
+  "bin",
+  "main.js",
+);
 
 function queueSpawnResult({
   status = 0,
@@ -42,10 +49,14 @@ describe("Convex setup CLI helpers", () => {
       const names = listConvexEnvNames();
 
       expect(names).toEqual(new Set(["JWT_PRIVATE_KEY", "lowercase_Name9"]));
-      expect(spawnSync).toHaveBeenCalledWith("npx", ["convex", "env", "list", "--names-only"], {
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "pipe"],
-      });
+      expect(spawnSync).toHaveBeenCalledWith(
+        process.execPath,
+        [EXPECTED_CONVEX_CLI_PATH, "env", "list", "--names-only"],
+        {
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
     });
 
     it("returns an empty set when the deployment has no variables", () => {
@@ -104,17 +115,22 @@ describe("Convex setup CLI helpers", () => {
       expect(env.get("note")).toBe('"starts');
       expect(spawnSync).toHaveBeenNthCalledWith(
         1,
-        "npx",
-        ["convex", "env", "list", "--names-only"],
+        process.execPath,
+        [EXPECTED_CONVEX_CLI_PATH, "env", "list", "--names-only"],
         {
           encoding: "utf8",
           stdio: ["ignore", "pipe", "pipe"],
         },
       );
-      expect(spawnSync).toHaveBeenNthCalledWith(2, "npx", ["convex", "env", "get", "note"], {
-        encoding: "utf8",
-        stdio: ["ignore", "pipe", "pipe"],
-      });
+      expect(spawnSync).toHaveBeenNthCalledWith(
+        2,
+        process.execPath,
+        [EXPECTED_CONVEX_CLI_PATH, "env", "get", "note"],
+        {
+          encoding: "utf8",
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
     });
 
     it("strips only the CLI newline from a multiline required value", () => {
@@ -183,13 +199,25 @@ describe("Convex setup CLI helpers", () => {
 
       setConvexEnv("JWT_PRIVATE_KEY", value);
 
-      expect(spawnSync).toHaveBeenCalledWith("npx", ["convex", "env", "set", "JWT_PRIVATE_KEY"], {
-        encoding: "utf8",
-        input: value,
-        stdio: ["pipe", "pipe", "pipe"],
-      });
       const commandArgs = vi.mocked(spawnSync).mock.calls.at(0)?.[1];
       expect(commandArgs).not.toContain(value);
+      const spawnOptions = vi.mocked(spawnSync).mock.calls.at(0)?.[2];
+      const transportInput =
+        spawnOptions && typeof spawnOptions === "object" && "input" in spawnOptions
+          ? spawnOptions.input
+          : undefined;
+      expect(typeof transportInput).toBe("string");
+      if (typeof transportInput !== "string") throw new Error("Expected string stdin input");
+      expect(transportInput.replace(/\n$/, "")).toBe(value);
+      expect(spawnSync).toHaveBeenCalledWith(
+        process.execPath,
+        [EXPECTED_CONVEX_CLI_PATH, "env", "set", "JWT_PRIVATE_KEY"],
+        {
+          encoding: "utf8",
+          input: `${value}\n`,
+          stdio: ["pipe", "pipe", "pipe"],
+        },
+      );
     });
 
     it("does not expose a rejected secret in the error message", () => {
@@ -205,6 +233,18 @@ describe("Convex setup CLI helpers", () => {
 
       expect(errorMessage).toContain("npx convex env set API_KEY failed (exit 1)");
       expect(errorMessage).not.toContain(value);
+    });
+  });
+
+  describe("runConvexDevOnce", () => {
+    it("invokes the installed CLI through the current Node executable", () => {
+      runConvexDevOnce();
+
+      expect(spawnSync).toHaveBeenCalledWith(
+        process.execPath,
+        [EXPECTED_CONVEX_CLI_PATH, "dev", "--once"],
+        { stdio: "inherit" },
+      );
     });
   });
 });

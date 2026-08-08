@@ -1,7 +1,14 @@
 import { spawnSync } from "node:child_process";
+import { createRequire } from "node:module";
+import path from "node:path";
 
 const CONVEX_ENV_NAME = /^[A-Za-z][A-Za-z0-9_]*$/;
 const CONVEX_ENV_NAMES_OUTPUT = /^(?:[A-Za-z][A-Za-z0-9_]*\r?\n)*$/;
+const CONVEX_CLI_PATH = path.join(
+  path.dirname(createRequire(import.meta.url).resolve("convex/package.json")),
+  "bin",
+  "main.js",
+);
 const INVALID_CONVEX_ENV_OUTPUT =
   "npx convex env list returned an unexpected format; setup cannot safely inspect the deployment.";
 
@@ -11,7 +18,7 @@ const INVALID_CONVEX_ENV_OUTPUT =
  * output instead of silently returning a partial view of the deployment.
  */
 export function listConvexEnvNames(): Set<string> {
-  const result = spawnSync("npx", ["convex", "env", "list", "--names-only"], {
+  const result = spawnSync(process.execPath, [CONVEX_CLI_PATH, "env", "list", "--names-only"], {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
   });
@@ -38,7 +45,7 @@ export function readConvexEnv(namesToRead: readonly string[]): Map<string, strin
   const entries = new Map<string, string>();
   for (const name of new Set(namesToRead)) {
     if (!existingNames.has(name)) continue;
-    const result = spawnSync("npx", ["convex", "env", "get", name], {
+    const result = spawnSync(process.execPath, [CONVEX_CLI_PATH, "env", "get", name], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "pipe"],
     });
@@ -64,9 +71,10 @@ export function readConvexEnv(namesToRead: readonly string[]): Map<string, strin
  * validation errors, which would leak the secret into logs.
  */
 export function setConvexEnv(key: string, value: string): void {
-  const result = spawnSync("npx", ["convex", "env", "set", key], {
+  const result = spawnSync(process.execPath, [CONVEX_CLI_PATH, "env", "set", key], {
     encoding: "utf8",
-    input: value,
+    // Convex's stdin reader removes one transport LF before storing the value.
+    input: `${value}\n`,
     stdio: ["pipe", "pipe", "pipe"],
   });
 
@@ -83,7 +91,7 @@ export function setConvexEnv(key: string, value: string): void {
  * Convex CLI prompts and can log in / pick a project.
  */
 export function runConvexDevOnce(): void {
-  const result = spawnSync("npx", ["convex", "dev", "--once"], {
+  const result = spawnSync(process.execPath, [CONVEX_CLI_PATH, "dev", "--once"], {
     stdio: "inherit",
   });
 
