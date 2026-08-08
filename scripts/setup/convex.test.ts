@@ -34,9 +34,20 @@ describe("Convex setup CLI helpers", () => {
       expect(env.get("JWKS")).toBe('{"keys":[]}');
     });
 
-    it("does not expose malformed environment output in the error message", () => {
-      const secret = "malformed-secret-output";
-      spawnResult.stdout = secret;
+    it("parses the Convex formatter's double-quoted newline fallback", () => {
+      spawnResult.stdout = `SYNTHETIC_VALUE="line one's\\nline two"\n`;
+
+      const env = listConvexEnv();
+
+      expect(env.get("SYNTHETIC_VALUE")).toBe("line one's\nline two");
+    });
+
+    it.each([
+      ["an unexpected line", `JWKS={"keys":[]}\nsynthetic-unexpected-output\n`],
+      ["an inline comment", `JWKS={"keys":[]} # synthetic-ignored-suffix\n`],
+      ["an unterminated quote", `JWT_PRIVATE_KEY='synthetic-unclosed\nJWKS={"keys":[]}\n`],
+    ])("rejects %s without exposing output", (_label, stdout) => {
+      spawnResult.stdout = stdout;
       let errorMessage = "";
 
       try {
@@ -46,6 +57,22 @@ describe("Convex setup CLI helpers", () => {
       }
 
       expect(errorMessage).toContain("unexpected format");
+      expect(errorMessage).not.toContain("synthetic-");
+    });
+
+    it("does not expose CLI stderr when listing fails", () => {
+      const secret = "synthetic-secret-that-must-not-leak";
+      spawnResult.status = 1;
+      spawnResult.stderr = `failure included ${secret}`;
+      let errorMessage = "";
+
+      try {
+        listConvexEnv();
+      } catch (error) {
+        errorMessage = error instanceof Error ? error.message : String(error);
+      }
+
+      expect(errorMessage).toContain("npx convex env list failed (exit 1)");
       expect(errorMessage).not.toContain(secret);
     });
   });
