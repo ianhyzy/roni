@@ -2,7 +2,28 @@ import { describe, expect, it } from "vitest";
 import { getFunctionName } from "convex/server";
 import type { ModelMessage } from "ai";
 import { type CoachAgentConfigOptions, makeCoachAgentConfig } from "./coach";
+import { ESTIMATED_TOOL_DEFINITION_TOKENS } from "./coachTools";
+import { estimateMessagesTokens } from "./contextWindow";
+import { buildInstructions } from "./promptSections";
+import { getPromptInputBudget } from "./providers";
 import { internal } from "../_generated/api";
+
+/**
+ * Tokens left for conversation history on openrouter/auto once the static
+ * system prompt and tool definitions are reserved. Derived rather than
+ * hardcoded so adding a coach tool re-sizes the fixtures instead of silently
+ * pushing them over the budget and failing an unrelated assertion.
+ */
+const OPENROUTER_MESSAGE_BUDGET_TOKENS =
+  getPromptInputBudget("openrouter", "openrouter/auto") -
+  estimateMessagesTokens([{ role: "system", content: buildInstructions() }]) -
+  ESTIMATED_TOOL_DEFINITION_TOKENS;
+
+/** ~4 chars per token, matching estimateMessageTokens. */
+function textFillingBudgetFraction(fraction: number, word: string): string {
+  const targetChars = Math.floor(OPENROUTER_MESSAGE_BUDGET_TOKENS * 4 * fraction);
+  return word.repeat(Math.floor(targetChars / word.length));
+}
 
 type ContextHandlerArgs = Parameters<
   NonNullable<ReturnType<typeof makeCoachAgentConfig>["contextHandler"]>
@@ -93,7 +114,9 @@ function systemText(message: ModelMessage): string {
 
 describe("coachAgentConfig.contextHandler — provider-aware prompt budgets", () => {
   it("subtracts authenticated snapshot overhead before windowing messages", async () => {
-    const priorContext = "prior ".repeat(Math.floor(147_000 / 6));
+    // Just under the message budget: the prior turn survives on its own, but
+    // not once the snapshot system message claims part of the same budget.
+    const priorContext = textFillingBudgetFraction(0.95, "prior ");
     const messages: ModelMessage[] = [
       { role: "user", content: priorContext },
       { role: "assistant", content: "prior answer" },
