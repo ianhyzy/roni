@@ -107,12 +107,11 @@ export function toWeekPlanPresentation(
   return toolName === "program_week" ? fromProgramWeek(output) : fromWeekPlanDetails(output);
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
 /** True when program_week reported an outright failure rather than a bad payload. */
 export function isFailedProgramWeekOutput(output: unknown): boolean {
-  return (
-    typeof output === "object" &&
-    output !== null &&
-    "success" in output &&
-    (output as { success: unknown }).success === false
-  );
+  return isRecord(output) && output.success === false;
 }

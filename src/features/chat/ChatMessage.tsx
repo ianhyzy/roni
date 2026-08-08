@@ -11,7 +11,7 @@ import { ToolCallIndicator } from "./ToolCallIndicator";
 import { WeekPlanCard } from "./WeekPlanCard";
 import { hasRetryLease } from "./chatTurnState";
 import { isWeekPlanCardToolName } from "./weekPlanCardData";
-import { weekPlanPresentationSchema } from "../../../convex/ai/schemas";
+import { type WeekPlanPresentation, weekPlanPresentationSchema } from "../../../convex/ai/schemas";
 
 function formatTime(timestamp: number): string {
   return new Date(timestamp).toLocaleTimeString([], {
@@ -20,39 +20,35 @@ function formatTime(timestamp: number): string {
   });
 }
 
-function extractWeekPlan(text: string) {
-  // Prefer the canonical ```week-plan fence tag
-  const weekPlanMatch = text.match(/```week-plan\s*\n([\s\S]*?)\n```/);
-  if (weekPlanMatch) {
+const WEEK_PLAN_PATTERNS = [
+  // The canonical ```week-plan fence tag, preferred.
+  /```week-plan\s*\n([\s\S]*?)\n```/,
+  // AI sometimes uses ```json instead — validated against the schema below.
+  /```json\s*\n([\s\S]*?)\n```/,
+  // Last resort: raw JSON with no fence, identified by its distinctive keys.
+  /(\{[\s\S]*"weekStartDate"[\s\S]*"days"[\s\S]*\})\s*$/,
+] as const;
+
+interface ExtractedWeekPlan {
+  readonly plan: WeekPlanPresentation;
+  /** The exact span consumed, so the caller strips only this and nothing else. */
+  readonly matchedText: string;
+}
+
+function extractWeekPlan(text: string): ExtractedWeekPlan | null {
+  for (const pattern of WEEK_PLAN_PATTERNS) {
+    const match = text.match(pattern);
+    if (!match) continue;
     try {
-      return weekPlanPresentationSchema.parse(JSON.parse(weekPlanMatch[1]));
+      return {
+        plan: weekPlanPresentationSchema.parse(JSON.parse(match[1])),
+        matchedText: match[0],
+      };
     } catch {
+      // Matched the shape but not a week plan — don't try a looser pattern.
       return null;
     }
   }
-
-  // Fallback: AI sometimes uses ```json instead — validate against the schema
-  const jsonMatch = text.match(/```json\s*\n([\s\S]*?)\n```/);
-  if (jsonMatch) {
-    try {
-      return weekPlanPresentationSchema.parse(JSON.parse(jsonMatch[1]));
-    } catch {
-      // JSON block didn't match the week plan schema — not a week plan
-      return null;
-    }
-  }
-
-  // Last resort: AI sometimes outputs raw JSON without code fences.
-  // Look for a top-level JSON object containing "weekStartDate" and "days".
-  const rawJsonMatch = text.match(/(\{[\s\S]*"weekStartDate"[\s\S]*"days"[\s\S]*\})\s*$/);
-  if (rawJsonMatch) {
-    try {
-      return weekPlanPresentationSchema.parse(JSON.parse(rawJsonMatch[1]));
-    } catch {
-      return null;
-    }
-  }
-
   return null;
 }
 
@@ -153,15 +149,12 @@ export function ChatMessage({ message, isGrouped, threadId }: ChatMessageProps) 
             if (!text && !isStreaming) return null;
 
             // Coach: check for structured week plan
-            const plan = extractWeekPlan(text);
-            if (plan && !isStreaming) {
-              const remainingText = text
-                .replace(/```(?:week-plan|json)\s*\n[\s\S]*?\n```/g, "")
-                .replace(/\{[\s\S]*"weekStartDate"[\s\S]*"days"[\s\S]*\}\s*$/, "")
-                .trim();
+            const extracted = extractWeekPlan(text);
+            if (extracted && !isStreaming) {
+              const remainingText = text.replace(extracted.matchedText, "").trim();
               return (
                 <div key={i}>
-                  <WeekPlanCard plan={plan} />
+                  <WeekPlanCard plan={extracted.plan} />
                   {remainingText && <MarkdownContent content={remainingText} />}
                 </div>
               );

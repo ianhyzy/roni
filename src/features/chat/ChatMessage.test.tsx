@@ -152,6 +152,41 @@ describe("ChatMessage", () => {
     expect(screen.getByTestId("markdown")).toHaveTextContent("Focus on quality reps.");
   });
 
+  it("strips only the week-plan block, leaving an unrelated json fence in the prose", () => {
+    const weekPlanJson = JSON.stringify({
+      weekStartDate: "2026-01-05",
+      split: "ppl",
+      days: [
+        {
+          dayName: "Mon",
+          durationMinutes: 45,
+          exercises: [{ name: "Bench Press", reps: 8, sets: 3 }],
+          sessionType: "Push",
+          targetMuscles: "Chest, Triceps",
+        },
+      ],
+      summary: "PPL split - 1 training day",
+    });
+    const text =
+      `Here is your week.\n\n\`\`\`week-plan\n${weekPlanJson}\n\`\`\`\n\n` +
+      'Your last session logged:\n\n```json\n{"rpe": 8}\n```\n\nFocus on quality reps.';
+
+    const message = createMessage({
+      parts: [{ text, type: "text" }],
+      role: "assistant",
+      text,
+    });
+
+    render(<ChatMessage message={message} threadId="thread-1" />);
+
+    const markdown = screen.getByTestId("markdown");
+    expect(screen.getByTestId("week-plan-card")).toHaveTextContent("PPL split - 1 training day");
+    // The unrelated fence must survive; only the plan it rendered is removed.
+    expect(markdown).toHaveTextContent('{"rpe": 8}');
+    expect(markdown).toHaveTextContent("Focus on quality reps.");
+    expect(markdown).not.toHaveTextContent("weekStartDate");
+  });
+
   it("renders approval cards and tool indicators for dynamic tool parts", () => {
     const message = createMessage({
       parts: [
