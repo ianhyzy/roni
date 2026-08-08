@@ -4,20 +4,19 @@
  * This is the only durable channel the coach can write for "never program X".
  * Before it existed, the exclusions table was settings-UI-only, so a request
  * like "no jumping" had nowhere to land: the coach would hand-rebuild the
- * affected days and the algorithm would reintroduce the same movements on the
- * next program_week call. Injuries (report_injury) stay reserved for actual
- * pain and physical limitation.
+ * affected days instead of explicitly excluding matching catalog entries.
+ * Injuries (report_injury) stay reserved for actual pain and physical
+ * limitation.
  */
 
 import { createTool } from "@convex-dev/agent";
 import { z } from "zod";
 import { internal } from "../_generated/api";
 import type { Id } from "../_generated/dataModel";
+import { MAX_EXCLUSION_BATCH_SIZE } from "../exerciseExclusions";
 import type { Movement } from "../tonal/types";
 import { resolveMovement } from "../tonal/movementResolve";
 import { requireUserId, withToolTracking } from "./helpers";
-
-const MAX_EXCLUSIONS_PER_CALL = 12;
 
 const exerciseRefSchema = z.object({
   name: z
@@ -42,12 +41,13 @@ interface ResolvedRefs {
 function resolveRefs(refs: readonly ExerciseRef[], catalog: Movement[]): ResolvedRefs {
   const movementIds: string[] = [];
   const unresolved: string[] = [];
+  const catalogMovementIds = new Set(catalog.map((movement) => movement.id));
 
   for (const ref of refs) {
     const outcome = resolveMovement({ movementId: ref.movementId, name: ref.name }, catalog);
     const label = ref.name ?? ref.movementId ?? "(unnamed exercise)";
 
-    if (outcome.status === "resolved") {
+    if (outcome.status === "resolved" && catalogMovementIds.has(outcome.movementId)) {
       movementIds.push(outcome.movementId);
     } else if (outcome.status === "ambiguous") {
       const candidates = outcome.candidates
@@ -68,17 +68,13 @@ function resolveRefs(refs: readonly ExerciseRef[], catalog: Movement[]): Resolve
 
 export const excludeExercisesTool = createTool({
   description:
-    "Permanently exclude specific exercises from all future generated programming. Use when the user says never program something again, or rules out a movement pattern (no jumping, no overhead work) — call search_exercises first to find every matching movement, then exclude them all in one call. Do not use for pain or physical limitation (use report_injury), for a one-time swap in the current draft (use swap_exercise), or for equipment the user does not own. Inputs are a list of exercises identified by exact name from search_exercises; returns the excluded names and any that could not be resolved.",
+    "Permanently exclude exact current Tonal catalog entries from generated programming. Use when the user wants one or more specific current exercises permanently excluded. Call search_exercises first. Inputs are exact returned names or movement IDs, with at most 12 entries per call. A request about a broad category must be translated into explicit current catalog entries; these exclusions do not automatically cover future catalog additions. Do not use for pain or physical limitation (use report_injury), for a one-time swap in the current draft (use swap_exercise), or for equipment the user does not own. Returns the excluded names and any references that could not be resolved.",
   inputSchema: z.object({
     exercises: z
       .array(exerciseRefSchema)
       .min(1)
-      .max(MAX_EXCLUSIONS_PER_CALL)
+      .max(MAX_EXCLUSION_BATCH_SIZE)
       .describe("Exercises to exclude. Identify each by its exact name from search_exercises."),
-    reason: z
-      .string()
-      .optional()
-      .describe("Short note on why, echoed back to the user. E.g. 'no jumping'."),
   }),
   execute: withToolTracking(
     "exclude_exercises",
@@ -96,14 +92,14 @@ export const excludeExercisesTool = createTool({
       const catalog: Movement[] = await ctx.runQuery(internal.tonal.movementSync.getAllMovements);
       const { movementIds, unresolved } = resolveRefs(input.exercises, catalog);
 
-      const excluded: string[] = [];
-      for (const movementId of movementIds) {
-        const exclusion = await ctx.runMutation(internal.exerciseExclusions.addForUser, {
-          userId: userId as Id<"users">,
-          movementId,
-        });
-        excluded.push(exclusion.movementName);
-      }
+      const exclusions =
+        movementIds.length > 0
+          ? await ctx.runMutation(internal.exerciseExclusions.addManyForUser, {
+              userId: userId as Id<"users">,
+              movementIds,
+            })
+          : [];
+      const excluded = exclusions.map((exclusion) => exclusion.movementName);
 
       const success = excluded.length > 0;
       const message = success
@@ -117,9 +113,13 @@ export const excludeExercisesTool = createTool({
 
 export const unexcludeExercisesTool = createTool({
   description:
-    "Remove exercises from the user's permanent exclusion list so programming can use them again. Use only when the user explicitly wants a previously banned movement back. Do not use to resolve an injury (use resolve_injury). Inputs are a list of exercises identified by exact name from get_exercise_exclusions or search_exercises; returns which were removed.",
+    "Remove exact exercises from the user's permanent exclusion list so programming can use them again. Use only when the user explicitly wants a previously banned movement back. Call get_exercise_exclusions first. Inputs are its stable movementId values. Do not use to resolve an injury (use resolve_injury). Returns which exclusions were removed.",
   inputSchema: z.object({
-    exercises: z.array(exerciseRefSchema).min(1).max(MAX_EXCLUSIONS_PER_CALL),
+    movementIds: z
+      .array(z.string().trim().min(1))
+      .min(1)
+      .max(MAX_EXCLUSION_BATCH_SIZE)
+      .describe("movementId values returned by get_exercise_exclusions."),
   }),
   execute: withToolTracking(
     "unexclude_exercises",
@@ -130,27 +130,19 @@ export const unexcludeExercisesTool = createTool({
     ): Promise<{
       success: boolean;
       removed: string[];
-      unresolved: string[];
       message: string;
     }> => {
       const userId = requireUserId(ctx);
-      const catalog: Movement[] = await ctx.runQuery(internal.tonal.movementSync.getAllMovements);
-      const { movementIds, unresolved } = resolveRefs(input.exercises, catalog);
-
-      const removed: string[] = [];
-      for (const movementId of movementIds) {
-        const result = await ctx.runMutation(internal.exerciseExclusions.removeForUser, {
-          userId: userId as Id<"users">,
-          movementId,
-        });
-        if (result.removed && result.movementName) removed.push(result.movementName);
-      }
+      const removals = await ctx.runMutation(internal.exerciseExclusions.removeManyForUser, {
+        userId: userId as Id<"users">,
+        movementIds: input.movementIds,
+      });
+      const removed = removals.map((exclusion) => exclusion.movementName);
 
       const success = removed.length > 0;
       return {
         success,
         removed,
-        unresolved,
         message: success
           ? `Removed ${removed.length} exercise(s) from the exclusion list: ${removed.join(", ")}.`
           : "Nothing was removed — those exercises were not on the exclusion list.",
@@ -161,7 +153,7 @@ export const unexcludeExercisesTool = createTool({
 
 export const getExerciseExclusionsTool = createTool({
   description:
-    "List the exercises the user has permanently excluded from generated programming. Use before excluding more, or when the user asks what is currently banned. Do not use to list injuries (use get_injuries). Inputs are empty; returns each excluded exercise's name and muscle groups.",
+    "List the exact exercises the user has permanently excluded from generated programming. Use before excluding more, before unexcluding, or when the user asks what is currently banned. Do not use to list injuries (use get_injuries). Inputs are empty; returns each excluded exercise's stable movementId, name, and muscle groups.",
   inputSchema: z.object({}),
   execute: withToolTracking(
     "get_exercise_exclusions",
@@ -169,13 +161,16 @@ export const getExerciseExclusionsTool = createTool({
       ctx,
       _input,
       _options,
-    ): Promise<{ exclusions: { name: string; muscleGroups: string[] }[] }> => {
+    ): Promise<{
+      exclusions: { movementId: string; name: string; muscleGroups: string[] }[];
+    }> => {
       const userId = requireUserId(ctx);
       const exclusions = await ctx.runQuery(internal.exerciseExclusions.getForUser, {
         userId: userId as Id<"users">,
       });
       return {
         exclusions: exclusions.map((exclusion) => ({
+          movementId: exclusion.movementId,
           name: exclusion.movementName,
           muscleGroups: exclusion.muscleGroups,
         })),
