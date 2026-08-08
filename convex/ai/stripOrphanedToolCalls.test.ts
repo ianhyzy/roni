@@ -60,6 +60,34 @@ describe("stripOrphanedToolCalls", () => {
     ]);
   });
 
+  it("drops an approval response when a later assistant message makes it uncollectable", () => {
+    const msgs: ModelMessage[] = [
+      { role: "user", content: "push it" },
+      {
+        role: "assistant",
+        content: [
+          { type: "text", text: "Approve this push?" },
+          { type: "tool-call", toolCallId: "tc1", toolName: "approve_week_plan", input: {} },
+          { type: "tool-approval-request", approvalId: "ap1", toolCallId: "tc1" },
+        ],
+      },
+      {
+        role: "tool",
+        content: [{ type: "tool-approval-response", approvalId: "ap1", approved: true }],
+      },
+      { role: "assistant", content: "Execution started but did not finish." },
+    ];
+
+    expect(stripOrphanedToolCalls(msgs)).toEqual([
+      { role: "user", content: "push it" },
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "Approve this push?" }],
+      },
+      { role: "assistant", content: "Execution started but did not finish." },
+    ]);
+  });
+
   it("keeps tool-calls when an approval request is still pending (no fresh user follow-up)", () => {
     const msgs: ModelMessage[] = [
       { role: "user", content: "deploy the plan" },

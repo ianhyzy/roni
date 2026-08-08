@@ -44,19 +44,18 @@ export function mergeConsecutiveSameRole(messages: ModelMessage[]): ModelMessage
 }
 
 export function stripOrphanedToolCalls(messages: ModelMessage[]): ModelMessage[] {
-  // Approval state is live only while it follows the latest user prompt.
-  // A later prompt breaks Gemini's required tool-call/result adjacency.
+  // Pending requests expire after a newer user prompt. Responses without a
+  // result are executable only from the final tool-message suffix the SDK collects.
   let lastFreshUserIdx = -1;
+  let finalToolSuffixStartIdx = messages.length;
   for (let i = messages.length - 1; i >= 0; i--) {
-    if (messages[i].role === "user") {
-      lastFreshUserIdx = i;
-      break;
-    }
+    const role = messages[i].role;
+    if (lastFreshUserIdx === -1 && role === "user") lastFreshUserIdx = i;
+    if (i === finalToolSuffixStartIdx - 1 && role === "tool") finalToolSuffixStartIdx = i;
   }
 
   const approvalIdToToolCallId = new Map<string, string>();
   const liveApprovalIds = new Set<string>();
-  const liveApprovalToolCallIds = new Set<string>();
   const toolResultIds = new Set<string>();
   const approvalResponseIndexById = new Map<string, number>();
   for (let i = 0; i < messages.length; i++) {
@@ -73,7 +72,6 @@ export function stripOrphanedToolCalls(messages: ModelMessage[]): ModelMessage[]
         approvalIdToToolCallId.set(reference.approvalId, reference.toolCallId);
         if (i > lastFreshUserIdx) {
           liveApprovalIds.add(reference.approvalId);
-          liveApprovalToolCallIds.add(reference.toolCallId);
         }
       }
       if (reference.type === "tool-result" && reference.toolCallId) {
@@ -86,10 +84,14 @@ export function stripOrphanedToolCalls(messages: ModelMessage[]): ModelMessage[]
   }
 
   const completedOrExecutableToolCallIds = new Set(toolResultIds);
-  for (const [approvalId, responseIndex] of approvalResponseIndexById) {
-    if (responseIndex <= lastFreshUserIdx) continue;
-    const toolCallId = approvalIdToToolCallId.get(approvalId);
-    if (toolCallId) completedOrExecutableToolCallIds.add(toolCallId);
+  for (const [approvalId, toolCallId] of approvalIdToToolCallId) {
+    const responseIndex = approvalResponseIndexById.get(approvalId);
+    if (
+      (responseIndex === undefined && liveApprovalIds.has(approvalId)) ||
+      (responseIndex !== undefined && responseIndex >= finalToolSuffixStartIdx)
+    ) {
+      completedOrExecutableToolCallIds.add(toolCallId);
+    }
   }
 
   // A result referencing a non-kept call is orphaned, typically from a
@@ -101,23 +103,20 @@ export function stripOrphanedToolCalls(messages: ModelMessage[]): ModelMessage[]
     for (const part of msg.content) {
       const reference = readToolPartReference(part);
       if (reference?.type !== "tool-call" || !reference.toolCallId) continue;
-      if (
-        completedOrExecutableToolCallIds.has(reference.toolCallId) ||
-        liveApprovalToolCallIds.has(reference.toolCallId)
-      ) {
+      if (completedOrExecutableToolCallIds.has(reference.toolCallId)) {
         keptAssistantToolCallIds.add(reference.toolCallId);
       }
     }
   }
 
-  // A result-backed approval is durable. Without a result, the AI SDK only
-  // collects its response while it follows the latest user prompt.
+  // A result-backed approval is durable. Without a result, its response must
+  // remain in the final tool-message suffix that same-role merging preserves.
   const keptApprovalIds = new Set<string>();
   for (const [approvalId, toolCallId] of approvalIdToToolCallId) {
     if (!keptAssistantToolCallIds.has(toolCallId)) continue;
     const responseIndex = approvalResponseIndexById.get(approvalId);
     const hasToolResult = toolResultIds.has(toolCallId);
-    const hasLiveResponse = responseIndex !== undefined && responseIndex > lastFreshUserIdx;
+    const hasLiveResponse = responseIndex !== undefined && responseIndex >= finalToolSuffixStartIdx;
     if (responseIndex !== undefined && (hasToolResult || hasLiveResponse)) {
       keptApprovalIds.add(approvalId);
       continue;

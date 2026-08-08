@@ -182,6 +182,41 @@ describe("approval continuation context", () => {
     expect(summarize(messages)).toEqual([{ role: "user", types: ["text", "text"] }]);
   });
 
+  it("drops an approved call when a partial assistant response prevents execution", async () => {
+    const { t, userId, threadId } = await buildThread();
+    const { tierAgents } = buildCoachAgentsForProvider({
+      provider: "gemini",
+      apiKey: "test-key",
+      messageSearchMode: "disabled",
+    });
+    const { messageId: approvalMessageId } = await t.run((ctx) =>
+      tierAgents.programming.approveToolCall(ctx, {
+        threadId,
+        approvalId: "approval-1",
+      }),
+    );
+    await t.run((ctx) =>
+      saveMessages(ctx, components.agent, {
+        threadId,
+        userId,
+        promptMessageId: approvalMessageId,
+        messages: [{ role: "assistant", content: "Execution started but did not finish." }],
+        metadata: [{ status: "success" }],
+      }),
+    );
+
+    const messages = await fetchContext(t, {
+      userId,
+      threadId,
+      promptMessageId: approvalMessageId,
+    });
+
+    expect(summarize(messages)).toEqual([
+      { role: "user", types: "text" },
+      { role: "assistant", types: "text" },
+    ]);
+  });
+
   it("does not auto-deny an approval when its tool result already exists without a response", async () => {
     const { t, userId, threadId, promptMessageId } = await buildThread();
     await t.run((ctx) =>
