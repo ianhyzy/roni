@@ -62,6 +62,36 @@ describe("schema consistency", () => {
     expect(section![1]).not.toContain("```week-plan");
   });
 
+  it("forbids claiming an action succeeded without a successful tool result", () => {
+    expect(prompt).toContain("NEVER report an action as done unless the tool that performs it");
+    expect(prompt).toContain(
+      'An "execution-denied" result means that specific tool call did not run',
+    );
+    expect(prompt).toContain("If a side-effecting tool has no result, its outcome is unconfirmed");
+    expect(prompt).not.toContain("whose result you cannot see did not run");
+  });
+
+  it("pairs the push success example with an actual approve_week_plan result", () => {
+    const section = prompt.match(/EXAMPLES:([\s\S]*?)$/);
+    expect(section, "EXAMPLES section not found").toBeTruthy();
+    // The old few-shot jumped straight from "Looks good, send it" to "Done —
+    // all 3 workouts are on your Tonal", teaching the model to treat the user's
+    // approval phrasing as proof the push happened.
+    expect(section![1]).toContain("[call approve_week_plan");
+    expect(section![1]).toContain("Push denied (tool did not run)");
+    expect(section![1]).toContain("Push result missing (outcome unconfirmed)");
+    expect(section![1]).not.toContain("execution-denied, or you get no result");
+
+    const missingResultExample = section![1].match(
+      /Push result missing \(outcome unconfirmed\):([\s\S]*?)(?=\n\n|$)/,
+    );
+    expect(missingResultExample).toBeTruthy();
+    expect(missingResultExample![1]).toContain("couldn't confirm");
+    expect(missingResultExample![1]).toContain("check your Tonal");
+    expect(missingResultExample![1]).not.toContain("Nothing has changed");
+    expect(missingResultExample![1]).not.toContain("still a draft");
+  });
+
   it("frames volume-strength analysis as advisory rather than causal MRV", () => {
     expect(prompt).toContain("analyze_volume_strength");
     expect(prompt).toContain("observational");
