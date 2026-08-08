@@ -2,6 +2,16 @@
 
 All notable changes to this project are documented here. This file is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commits on `main`. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.13.1](https://github.com/JeffOtano/roni/compare/v0.13.0...v0.13.1) (2026-08-08)
+
+
+### Bug Fixes
+
+* honor name exclusions in warmup and cooldown selection ([#650](https://github.com/JeffOtano/roni/issues/650)) ([6828683](https://github.com/JeffOtano/roni/commit/6828683af0519ee2ac78f6ec074d06ef7fc9d75f))
+* patch vulnerable transitive dependencies ([#646](https://github.com/JeffOtano/roni/issues/646)) ([6d4374f](https://github.com/JeffOtano/roni/commit/6d4374febade374d089c037c825b51f0055c72ed))
+* render the week-plan card whenever the plan is re-read ([#655](https://github.com/JeffOtano/roni/issues/655)) ([2ae0448](https://github.com/JeffOtano/roni/commit/2ae0448833b81f383a32f9296134638cff369d74))
+* stop the coach reporting a push it never made ([#652](https://github.com/JeffOtano/roni/issues/652)) ([2c84b48](https://github.com/JeffOtano/roni/commit/2c84b4831b4addd037314468fa169941ff44fdd1))
+
 ## [0.13.0](https://github.com/JeffOtano/roni/compare/v0.12.0...v0.13.0) (2026-08-03)
 
 
