@@ -32,12 +32,13 @@ describe("BudgetPreferences", () => {
       />,
     );
 
-    expect(screen.getByRole("switch", { name: "Ignore budget" })).toHaveAttribute(
+    expect(screen.getByRole("switch", { name: "Ignore budget for all providers" })).toHaveAttribute(
       "aria-checked",
       "false",
     );
-    expect(screen.getByLabelText("Budget limit per OpenAI attempt (USD)")).toHaveValue(0.42);
+    expect(screen.getByLabelText("Per-attempt budget limit for OpenAI (USD)")).toHaveValue(0.42);
     expect(screen.getByText(/OpenAI is currently selected/i)).toBeVisible();
+    expect(screen.getByText(/A retry or fallback starts another model attempt/i)).toBeVisible();
   });
 
   it("saves the ignore preference immediately", async () => {
@@ -52,12 +53,12 @@ describe("BudgetPreferences", () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole("switch", { name: "Ignore budget" }));
+    fireEvent.click(screen.getByRole("switch", { name: "Ignore budget for all providers" }));
 
     await waitFor(() => {
       expect(mockIgnoreBudgetChange).toHaveBeenCalledWith(true);
     });
-    expect(toast.success).toHaveBeenCalledWith("Budget guard disabled");
+    expect(toast.success).toHaveBeenCalledWith("Budget guard disabled for all providers");
   });
 
   it("keeps the provider limit editable and saves it while the guard is ignored", async () => {
@@ -72,9 +73,9 @@ describe("BudgetPreferences", () => {
       />,
     );
 
-    const input = screen.getByLabelText("Budget limit per Anthropic Claude attempt (USD)");
+    const input = screen.getByLabelText("Per-attempt budget limit for Anthropic Claude (USD)");
     expect(input).toBeEnabled();
-    expect(screen.getByText(/saved but not enforced/i)).toBeVisible();
+    expect(screen.getByText(/no provider limits are enforced/i)).toBeVisible();
 
     fireEvent.change(input, { target: { value: "0.25" } });
     fireEvent.click(screen.getByRole("button", { name: "Save limit" }));
@@ -96,7 +97,7 @@ describe("BudgetPreferences", () => {
       />,
     );
 
-    const input = screen.getByLabelText("Budget limit per OpenRouter attempt (USD)");
+    const input = screen.getByLabelText("Per-attempt budget limit for OpenRouter (USD)");
     fireEvent.change(input, { target: { value: "0.009" } });
     const form = screen.getByRole("button", { name: "Save limit" }).closest("form");
     if (!form) throw new Error("Expected budget limit form");

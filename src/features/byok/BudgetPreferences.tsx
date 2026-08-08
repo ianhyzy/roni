@@ -55,7 +55,11 @@ export function BudgetPreferences({
     setSavingOperation("ignore");
     try {
       await onIgnoreBudgetChange(!ignoreBudget);
-      toast.success(ignoreBudget ? "Budget guard enabled" : "Budget guard disabled");
+      toast.success(
+        ignoreBudget
+          ? "Budget guard enabled for all providers"
+          : "Budget guard disabled for all providers",
+      );
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to save budget preference");
     } finally {
@@ -103,18 +107,20 @@ export function BudgetPreferences({
         <div>
           <p className="text-sm font-medium text-foreground">API budget guard</p>
           <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-            {providerLabel} is currently selected. Roni checks estimated cost after each model step.
-            Retries and fallback requests start a new limit.
+            {providerLabel} is currently selected. The limit accumulates across model steps in one
+            attempt. A retry or fallback starts another model attempt and may spend up to this limit
+            again.
           </p>
         </div>
 
         <div className="flex items-center justify-between gap-4 border-t border-border pt-4">
           <div>
             <p id={ignoreBudgetLabelId} className="text-sm font-medium text-foreground">
-              Ignore budget
+              Ignore budget for all providers
             </p>
             <p className="mt-1 text-xs text-muted-foreground">
-              Skip Roni&apos;s estimated-cost limit for your personal API key.
+              Global setting: skip Roni&apos;s estimated-cost limits for every personal provider
+              key.
             </p>
           </div>
           <Button
@@ -137,7 +143,7 @@ export function BudgetPreferences({
         <form className="space-y-3 border-t border-border pt-4" onSubmit={handleLimitSave}>
           <div className="space-y-1.5">
             <Label htmlFor={inputId} className="text-xs text-muted-foreground">
-              Budget limit per {providerLabel} attempt (USD)
+              Per-attempt budget limit for {providerLabel} (USD)
             </Label>
             <Input
               id={inputId}
@@ -175,7 +181,8 @@ export function BudgetPreferences({
               role="status"
               className="rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground"
             >
-              This limit is saved but not enforced while Ignore budget is on.
+              This provider limit remains saved, but no provider limits are enforced while Ignore
+              budget for all providers is on.
             </p>
           )}
 

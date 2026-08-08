@@ -18,7 +18,7 @@ export interface AiBudgetPreferences {
 }
 
 export type AiBudgetPolicy =
-  { readonly kind: "disabled" } | { readonly kind: "limit"; readonly maxInteractionUsd: number };
+  { readonly kind: "disabled" } | { readonly kind: "limit"; readonly maxAttemptUsd: number };
 
 interface ResolveAiBudgetPreferencesArgs {
   readonly ignoreBudget?: boolean;
@@ -56,7 +56,7 @@ export function resolveAiBudgetPolicy(args: {
   if (args.isHouseKey || args.preferences.ignoreBudget) return { kind: "disabled" };
   return {
     kind: "limit",
-    maxInteractionUsd: args.preferences.providerLimitsUsd[args.provider],
+    maxAttemptUsd: args.preferences.providerLimitsUsd[args.provider],
   };
 }
 

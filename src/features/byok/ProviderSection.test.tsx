@@ -135,16 +135,17 @@ describe("ProviderSection", () => {
 
     render(<ProviderSection />);
 
-    expect(await screen.findByLabelText("Budget limit per OpenAI attempt (USD)")).toHaveValue(0.42);
-    fireEvent.click(screen.getByRole("switch", { name: "Ignore budget" }));
+    expect(await screen.findByLabelText("Per-attempt budget limit for OpenAI (USD)")).toHaveValue(
+      0.42,
+    );
+    fireEvent.click(screen.getByRole("switch", { name: "Ignore budget for all providers" }));
 
     await waitFor(() => {
       expect(mockSetIgnoreBudget).toHaveBeenCalledWith({ ignoreBudget: true });
       expect(mockGetSettings).toHaveBeenCalledTimes(2);
-      expect(screen.getByRole("switch", { name: "Ignore budget" })).toHaveAttribute(
-        "aria-checked",
-        "true",
-      );
+      expect(
+        screen.getByRole("switch", { name: "Ignore budget for all providers" }),
+      ).toHaveAttribute("aria-checked", "true");
     });
   });
 
@@ -178,7 +179,9 @@ describe("ProviderSection", () => {
 
     render(<ProviderSection />);
 
-    const input = await screen.findByLabelText("Budget limit per Anthropic Claude attempt (USD)");
+    const input = await screen.findByLabelText(
+      "Per-attempt budget limit for Anthropic Claude (USD)",
+    );
     expect(input).toBeEnabled();
     fireEvent.change(input, { target: { value: "0.55" } });
     fireEvent.click(screen.getByRole("button", { name: "Save limit" }));
@@ -186,9 +189,9 @@ describe("ProviderSection", () => {
     await waitFor(() => {
       expect(mockSetSelectedProviderBudgetLimit).toHaveBeenCalledWith({ budgetLimitUsd: 0.55 });
       expect(mockGetSettings).toHaveBeenCalledTimes(2);
-      expect(screen.getByLabelText("Budget limit per Anthropic Claude attempt (USD)")).toHaveValue(
-        0.55,
-      );
+      expect(
+        screen.getByLabelText("Per-attempt budget limit for Anthropic Claude (USD)"),
+      ).toHaveValue(0.55);
     });
   });
 });

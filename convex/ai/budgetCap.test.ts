@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { budgetCapStopCondition, estimateInteractionCostUsd } from "./budgetCap";
+import { budgetCapStopCondition, estimateAttemptCostUsd } from "./budgetCap";
 
 describe("budgetCapStopCondition", () => {
-  it("estimates interaction cost from each step model id", () => {
-    const cost = estimateInteractionCostUsd(
+  it("estimates one model attempt's cost from each step model id", () => {
+    const cost = estimateAttemptCostUsd(
       [
         {
           usage: {
@@ -39,7 +39,7 @@ describe("budgetCapStopCondition", () => {
           },
           model: { provider: "openai", modelId: "gpt-5.4" },
         },
-      ] as Parameters<typeof estimateInteractionCostUsd>[0],
+      ] as Parameters<typeof estimateAttemptCostUsd>[0],
       "openai",
     );
 
@@ -47,7 +47,7 @@ describe("budgetCapStopCondition", () => {
   });
 
   it("uses conservative provider pricing when a step omits model metadata", () => {
-    const cost = estimateInteractionCostUsd(
+    const cost = estimateAttemptCostUsd(
       [
         {
           usage: {
@@ -65,7 +65,7 @@ describe("budgetCapStopCondition", () => {
             },
           },
         },
-      ] as Parameters<typeof estimateInteractionCostUsd>[0],
+      ] as Parameters<typeof estimateAttemptCostUsd>[0],
       "openai",
     );
 
@@ -133,7 +133,7 @@ describe("budgetCapStopCondition", () => {
     const onTrip = vi.fn();
     const stopWhen = budgetCapStopCondition({
       provider: "openai",
-      maxInteractionUsd: 0.05,
+      maxAttemptUsd: 0.05,
       onTrip,
     });
 
@@ -154,7 +154,7 @@ describe("budgetCapStopCondition", () => {
     const onTrip = vi.fn();
     const stopWhen = budgetCapStopCondition({
       provider: "openai",
-      maxInteractionUsd: 0.2,
+      maxAttemptUsd: 0.2,
       onTrip,
     });
 

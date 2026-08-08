@@ -16,7 +16,8 @@ export interface BudgetCapTrip {
 type StepModelInput = Partial<Pick<StepResult<ToolSet>, "model" | "response">>;
 type StepCostInput = Pick<StepResult<ToolSet>, "usage"> & StepModelInput;
 
-export function estimateInteractionCostUsd(
+/** Estimate cumulative model cost within one streamText attempt. */
+export function estimateAttemptCostUsd(
   steps: ReadonlyArray<StepCostInput>,
   provider: ProviderId,
 ): number {
@@ -59,12 +60,12 @@ function getPricingForStep(provider: ProviderId, step: StepModelInput): ModelPri
 
 export function budgetCapStopCondition(args: {
   provider: ProviderId;
-  maxInteractionUsd?: number;
+  maxAttemptUsd?: number;
   onTrip?: (trip: BudgetCapTrip) => void;
 }): StopCondition<ToolSet> {
   const {
     provider,
-    maxInteractionUsd = DEFAULT_PROVIDER_BUDGET_LIMITS_USD[args.provider],
+    maxAttemptUsd = DEFAULT_PROVIDER_BUDGET_LIMITS_USD[args.provider],
     onTrip,
   } = args;
   let tripped = false;
@@ -72,8 +73,8 @@ export function budgetCapStopCondition(args: {
   return ({ steps }) => {
     if (tripped) return true;
 
-    const estimatedCostUsd = estimateInteractionCostUsd(steps, provider);
-    if (estimatedCostUsd < maxInteractionUsd) return false;
+    const estimatedCostUsd = estimateAttemptCostUsd(steps, provider);
+    if (estimatedCostUsd < maxAttemptUsd) return false;
 
     tripped = true;
     const lastStep = steps[steps.length - 1];

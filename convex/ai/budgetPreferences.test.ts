@@ -43,18 +43,20 @@ describe("resolveAiBudgetPolicy", () => {
 
     expect(
       resolveAiBudgetPolicy({ isHouseKey: false, provider: "openrouter", preferences }),
-    ).toEqual({ kind: "limit", maxInteractionUsd: 1.25 });
+    ).toEqual({ kind: "limit", maxAttemptUsd: 1.25 });
   });
 
-  it("disables the guard when the user ignores the budget", () => {
+  it("disables the guard for every personal provider when the global preference is on", () => {
     const preferences = resolveAiBudgetPreferences({
       ignoreBudget: true,
       providerLimitOverridesUsd: { openai: 0.5 },
     });
 
-    expect(resolveAiBudgetPolicy({ isHouseKey: false, provider: "openai", preferences })).toEqual({
-      kind: "disabled",
-    });
+    for (const provider of ["gemini", "claude", "openai", "openrouter"] as const) {
+      expect(resolveAiBudgetPolicy({ isHouseKey: false, provider, preferences })).toEqual({
+        kind: "disabled",
+      });
+    }
     expect(preferences.providerLimitsUsd.openai).toBe(0.5);
   });
 

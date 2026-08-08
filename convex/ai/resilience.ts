@@ -34,7 +34,7 @@ import {
 
 export { getFinalizeCodeForError } from "./resilienceReporting";
 const BUDGET_CAP_MESSAGE =
-  "This is getting expensive on your API key, so I'm simplifying here. Ask a narrower follow-up if you want me to keep going.";
+  "This model attempt reached your personal API budget limit, so I'm stopping here. A narrower follow-up starts a new attempt with a new limit.";
 const MASKED_UI_STREAM_ERROR = "An error occurred.";
 const MAX_OUTPUT_TOKENS = 4096;
 const RETRY_DELAY_MS = 3000;
@@ -278,7 +278,7 @@ async function attemptStream({
       (telemetry.isByok
         ? {
             kind: "limit" as const,
-            maxInteractionUsd: DEFAULT_PROVIDER_BUDGET_LIMITS_USD[telemetry.provider],
+            maxAttemptUsd: DEFAULT_PROVIDER_BUDGET_LIMITS_USD[telemetry.provider],
           }
         : { kind: "disabled" as const });
     const stopWhen =
@@ -287,7 +287,7 @@ async function attemptStream({
             stepCountIs(COACH_MAX_STEPS),
             budgetCapStopCondition({
               provider: telemetry.provider,
-              maxInteractionUsd: budgetPolicy.maxInteractionUsd,
+              maxAttemptUsd: budgetPolicy.maxAttemptUsd,
               onTrip: (trip) => {
                 budgetTrip = trip;
               },

@@ -532,6 +532,8 @@ export default defineSchema({
     cacheWriteTokens: v.optional(v.number()),
     totalCostUsd: v.optional(v.number()),
     stoppedByBudget: v.optional(v.boolean()),
+    /** Scope of the configured spend guard; absent on legacy and non-budget rows. */
+    budgetScope: v.optional(v.literal("model_attempt")),
     routedIntent: v.optional(v.string()),
     breakerEvent: v.optional(
       v.object({

@@ -174,7 +174,7 @@ describe("provider credential quota", () => {
       } as unknown as ActionCtx;
 
       await expect(resolveUserProviderConfig(ctx, "user-1")).resolves.toMatchObject({
-        budgetPolicy: { kind: "limit", maxInteractionUsd: 0.6 },
+        budgetPolicy: { kind: "limit", maxAttemptUsd: 0.6 },
       });
 
       profile.ignoreAiProviderBudget = true;

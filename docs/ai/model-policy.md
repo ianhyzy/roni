@@ -1,6 +1,6 @@
 # AI Model Policy
 
-Last reviewed: 2026-08-05
+Last reviewed: 2026-08-08
 
 This policy defines the default production model tiers used by the coach. The source of truth in code is `convex/ai/providers.ts`; this document explains the intent, default model IDs, and standard pricing assumptions.
 
@@ -78,7 +78,9 @@ Legacy entries remain configured because explicit OpenRouter overrides can still
 
 Budget-cap estimation uses the reported model ID from each AI SDK step. If a step omits model metadata or reports an unknown model, the estimator falls back to the most expensive configured tier for that provider.
 
-Personal API keys default to a $0.10 cumulative cost limit for each provider attempt. A retry or fallback starts a new attempt and therefore a new guard. Users can set a different limit for the selected provider in Settings, or enable **Ignore budget** to omit the cost stop condition entirely. The configured limits remain stored while the toggle is enabled, but do not apply until budget enforcement is restored. Shared hosted AI does not use this personal-key guard.
+Personal API keys default to a $0.10 cumulative cost limit per model attempt. The guard totals all model steps within that attempt. Each retry or fallback is a fresh attempt with a fresh limit, so one user turn can spend the configured limit more than once. Users can store an independent per-attempt limit for each provider; Settings edits the currently selected provider's limit. **Ignore budget for all providers** is one global preference that removes the cost stop condition from every personal provider. Provider limits remain stored while the global toggle is on and resume when it is turned off. Shared hosted AI does not use this personal-key guard.
+
+Budget-stop telemetry records one `aiUsage` event per stopped attempt with `budgetScope: "model_attempt"`. The separate `aiRun` row remains a whole-turn aggregate, so its usage can include primary, retry, and fallback attempts.
 
 ## prepareStep
 

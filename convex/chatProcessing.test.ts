@@ -264,7 +264,7 @@ describe("processMessage", () => {
 
 describe("continueAfterApproval", () => {
   it("preserves weekly tool restrictions and initialized search telemetry after approval", async () => {
-    resolveHouseProviderWithBudget({ kind: "limit", maxInteractionUsd: 0.42 });
+    resolveHouseProviderWithBudget({ kind: "limit", maxAttemptUsd: 0.42 });
     const accumulator = successfulAccumulator();
     streamWithRetryMock.mockResolvedValue(accumulator);
     const t = convexTest(schema, modules);
@@ -287,7 +287,7 @@ describe("continueAfterApproval", () => {
     expect(options.primaryAgent.options.contextOptions.searchOptions).toBeUndefined();
     expect(options.promptMessageId).toBe("approval-message-1");
     expect(options.retrievalEnabled).toBe(false);
-    expect(options).toMatchObject({ budgetPolicy: { kind: "limit", maxInteractionUsd: 0.42 } });
+    expect(options).toMatchObject({ budgetPolicy: { kind: "limit", maxAttemptUsd: 0.42 } });
     expect(accumulator.setContextTiming).toHaveBeenCalledWith({});
   });
 
