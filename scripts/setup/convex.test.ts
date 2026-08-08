@@ -42,10 +42,19 @@ describe("Convex setup CLI helpers", () => {
       expect(env.get("SYNTHETIC_VALUE")).toBe("line one's\nline two");
     });
 
+    it("parses environment names that start with a lowercase ASCII letter", () => {
+      spawnResult.stdout = "lowercase_Name9=synthetic-lowercase-value\n";
+
+      const env = listConvexEnv();
+
+      expect(env.get("lowercase_Name9")).toBe("synthetic-lowercase-value");
+    });
+
     it.each([
       ["an unexpected line", `JWKS={"keys":[]}\nsynthetic-unexpected-output\n`],
       ["an inline comment", `JWKS={"keys":[]} # synthetic-ignored-suffix\n`],
       ["an unterminated quote", `JWT_PRIVATE_KEY='synthetic-unclosed\nJWKS={"keys":[]}\n`],
+      ["a name without a leading ASCII letter", `_SYNTHETIC=synthetic-invalid-name\n`],
     ])("rejects %s without exposing output", (_label, stdout) => {
       spawnResult.stdout = stdout;
       let errorMessage = "";

@@ -32,9 +32,9 @@ describe("stepSetGoogleKey", () => {
   });
 
   it("rejects a key from another provider", async () => {
-    await expect(
-      stepSetGoogleKey(createPrompter("sk-wrong-provider-key"), new Map()),
-    ).rejects.toThrow(/expected 'AQ\.\.\.' or 'AIza\.\.\.' format/);
+    const result = stepSetGoogleKey(createPrompter("sk-wrong-provider-key"), new Map());
+
+    await expect(result).rejects.toThrow(/expected 'AQ\.\.\.' or 'AIza\.\.\.' format/);
     expect(setConvexEnv).not.toHaveBeenCalled();
   });
 });

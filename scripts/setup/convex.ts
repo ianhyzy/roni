@@ -1,11 +1,11 @@
 import { spawnSync } from "node:child_process";
 import { parseEnv } from "node:util";
 
-const CONVEX_ENV_NAME = /^[A-Z_][A-Z0-9_]*$/;
+const CONVEX_ENV_NAME = /^[A-Za-z][A-Za-z0-9_]*$/;
 // parseEnv silently skips malformed dotenv text, so validate the complete
 // round-trippable `convex env list` stream before parsing it.
 const CONVEX_ENV_LIST_OUTPUT =
-  /^(?:[A-Z_][A-Z0-9_]*=(?:'(?:[^'\r\n]|\r?\n)*'|"(?:[^"\r\n]|\r?\n)*"|(?!['"`])[^#\r\n]*)(?:\r?\n|$))*$/;
+  /^(?:[A-Za-z][A-Za-z0-9_]*=(?:'(?:[^'\r\n]|\r?\n)*'|"(?:[^"\r\n]|\r?\n)*"|(?!['"`])[^#\r\n]*)(?:\r?\n|$))*$/;
 const INVALID_CONVEX_ENV_OUTPUT =
   "npx convex env list returned an unexpected format; setup cannot safely inspect the deployment.";
 
