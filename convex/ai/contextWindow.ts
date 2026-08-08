@@ -129,24 +129,25 @@ export function stripOrphanedToolCalls(messages: ModelMessage[]): ModelMessage[]
       if (msg.role === "assistant") {
         if (typeof msg.content === "string" || !Array.isArray(msg.content)) return msg;
 
-        const parts = msg.content as Array<{ type: string; toolCallId?: string }>;
-        const hasToolCalls = parts.some((p) => p.type === "tool-call");
-        if (!hasToolCalls) return msg;
+        const parts = msg.content as Array<{
+          type: string;
+          toolCallId?: string;
+          approvalId?: string;
+        }>;
 
         // A tool-approval-request must be dropped alongside the tool-call it
-        // points at. Left behind, @convex-dev/agent's autoDenyUnresolvedApprovals
-        // synthesizes a denial for it, and the AI SDK then either throws
-        // ToolCallNotFoundForApprovalError or writes an execution-denied result
-        // for a tool the user never declined.
-        const isKeptToolCall = (toolCallId: string | undefined): boolean =>
-          toolCallId !== undefined &&
-          (resolvedToolCallIds.has(toolCallId) || liveApprovalToolCallIds.has(toolCallId));
-
-        const filtered = parts.filter(
-          (p) =>
-            (p.type !== "tool-call" && p.type !== "tool-approval-request") ||
-            isKeptToolCall(p.toolCallId),
-        );
+        // points at, even when persistence split them across assistant messages.
+        // Left behind, @convex-dev/agent's autoDenyUnresolvedApprovals creates a
+        // denial for a tool the user never declined.
+        const filtered = parts.filter((part) => {
+          if (part.type === "tool-call") {
+            return part.toolCallId !== undefined && keptAssistantToolCallIds.has(part.toolCallId);
+          }
+          if (part.type === "tool-approval-request") {
+            return part.approvalId !== undefined && keptApprovalIds.has(part.approvalId);
+          }
+          return true;
+        });
 
         if (filtered.length === 0) return null;
         return { ...msg, content: filtered } as ModelMessage;

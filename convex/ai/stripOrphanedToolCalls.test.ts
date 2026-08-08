@@ -60,8 +60,13 @@ describe("stripOrphanedToolCalls", () => {
       {
         role: "assistant",
         content: [
-          { type: "text", text: "Approve this push?" },
           { type: "tool-call", toolCallId: "tc1", toolName: "approve_week_plan", input: {} },
+        ],
+      },
+      {
+        role: "assistant",
+        content: [
+          { type: "text", text: "Approve this push?" },
           { type: "tool-approval-request", approvalId: "ap1", toolCallId: "tc1" },
         ],
       },
@@ -72,7 +77,7 @@ describe("stripOrphanedToolCalls", () => {
     expect(result).toEqual(msgs);
   });
 
-  it("strips tool-call when a fresh user message abandons the pending approval", () => {
+  it("strips a split persisted approval pair abandoned by a fresh user message", () => {
     // Reproduces Gemini's "function call turn comes immediately after a user
     // turn or after a function response turn" error: an unresolved tool-call
     // followed by a fresh user prompt has no matching tool-result, so Gemini
@@ -82,9 +87,15 @@ describe("stripOrphanedToolCalls", () => {
       {
         role: "assistant",
         content: [
-          { type: "text", text: "Approve this push?" },
           { type: "tool-call", toolCallId: "tc1", toolName: "approve_week_plan", input: {} },
+        ],
+      },
+      {
+        role: "assistant",
+        content: [
+          { type: "text", text: "Approve this push?" },
           { type: "tool-approval-request", approvalId: "ap1", toolCallId: "tc1" },
+          { type: "reasoning", text: "Keep this context." },
         ],
       },
       { role: "user", content: "actually nevermind, what does this change?" },
@@ -93,13 +104,10 @@ describe("stripOrphanedToolCalls", () => {
     const result = stripOrphanedToolCalls(msgs);
 
     expect(result).toHaveLength(3);
-    const assistantContent = result[1].content as Array<{ type: string; toolCallId?: string }>;
-    expect(assistantContent.some((p) => p.type === "tool-call")).toBe(false);
-    expect(assistantContent.some((p) => p.type === "text")).toBe(true);
-    // The approval-request goes with its tool-call. Leaving it behind lets
-    // @convex-dev/agent auto-deny it, which surfaces as a "Denied" badge on a
-    // push the user never declined.
-    expect(assistantContent.some((p) => p.type === "tool-approval-request")).toBe(false);
+    expect(result[1].content).toEqual([
+      { type: "text", text: "Approve this push?" },
+      { type: "reasoning", text: "Keep this context." },
+    ]);
   });
 
   it("drops an approval response whose request was trimmed out of the window", () => {
