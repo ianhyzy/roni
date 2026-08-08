@@ -297,6 +297,7 @@ export const recordBudgetStop = internalMutation({
       outputTokens: 0,
       totalTokens: 0,
       stoppedByBudget: true,
+      budgetScope: "model_attempt",
       createdAt: Date.now(),
     });
   },

@@ -124,6 +124,16 @@ export default defineSchema({
     openrouterApiKeyEncrypted: v.optional(v.string()),
     openrouterApiKeyAddedAt: v.optional(v.number()),
     modelOverride: v.optional(v.string()),
+    /** Personal-key cost guard preferences. Omitted values inherit provider defaults. */
+    ignoreAiProviderBudget: v.optional(v.boolean()),
+    aiProviderBudgetLimitsUsd: v.optional(
+      v.object({
+        gemini: v.optional(v.number()),
+        claude: v.optional(v.number()),
+        openai: v.optional(v.number()),
+        openrouter: v.optional(v.number()),
+      }),
+    ),
     /** Timestamp when a token refresh started. Used to prevent concurrent refreshes. */
     tokenRefreshInProgress: v.optional(v.number()),
     syncStatus: v.optional(
@@ -522,6 +532,8 @@ export default defineSchema({
     cacheWriteTokens: v.optional(v.number()),
     totalCostUsd: v.optional(v.number()),
     stoppedByBudget: v.optional(v.boolean()),
+    /** Scope of the configured spend guard; absent on legacy and non-budget rows. */
+    budgetScope: v.optional(v.literal("model_attempt")),
     routedIntent: v.optional(v.string()),
     breakerEvent: v.optional(
       v.object({

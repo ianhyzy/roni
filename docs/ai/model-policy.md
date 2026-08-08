@@ -1,6 +1,6 @@
 # AI Model Policy
 
-Last reviewed: 2026-07-28
+Last reviewed: 2026-08-08
 
 This policy defines the default production model tiers used by the coach. The source of truth in code is `convex/ai/providers.ts`; this document explains the intent, default model IDs, and standard pricing assumptions.
 
@@ -77,6 +77,10 @@ Prices are standard USD per 1M tokens. Cached input is the provider's cache-read
 Legacy entries remain configured because explicit OpenRouter overrides can still report those model families and the cost guardrail needs an exact known price when they do.
 
 Budget-cap estimation uses the reported model ID from each AI SDK step. If a step omits model metadata or reports an unknown model, the estimator falls back to the most expensive configured tier for that provider.
+
+Personal API keys default to a $0.10 estimated cumulative-cost threshold per model attempt. After each completed model step, Roni estimates the attempt's cumulative cost and stops before starting another step when the threshold has been reached or exceeded. Because the check runs only after a step completes, that step can take the estimated cost above the configured threshold. Each retry or fallback is a fresh attempt with a fresh threshold, so one user turn can cross the threshold in more than one attempt. Users can store an independent per-attempt threshold for each provider; Settings edits the currently selected provider's threshold. **Ignore budget for all providers** is one global preference that removes the cost stop condition from every personal provider. Provider thresholds remain stored while the global toggle is on and resume when it is turned off. Shared hosted AI does not use this personal-key guard.
+
+Budget-stop telemetry records one `aiUsage` event per stopped attempt with `budgetScope: "model_attempt"`. The separate `aiRun` row remains a whole-turn aggregate, so its usage can include primary, retry, and fallback attempts.
 
 ## prepareStep
 

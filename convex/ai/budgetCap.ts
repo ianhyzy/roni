@@ -5,13 +5,7 @@ import {
   type ModelPricing,
   type ProviderId,
 } from "./providers";
-
-const PROVIDER_BUDGET_CAPS: Record<ProviderId, number> = {
-  gemini: 0.1,
-  claude: 0.1,
-  openai: 0.1,
-  openrouter: 0.1,
-};
+import { DEFAULT_PROVIDER_BUDGET_LIMITS_USD } from "../../lib/aiBudgetPreferences";
 
 export interface BudgetCapTrip {
   estimatedCostUsd: number;
@@ -22,7 +16,8 @@ export interface BudgetCapTrip {
 type StepModelInput = Partial<Pick<StepResult<ToolSet>, "model" | "response">>;
 type StepCostInput = Pick<StepResult<ToolSet>, "usage"> & StepModelInput;
 
-export function estimateInteractionCostUsd(
+/** Estimate cumulative model cost within one streamText attempt. */
+export function estimateAttemptCostUsd(
   steps: ReadonlyArray<StepCostInput>,
   provider: ProviderId,
 ): number {
@@ -63,18 +58,23 @@ function getPricingForStep(provider: ProviderId, step: StepModelInput): ModelPri
   return getModelPricing(provider, modelId) ?? getConservativeModelPricing(provider);
 }
 
-export function budgetCapStopCondition(
-  provider: ProviderId,
-  onTrip?: (trip: BudgetCapTrip) => void,
-): StopCondition<ToolSet> {
-  const maxInteractionUsd = PROVIDER_BUDGET_CAPS[provider];
+export function budgetCapStopCondition(args: {
+  provider: ProviderId;
+  maxAttemptUsd?: number;
+  onTrip?: (trip: BudgetCapTrip) => void;
+}): StopCondition<ToolSet> {
+  const {
+    provider,
+    maxAttemptUsd = DEFAULT_PROVIDER_BUDGET_LIMITS_USD[args.provider],
+    onTrip,
+  } = args;
   let tripped = false;
 
   return ({ steps }) => {
     if (tripped) return true;
 
-    const estimatedCostUsd = estimateInteractionCostUsd(steps, provider);
-    if (estimatedCostUsd < maxInteractionUsd) return false;
+    const estimatedCostUsd = estimateAttemptCostUsd(steps, provider);
+    if (estimatedCostUsd < maxAttemptUsd) return false;
 
     tripped = true;
     const lastStep = steps[steps.length - 1];

@@ -7,6 +7,7 @@ import type { Id } from "./_generated/dataModel";
 import { classifyPromptIntent, selectCoachTierRoute } from "./chatProcessing";
 import schema from "./schema";
 import { DEFAULT_DAYS, getWeekStartDateString } from "./weekPlanHelpers";
+import type { AiBudgetPolicy } from "../lib/aiBudgetPreferences";
 
 const checkDailyBudgetMock = vi.hoisted(() => vi.fn());
 const clearTurnRetryingMock = vi.hoisted(() => vi.fn(async () => undefined));
@@ -17,6 +18,15 @@ const successfulAccumulator = () => ({
   setContextTiming: vi.fn(),
   toRow: vi.fn(() => ({})),
 });
+
+function resolveHouseProviderWithBudget(budgetPolicy: AiBudgetPolicy = { kind: "disabled" }): void {
+  resolveUserProviderConfigMock.mockResolvedValue({
+    provider: "gemini",
+    apiKey: "test-gemini-key",
+    isHouseKey: true,
+    budgetPolicy,
+  });
+}
 
 vi.mock("@convex-dev/agent", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@convex-dev/agent")>()),
@@ -81,11 +91,7 @@ beforeEach(() => {
 describe("processMessage", () => {
   it("configures weekly tool restrictions and initialized search telemetry", async () => {
     checkDailyBudgetMock.mockResolvedValue(false);
-    resolveUserProviderConfigMock.mockResolvedValue({
-      provider: "gemini",
-      apiKey: "test-gemini-key",
-      isHouseKey: true,
-    });
+    resolveHouseProviderWithBudget();
     const accumulator = successfulAccumulator();
     streamWithRetryMock.mockResolvedValue(accumulator);
     const t = convexTest(schema, modules);
@@ -96,7 +102,6 @@ describe("processMessage", () => {
       userId,
       prompt: "Push Bens workout week 1 Monday",
     });
-
     const options = streamWithRetryMock.mock.calls[0]?.[1] as {
       primaryAgent: { options: { name: string } };
       fallbackAgent: { options: { name: string } };
@@ -118,16 +123,13 @@ describe("processMessage", () => {
     expect(primaryActiveTools).not.toContain("delete_workout");
     expect(fallbackActiveTools).not.toContain("create_workout");
     expect(fallbackActiveTools).not.toContain("delete_workout");
+    expect(options).toMatchObject({ budgetPolicy: { kind: "disabled" } });
     expect(accumulator.setContextTiming).toHaveBeenCalledWith({ searchHits: 0, searchUsed: false });
   });
 
   it("keeps a bare one-off push on the chat tier with all tools available", async () => {
     checkDailyBudgetMock.mockResolvedValue(false);
-    resolveUserProviderConfigMock.mockResolvedValue({
-      provider: "gemini",
-      apiKey: "test-gemini-key",
-      isHouseKey: true,
-    });
+    resolveHouseProviderWithBudget();
     streamWithRetryMock.mockResolvedValue(successfulAccumulator());
     const t = convexTest(schema, modules);
     const userId = await t.run(async (ctx) => ctx.db.insert("users", {}));
@@ -153,11 +155,7 @@ describe("processMessage", () => {
 
   it("restricts a terse follow-up when the current week has a pending draft", async () => {
     checkDailyBudgetMock.mockResolvedValue(false);
-    resolveUserProviderConfigMock.mockResolvedValue({
-      provider: "gemini",
-      apiKey: "test-gemini-key",
-      isHouseKey: true,
-    });
+    resolveHouseProviderWithBudget();
     streamWithRetryMock.mockResolvedValue(successfulAccumulator());
     const t = convexTest(schema, modules);
     const userId = await t.run(async (ctx) => ctx.db.insert("users", {}));
@@ -266,11 +264,7 @@ describe("processMessage", () => {
 
 describe("continueAfterApproval", () => {
   it("preserves weekly tool restrictions and initialized search telemetry after approval", async () => {
-    resolveUserProviderConfigMock.mockResolvedValue({
-      provider: "gemini",
-      apiKey: "test-gemini-key",
-      isHouseKey: true,
-    });
+    resolveHouseProviderWithBudget({ kind: "limit", maxAttemptUsd: 0.42 });
     const accumulator = successfulAccumulator();
     streamWithRetryMock.mockResolvedValue(accumulator);
     const t = convexTest(schema, modules);
@@ -293,6 +287,7 @@ describe("continueAfterApproval", () => {
     expect(options.primaryAgent.options.contextOptions.searchOptions).toBeUndefined();
     expect(options.promptMessageId).toBe("approval-message-1");
     expect(options.retrievalEnabled).toBe(false);
+    expect(options).toMatchObject({ budgetPolicy: { kind: "limit", maxAttemptUsd: 0.42 } });
     expect(accumulator.setContextTiming).toHaveBeenCalledWith({});
   });
 
