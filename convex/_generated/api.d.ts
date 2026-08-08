@@ -95,6 +95,7 @@ import type * as contact from "../contact.js";
 import type * as crons from "../crons.js";
 import type * as dashboard from "../dashboard.js";
 import type * as dataExport from "../dataExport.js";
+import type * as dataExportTypes from "../dataExportTypes.js";
 import type * as dataRetention from "../dataRetention.js";
 import type * as devTools from "../devTools.js";
 import type * as devToolsActions from "../devToolsActions.js";
@@ -344,6 +345,7 @@ declare const fullApi: ApiFromModules<{
   crons: typeof crons;
   dashboard: typeof dashboard;
   dataExport: typeof dataExport;
+  dataExportTypes: typeof dataExportTypes;
   dataRetention: typeof dataRetention;
   devTools: typeof devTools;
   devToolsActions: typeof devToolsActions;
