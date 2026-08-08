@@ -201,11 +201,6 @@ export const generateDraftWeekPlan = internalAction({
       eliminatedByMovementId: number;
       eliminatedByAccessory: number;
     }[] = [];
-    const warmupCooldownConstraints = {
-      excludeAccessories: data.constraints?.excludeAccessories,
-      excludeMovementIds: data.constraints?.excludeMovementIds,
-    };
-
     for (const { dayIndex, sessionType } of daySessions) {
       const targetMuscleGroups =
         SESSION_TYPE_MUSCLES[sessionType] ?? SESSION_TYPE_MUSCLES.full_body;
@@ -242,13 +237,13 @@ export const generateDraftWeekPlan = internalAction({
         catalog,
         targetMuscleGroups,
         maxExercises: wcCounts.warmup,
-        constraints: warmupCooldownConstraints,
+        constraints: data.constraints,
       });
       const cooldownIds = selectCooldownExercises({
         catalog,
         targetMuscleGroups,
         maxExercises: wcCounts.cooldown,
-        constraints: warmupCooldownConstraints,
+        constraints: data.constraints,
       });
 
       // Progressive overload suggestions
