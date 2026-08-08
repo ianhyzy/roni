@@ -43,12 +43,9 @@ export function mergeConsecutiveSameRole(messages: ModelMessage[]): ModelMessage
   return result;
 }
 
-// Strip orphaned tool calls.
-
 export function stripOrphanedToolCalls(messages: ModelMessage[]): ModelMessage[] {
-  // A request is live only while no fresh user prompt follows it. Otherwise
-  // the required tool-call → tool-result adjacency is broken and Gemini rejects
-  // the history. Approval responses use the tool role, not the user role.
+  // Approval state is live only while it follows the latest user prompt.
+  // A later prompt breaks Gemini's required tool-call/result adjacency.
   let lastFreshUserIdx = -1;
   for (let i = messages.length - 1; i >= 0; i--) {
     if (messages[i].role === "user") {
@@ -61,7 +58,7 @@ export function stripOrphanedToolCalls(messages: ModelMessage[]): ModelMessage[]
   const liveApprovalIds = new Set<string>();
   const liveApprovalToolCallIds = new Set<string>();
   const toolResultIds = new Set<string>();
-  const approvalResponseIds = new Set<string>();
+  const approvalResponseIndexById = new Map<string, number>();
   for (let i = 0; i < messages.length; i++) {
     const msg = messages[i];
     if (typeof msg.content === "string" || !Array.isArray(msg.content)) continue;
@@ -83,22 +80,20 @@ export function stripOrphanedToolCalls(messages: ModelMessage[]): ModelMessage[]
         toolResultIds.add(reference.toolCallId);
       }
       if (reference.type === "tool-approval-response" && reference.approvalId) {
-        approvalResponseIds.add(reference.approvalId);
+        approvalResponseIndexById.set(reference.approvalId, i);
       }
     }
   }
 
-  const resolvedToolCallIds = new Set(toolResultIds);
-  for (const approvalId of approvalResponseIds) {
+  const completedOrExecutableToolCallIds = new Set(toolResultIds);
+  for (const [approvalId, responseIndex] of approvalResponseIndexById) {
+    if (responseIndex <= lastFreshUserIdx) continue;
     const toolCallId = approvalIdToToolCallId.get(approvalId);
-    if (toolCallId) resolvedToolCallIds.add(toolCallId);
+    if (toolCallId) completedOrExecutableToolCallIds.add(toolCallId);
   }
 
-  // Build the set of tool-call ids that survive the assistant-message filter
-  // below. Any `tool` role message whose tool-result references a non-kept
-  // call is orphaned (typically from a partially-persisted failed stream)
-  // and must be dropped — Gemini rejects history where a tool turn doesn't
-  // immediately follow its originating user/function-response turn.
+  // A result referencing a non-kept call is orphaned, typically from a
+  // partially persisted failed stream, and Gemini rejects that history.
   const keptAssistantToolCallIds = new Set<string>();
   for (const msg of messages) {
     if (msg.role !== "assistant") continue;
@@ -107,7 +102,7 @@ export function stripOrphanedToolCalls(messages: ModelMessage[]): ModelMessage[]
       const reference = readToolPartReference(part);
       if (reference?.type !== "tool-call" || !reference.toolCallId) continue;
       if (
-        resolvedToolCallIds.has(reference.toolCallId) ||
+        completedOrExecutableToolCallIds.has(reference.toolCallId) ||
         liveApprovalToolCallIds.has(reference.toolCallId)
       ) {
         keptAssistantToolCallIds.add(reference.toolCallId);
@@ -115,15 +110,19 @@ export function stripOrphanedToolCalls(messages: ModelMessage[]): ModelMessage[]
     }
   }
 
-  // A completed approval survives only with its response. A pending approval
-  // survives only while live and before a tool result proves execution moved on.
+  // A result-backed approval is durable. Without a result, the AI SDK only
+  // collects its response while it follows the latest user prompt.
   const keptApprovalIds = new Set<string>();
   for (const [approvalId, toolCallId] of approvalIdToToolCallId) {
     if (!keptAssistantToolCallIds.has(toolCallId)) continue;
-    if (
-      approvalResponseIds.has(approvalId) ||
-      (liveApprovalIds.has(approvalId) && !toolResultIds.has(toolCallId))
-    ) {
+    const responseIndex = approvalResponseIndexById.get(approvalId);
+    const hasToolResult = toolResultIds.has(toolCallId);
+    const hasLiveResponse = responseIndex !== undefined && responseIndex > lastFreshUserIdx;
+    if (responseIndex !== undefined && (hasToolResult || hasLiveResponse)) {
+      keptApprovalIds.add(approvalId);
+      continue;
+    }
+    if (responseIndex === undefined && liveApprovalIds.has(approvalId) && !hasToolResult) {
       keptApprovalIds.add(approvalId);
     }
   }

@@ -34,7 +34,7 @@ describe("stripOrphanedToolCalls", () => {
     expect(stripOrphanedToolCalls(msgs)).toEqual(msgs);
   });
 
-  it("keeps tool-calls that were resolved by an approval response", () => {
+  it("drops a stale approval response when a fresh user prompt follows before execution", () => {
     const msgs: ModelMessage[] = [
       {
         role: "assistant",
@@ -51,7 +51,13 @@ describe("stripOrphanedToolCalls", () => {
       { role: "user", content: "Looks good" },
     ];
 
-    expect(stripOrphanedToolCalls(msgs)).toEqual(msgs);
+    expect(stripOrphanedToolCalls(msgs)).toEqual([
+      {
+        role: "assistant",
+        content: [{ type: "text", text: "Approve this push?" }],
+      },
+      { role: "user", content: "Looks good" },
+    ]);
   });
 
   it("keeps tool-calls when an approval request is still pending (no fresh user follow-up)", () => {
@@ -125,7 +131,7 @@ describe("stripOrphanedToolCalls", () => {
     expect(result[0].role).toBe("user");
   });
 
-  it("keeps a resolved approval request and response together", () => {
+  it("keeps an active approval request and response together", () => {
     const msgs: ModelMessage[] = [
       { role: "user", content: "push it" },
       {
@@ -251,9 +257,7 @@ describe("stripOrphanedToolCalls", () => {
     expect(stripOrphanedToolCalls(msgs)).toEqual(msgs);
   });
 
-  it("preserves tool-approval-response parts even when no toolCallId reference matches", () => {
-    // tool-approval-response is keyed by approvalId, not toolCallId,
-    // so it must survive even if no paired assistant tool-call is present.
+  it("keeps a completed approval lifecycle after a later user prompt", () => {
     const msgs: ModelMessage[] = [
       {
         role: "assistant",
@@ -267,18 +271,23 @@ describe("stripOrphanedToolCalls", () => {
         role: "tool",
         content: [{ type: "tool-approval-response", approvalId: "ap1", approved: true }],
       },
+      {
+        role: "tool",
+        content: [
+          {
+            type: "tool-result",
+            toolCallId: "tc1",
+            toolName: "approve_week_plan",
+            output: { type: "text", value: "pushed" },
+          },
+        ],
+      },
       { role: "user", content: "Looks good" },
     ];
 
     const result = stripOrphanedToolCalls(msgs);
 
-    // The tool-approval-response message must survive intact
-    const toolMsg = result.find((m) => m.role === "tool");
-    expect(toolMsg).toBeDefined();
-    const parts = toolMsg!.content as Array<{ type: string; approvalId: string }>;
-    expect(parts).toHaveLength(1);
-    expect(parts[0].type).toBe("tool-approval-response");
-    expect(parts[0].approvalId).toBe("ap1");
+    expect(result).toEqual(msgs);
   });
 
   it("strips only orphaned tool-result parts when message has mixed parts", () => {

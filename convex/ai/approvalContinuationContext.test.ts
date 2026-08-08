@@ -159,6 +159,29 @@ describe("approval continuation context", () => {
     expect(messages[messages.length - 1]?.role).toBe("user");
   });
 
+  it("drops an approved call that was not executed before a newer prompt", async () => {
+    const { t, userId, threadId } = await buildThread();
+    const { tierAgents } = buildCoachAgentsForProvider({
+      provider: "gemini",
+      apiKey: "test-key",
+      messageSearchMode: "disabled",
+    });
+    await t.run((ctx) =>
+      tierAgents.programming.approveToolCall(ctx, {
+        threadId,
+        approvalId: "approval-1",
+      }),
+    );
+
+    const messages = await fetchContext(t, {
+      userId,
+      threadId,
+      prompt: "wait, explain what will be pushed first",
+    });
+
+    expect(summarize(messages)).toEqual([{ role: "user", types: ["text", "text"] }]);
+  });
+
   it("does not auto-deny an approval when its tool result already exists without a response", async () => {
     const { t, userId, threadId, promptMessageId } = await buildThread();
     await t.run((ctx) =>
