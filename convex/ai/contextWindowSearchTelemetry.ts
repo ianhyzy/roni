@@ -39,9 +39,10 @@ export function buildSearchTelemetryContextWindow({
     promptBudgetTokens,
     reservedPromptTokens,
   });
+  const safeWindowedMessages = mergeConsecutiveSameRole(stripOrphanedToolCalls(windowedMessages));
 
   return {
-    messages: windowedMessages.map(withoutSearchProvenance),
-    searchUsed: windowedMessages.some(hasSearchProvenance),
+    messages: safeWindowedMessages.map(withoutSearchProvenance),
+    searchUsed: safeWindowedMessages.some(hasSearchProvenance),
   };
 }

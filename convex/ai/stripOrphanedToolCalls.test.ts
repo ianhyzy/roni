@@ -285,7 +285,7 @@ describe("stripOrphanedToolCalls", () => {
     expect(stripOrphanedToolCalls(msgs)).toEqual(msgs);
   });
 
-  it("keeps a completed approval lifecycle after a later user prompt", () => {
+  it("removes approval metadata from a completed lifecycle", () => {
     const msgs: ModelMessage[] = [
       {
         role: "assistant",
@@ -315,7 +315,11 @@ describe("stripOrphanedToolCalls", () => {
 
     const result = stripOrphanedToolCalls(msgs);
 
-    expect(result).toEqual(msgs);
+    const partTypes = result.flatMap((message) =>
+      Array.isArray(message.content) ? message.content.map((part) => part.type) : [],
+    );
+    expect(result).toHaveLength(3);
+    expect(partTypes).toEqual(["text", "tool-call", "tool-result"]);
   });
 
   it("strips only orphaned tool-result parts when message has mixed parts", () => {

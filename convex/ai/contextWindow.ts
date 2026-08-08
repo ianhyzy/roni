@@ -109,19 +109,20 @@ export function stripOrphanedToolCalls(messages: ModelMessage[]): ModelMessage[]
     }
   }
 
-  // A result-backed approval is durable. Without a result, its response must
-  // remain in the final tool-message suffix that same-role merging preserves.
+  // A result makes approval metadata obsolete. Without a result, the response
+  // must remain in the final tool-message suffix that same-role merging preserves.
   const keptApprovalIds = new Set<string>();
   for (const [approvalId, toolCallId] of approvalIdToToolCallId) {
     if (!keptAssistantToolCallIds.has(toolCallId)) continue;
     const responseIndex = approvalResponseIndexById.get(approvalId);
     const hasToolResult = toolResultIds.has(toolCallId);
+    if (hasToolResult) continue;
     const hasLiveResponse = responseIndex !== undefined && responseIndex >= finalToolSuffixStartIdx;
-    if (responseIndex !== undefined && (hasToolResult || hasLiveResponse)) {
+    if (responseIndex !== undefined && hasLiveResponse) {
       keptApprovalIds.add(approvalId);
       continue;
     }
-    if (responseIndex === undefined && liveApprovalIds.has(approvalId) && !hasToolResult) {
+    if (responseIndex === undefined && liveApprovalIds.has(approvalId)) {
       keptApprovalIds.add(approvalId);
     }
   }
