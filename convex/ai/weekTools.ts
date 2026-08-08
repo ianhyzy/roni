@@ -12,7 +12,7 @@
 import { createTool } from "@convex-dev/agent";
 import { z } from "zod";
 import { internal } from "../_generated/api";
-import type { Id } from "../_generated/dataModel";
+import type { Doc, Id } from "../_generated/dataModel";
 import { DAY_NAMES } from "../coach/weekProgrammingHelpers";
 import type { WorkoutPerformanceSummary } from "../coach/prDetection";
 import type { WeekPushResult } from "../coach/pushAndVerifyContract";
@@ -66,6 +66,7 @@ interface WeekPlanDayDetail {
   dayName: string;
   sessionType: string;
   status: string;
+  workoutStatus?: Doc<"workoutPlans">["status"];
   estimatedDuration?: number;
   exercises: {
     movementId: string;
@@ -87,7 +88,7 @@ interface WeekPlanDetails {
 export function createGetWeekPlanDetailsTool(userTimezone?: string) {
   return createTool({
     description:
-      "Retrieve the current week's training plan with resolved exercise details. Use when the user asks to see the plan or when the coach needs to inspect the existing draft before modifying it. Do not use to create, approve, delete, or analyze completed workout performance. Inputs are empty; returns the current week plan with day status, session type, estimated duration, movement IDs, exercise names, muscle groups, sets, reps, and duration seconds.",
+      "Retrieve the current week's training plan with resolved exercise details. Use when the user asks to see the plan or when the coach needs to inspect the existing draft before modifying it. Do not use to create, approve, delete, or analyze completed workout performance. Inputs are empty; returns the current week plan with calendar and linked-workout statuses, session type, estimated duration, movement IDs, exercise names, muscle groups, sets, reps, and duration seconds.",
     inputSchema: z.object({}),
     execute: withToolTracking(
       "get_week_plan_details",
@@ -138,13 +139,14 @@ export function createGetWeekPlanDetailsTool(userTimezone?: string) {
           };
 
           if (day.workoutPlanId) {
-            const plan = (await ctx.runQuery(internal.workoutPlans.getById, {
+            const workoutPlan = (await ctx.runQuery(internal.workoutPlans.getById, {
               planId: day.workoutPlanId,
               userId,
-            })) as { blocks: WorkoutBlocks } | null;
+            })) as Pick<Doc<"workoutPlans">, "blocks" | "status"> | null;
 
-            if (plan?.blocks) {
-              detail.exercises = resolveExercises(plan.blocks, movementMap);
+            if (workoutPlan) {
+              detail.workoutStatus = workoutPlan.status;
+              detail.exercises = resolveExercises(workoutPlan.blocks, movementMap);
             }
           }
 

@@ -4,7 +4,11 @@ import type { LanguageModelV3GenerateResult } from "@ai-sdk/provider";
 import { getFunctionName } from "convex/server";
 import { describe, expect, test, vi } from "vitest";
 import { makeCoachAgentConfig } from "./coach";
-import { createApproveWeekPlanTool, deleteWeekPlanTool } from "./weekTools";
+import {
+  createApproveWeekPlanTool,
+  createGetWeekPlanDetailsTool,
+  deleteWeekPlanTool,
+} from "./weekTools";
 
 const MOCK_USAGE = {
   inputTokens: {
@@ -210,6 +214,55 @@ describe("approveWeekPlanTool", () => {
       schedulingFailed: 0,
       deferred: 1,
       results: [{ status: "deferred", retryable: true }],
+    });
+  });
+});
+
+describe("getWeekPlanDetailsTool", () => {
+  test("returns calendar and workout statuses as distinct fields", async () => {
+    const runQuery = vi.fn(async (ref: unknown) => {
+      const name = getFunctionName(ref as never);
+      if (name === "weekPlans:getByUserIdAndWeekStartInternal") {
+        return {
+          _id: "week-plan-1",
+          weekStartDate: "2026-08-03",
+          preferredSplit: "upper_lower",
+          targetDays: 1,
+          days: [
+            {
+              sessionType: "upper",
+              status: "programmed",
+              workoutPlanId: "workout-plan-1",
+              estimatedDuration: 30,
+            },
+          ],
+        };
+      }
+      if (name === "tonal/movementSync:getAllMovements") {
+        return [];
+      }
+      if (name === "workoutPlans:getById") {
+        return { blocks: [], status: "pushed" };
+      }
+      throw new Error(`Unexpected query: ${name}`);
+    });
+    const tool = {
+      ...createGetWeekPlanDetailsTool("UTC"),
+      ctx: {
+        userId: "test-user",
+        runQuery,
+        runMutation: vi.fn(async () => null),
+        runAction: vi.fn(async () => null),
+      },
+    };
+
+    const result = await tool.execute!({}, { toolCallId: "call-details", messages: [] });
+
+    expect(result).toMatchObject({
+      found: true,
+      plan: {
+        days: [{ status: "programmed", workoutStatus: "pushed" }],
+      },
     });
   });
 });

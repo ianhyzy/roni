@@ -47,6 +47,17 @@ const approveWeekPlan: Extractor = (output) => {
   return { variant: "success", message: `${pushed} workouts pushed to Tonal` };
 };
 
+/**
+ * program_week only reaches a banner when it failed — a successful call is
+ * intercepted upstream and rendered as the week-plan card. Surface the tool's
+ * own error text so the user sees why, not a generic "could not be confirmed".
+ */
+const programWeek: Extractor = (output) => {
+  if (!isRecord(output) || output.success !== false) return null;
+  const message = typeof output.error === "string" ? output.error : "Failed to program the week";
+  return { variant: "error", message };
+};
+
 function booleanSentinel(field: string, successMsg: string, errorMsg: string): Extractor {
   return (output) => {
     if (!isRecord(output)) return null;
@@ -65,6 +76,7 @@ function deletedBoolean(successMsg: string, errorMsg: string): Extractor {
 }
 
 export const ACTION_BANNER_TOOL_NAMES = [
+  "program_week",
   "approve_week_plan",
   "create_workout",
   "delete_workout",
@@ -91,6 +103,7 @@ function isActionBannerToolName(toolName: string): toolName is ActionBannerToolN
 }
 
 const ACTION_EXTRACTORS: Record<ActionBannerToolName, Extractor> = {
+  program_week: programWeek,
   approve_week_plan: approveWeekPlan,
   create_workout: successBoolean("Workout created", "Failed to create workout"),
   delete_workout: deletedBoolean("Workout deleted", "Failed to delete workout"),

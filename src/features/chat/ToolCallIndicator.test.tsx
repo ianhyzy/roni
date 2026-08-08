@@ -50,13 +50,18 @@ function createProgramWeekOutput(
 
 describe("ToolCallIndicator", () => {
   it("covers every state-changing tool with a banner extractor or special renderer", () => {
-    const coveredToolNames = [...ACTION_BANNER_TOOL_NAMES, ...SPECIAL_RENDERER_TOOL_NAMES];
+    const coveredToolNames = new Set([...ACTION_BANNER_TOOL_NAMES, ...SPECIAL_RENDERER_TOOL_NAMES]);
 
-    expect(new Set(coveredToolNames)).toEqual(new Set(STATE_CHANGING_TOOL_NAMES));
-    expect(new Set(coveredToolNames).size).toBe(coveredToolNames.length);
+    // Every state-changing tool must render something better than a bare chip.
+    // The reverse doesn't hold: get_week_plan_details is a read that still
+    // earns the full card.
+    for (const toolName of STATE_CHANGING_TOOL_NAMES) {
+      expect(coveredToolNames).toContain(toolName);
+    }
+    expect(new Set(ACTION_BANNER_TOOL_NAMES).size).toBe(ACTION_BANNER_TOOL_NAMES.length);
     expect(new Set(STATE_CHANGING_TOOL_NAMES).size).toBe(STATE_CHANGING_TOOL_NAMES.length);
     expect(STATE_CHANGING_TOOL_NAMES).toHaveLength(18);
-    expect(SPECIAL_RENDERER_TOOL_NAMES).toEqual(["program_week"]);
+    expect(SPECIAL_RENDERER_TOOL_NAMES).toEqual(["program_week", "get_week_plan_details"]);
   });
 
   it("renders running chip for a state-changing tool in progress", () => {
@@ -177,6 +182,72 @@ describe("ToolCallIndicator", () => {
     render(<ToolCallIndicator toolName="search_exercises" state="output-available" />);
 
     expect(screen.getByText("Searched exercises")).toBeInTheDocument();
+  });
+
+  it("renders WeekPlanCard for get_week_plan_details so edits after program_week stay visible", () => {
+    render(
+      <ToolCallIndicator
+        toolName="get_week_plan_details"
+        state="output-available"
+        output={{
+          found: true,
+          plan: {
+            weekStartDate: "2026-08-03",
+            preferredSplit: "upper_lower",
+            targetDays: 4,
+            days: [
+              {
+                dayIndex: 0,
+                dayName: "Monday",
+                sessionType: "upper",
+                status: "programmed",
+                workoutStatus: "draft",
+                estimatedDuration: 30,
+                exercises: [
+                  {
+                    movementId: "m1",
+                    name: "Standing Chest Press",
+                    muscleGroups: ["Chest"],
+                    sets: 3,
+                    reps: 10,
+                  },
+                ],
+              },
+            ],
+          },
+        }}
+      />,
+    );
+
+    expect(screen.getByTestId("week-plan-card")).toBeInTheDocument();
+    expect(screen.getByText(/Standing Chest Press/)).toBeInTheDocument();
+  });
+
+  it("reports when there is no week plan to show", () => {
+    render(
+      <ToolCallIndicator
+        toolName="get_week_plan_details"
+        state="output-available"
+        output={{ found: false, message: "No week plan found for the current week." }}
+      />,
+    );
+
+    expect(screen.queryByTestId("week-plan-card")).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("No week plan found");
+    expect(screen.queryByText("Loaded week plan")).not.toBeInTheDocument();
+  });
+
+  it("surfaces the tool's own error when program_week fails", () => {
+    render(
+      <ToolCallIndicator
+        toolName="program_week"
+        state="output-available"
+        output={{ success: false, error: "No movements matched your constraints" }}
+      />,
+    );
+
+    expect(screen.queryByTestId("week-plan-card")).not.toBeInTheDocument();
+    expect(screen.getByText("No movements matched your constraints")).toBeInTheDocument();
   });
 
   it("still renders WeekPlanCard for program_week", () => {
