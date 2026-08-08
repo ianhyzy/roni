@@ -61,6 +61,38 @@ describe("USER_DATA_TABLES", () => {
     );
   });
 
+  test("collectUserData exports AI budget preferences without provider secrets", async () => {
+    const t = convexTest(schema, modules);
+    const userId = await t.run(async (ctx) => {
+      const id = await ctx.db.insert("users", {});
+      await ctx.db.insert("userProfiles", {
+        userId: id,
+        tonalUserId: "tonal-user",
+        tonalToken: "encrypted-tonal-secret",
+        lastActiveAt: 123,
+        ignoreAiProviderBudget: true,
+        aiProviderBudgetLimitsUsd: { gemini: 0.75, openrouter: 2.5 },
+        geminiApiKeyEncrypted: "encrypted-gemini-secret",
+        claudeApiKeyEncrypted: "encrypted-claude-secret",
+        openaiApiKeyEncrypted: "encrypted-openai-secret",
+        openrouterApiKeyEncrypted: "encrypted-openrouter-secret",
+      });
+      return id;
+    });
+
+    const data = await t.query(internal.dataExport.collectUserData, { userId });
+
+    expect(data.profile).toMatchObject({
+      ignoreAiProviderBudget: true,
+      aiProviderBudgetLimitsUsd: { gemini: 0.75, openrouter: 2.5 },
+    });
+    expect(data.profile).not.toHaveProperty("geminiApiKeyEncrypted");
+    expect(data.profile).not.toHaveProperty("claudeApiKeyEncrypted");
+    expect(data.profile).not.toHaveProperty("openaiApiKeyEncrypted");
+    expect(data.profile).not.toHaveProperty("openrouterApiKeyEncrypted");
+    expect(JSON.stringify(data)).not.toContain("encrypted-gemini-secret");
+  });
+
   test("collectUserData exports Garmin wellness rows without Convex metadata", async () => {
     const t = convexTest(schema, modules);
     const userId = await t.run(async (ctx) => {
