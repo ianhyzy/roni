@@ -33,6 +33,9 @@ export const getWeekPlanDeletionState = internalQuery({
     const plan = await ctx.db.get(args.weekPlanId);
     if (!plan) return { ok: true, tonalWorkoutIds: [] };
     if (plan.userId !== args.userId) return { ok: false, error: "Week plan access denied" };
+    if (plan.days.some((day) => day.status === "completed")) {
+      return { ok: false, error: COMPLETED_WEEK_PLAN_DELETE_ERROR };
+    }
 
     const workoutPlanIds = [
       ...new Set(plan.days.flatMap((day) => (day.workoutPlanId ? [day.workoutPlanId] : []))),
@@ -128,6 +131,9 @@ export const deleteWeekPlanInternal = internalMutation({
     if (plan.userId !== args.userId) {
       return { ok: false as const, error: "Week plan access denied" };
     }
+    if (plan.days.some((day) => day.status === "completed")) {
+      return { ok: false as const, error: COMPLETED_WEEK_PLAN_DELETE_ERROR };
+    }
 
     const workoutPlanIds = [
       ...new Set(plan.days.flatMap((day) => (day.workoutPlanId ? [day.workoutPlanId] : []))),
@@ -144,6 +150,9 @@ export const deleteWeekPlanInternal = internalMutation({
       // "non_draft" and would let a pushed workout skip the claim check.
       if (workout.tonalSchedulingClaim !== undefined) {
         return { ok: false as const, error: "Workout scheduling is in progress" };
+      }
+      if (workout.status === "completed") {
+        return { ok: false as const, error: COMPLETED_WEEK_PLAN_DELETE_ERROR };
       }
       if (!args.allowPushed) {
         const blocker = getDraftWorkoutMutationBlocker(workout);
