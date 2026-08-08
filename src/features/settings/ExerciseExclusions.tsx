@@ -9,6 +9,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Dumbbell, Loader2, Plus, Search, X } from "lucide-react";
 import { toast } from "sonner";
+import { describeError, getRateLimitMessage } from "@/lib/rateLimitMessage";
 
 interface CatalogEntry {
   id: string;
@@ -89,7 +90,7 @@ export function ExerciseExclusions() {
       await addExclusion({ movementId });
       toast.success("Exercise excluded");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not exclude exercise");
+      toast.error(getRateLimitMessage(error) ?? describeError(error, "Could not exclude exercise"));
     } finally {
       setPendingMovementIds((prev) => {
         const next = new Set(prev);
@@ -105,7 +106,7 @@ export function ExerciseExclusions() {
       await removeExclusion({ movementId });
       toast.success("Exercise restored");
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not restore exercise");
+      toast.error(getRateLimitMessage(error) ?? describeError(error, "Could not restore exercise"));
     } finally {
       setPendingMovementIds((prev) => {
         const next = new Set(prev);

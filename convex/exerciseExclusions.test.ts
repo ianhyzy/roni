@@ -91,6 +91,28 @@ describe("exerciseExclusions", () => {
     expect(listed).toHaveLength(1);
   });
 
+  test("allows a twenty-exercise curation burst for adds and removals", async () => {
+    const t = createTest();
+    const userId = await createUser(t);
+    const authed = t.withIdentity({ subject: `${userId}|session` });
+    const movementIds = Array.from({ length: 20 }, (_, index) => `movement-${index}`);
+    for (const [index, movementId] of movementIds.entries()) {
+      await insertMovement(t, { tonalId: movementId, name: `Movement ${index}` });
+    }
+
+    for (const movementId of movementIds) {
+      await authed.mutation(api.exerciseExclusions.addMine, { movementId });
+    }
+
+    await expect(authed.query(api.exerciseExclusions.listMine, {})).resolves.toHaveLength(20);
+
+    for (const movementId of movementIds) {
+      await authed.mutation(api.exerciseExclusions.removeMine, { movementId });
+    }
+
+    await expect(authed.query(api.exerciseExclusions.listMine, {})).resolves.toEqual([]);
+  });
+
   test("rejects unknown movement IDs", async () => {
     const t = createTest();
     const userId = await createUser(t);
