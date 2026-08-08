@@ -200,7 +200,8 @@ describe("ToolCallIndicator", () => {
                 dayIndex: 0,
                 dayName: "Monday",
                 sessionType: "upper",
-                status: "draft",
+                status: "programmed",
+                workoutStatus: "draft",
                 estimatedDuration: 30,
                 exercises: [
                   {
@@ -222,7 +223,7 @@ describe("ToolCallIndicator", () => {
     expect(screen.getByText(/Standing Chest Press/)).toBeInTheDocument();
   });
 
-  it("falls back to the plain chip when there is no week plan to show", () => {
+  it("reports when there is no week plan to show", () => {
     render(
       <ToolCallIndicator
         toolName="get_week_plan_details"
@@ -232,7 +233,8 @@ describe("ToolCallIndicator", () => {
     );
 
     expect(screen.queryByTestId("week-plan-card")).not.toBeInTheDocument();
-    expect(screen.getByText("Loaded week plan")).toBeInTheDocument();
+    expect(screen.getByRole("status")).toHaveTextContent("No week plan found");
+    expect(screen.queryByText("Loaded week plan")).not.toBeInTheDocument();
   });
 
   it("surfaces the tool's own error when program_week fails", () => {

@@ -121,9 +121,15 @@ export function ToolCallIndicator({ toolName, state, output }: ToolCallIndicator
     running: `Running ${toolName}...`,
     done: `Ran ${toolName}`,
   };
-
   const isRunning = state === "input-streaming" || state === "input-available";
   const isDone = state === "output-available";
+  const isMissingWeekPlan =
+    isDone &&
+    toolName === "get_week_plan_details" &&
+    typeof output === "object" &&
+    output !== null &&
+    "found" in output &&
+    output.found === false;
   const unconfirmedResult = (
     <span
       className="inline-flex items-center gap-1.5 rounded-md bg-amber-500/10 px-2.5 py-1 text-xs text-amber-700 dark:text-amber-300"
@@ -188,11 +194,14 @@ export function ToolCallIndicator({ toolName, state, output }: ToolCallIndicator
 
   if (isDone) {
     return (
-      <span className="inline-flex items-center gap-1.5 rounded-md bg-muted/60 px-2.5 py-1 text-xs text-muted-foreground">
+      <span
+        className="inline-flex items-center gap-1.5 rounded-md bg-muted/60 px-2.5 py-1 text-xs text-muted-foreground"
+        role={isMissingWeekPlan ? "status" : undefined}
+      >
         <span className="text-primary" aria-hidden="true">
-          &#10003;
+          {isMissingWeekPlan ? "—" : "✓"}
         </span>
-        {messages.done}
+        {isMissingWeekPlan ? "No week plan found" : messages.done}
       </span>
     );
   }
