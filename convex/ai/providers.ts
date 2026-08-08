@@ -2,6 +2,7 @@ import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createOpenAI } from "@ai-sdk/openai";
 import type { LanguageModelV3 } from "@ai-sdk/provider";
+import { GEMINI_API_KEY_PATTERN } from "../../lib/geminiApiKey";
 
 export type ProviderId = "gemini" | "claude" | "openai" | "openrouter";
 
@@ -290,7 +291,7 @@ export const PROVIDERS: Record<ProviderId, ProviderConfig> = {
       programming: "gemini-3.6-flash",
       summarize: "gemini-3.5-flash-lite",
     },
-    keyRegex: /^(?:AIza[A-Za-z0-9_-]{35}|AQ\.?[A-Za-z0-9_-]{20,})$/,
+    keyRegex: GEMINI_API_KEY_PATTERN,
     keyFormatError: "Key format looks wrong. Gemini keys start with 'AIza' or 'AQ'.",
     keySourceUrl: "https://aistudio.google.com/app/apikey",
     billingUrl: "https://aistudio.google.com/app/apikey",

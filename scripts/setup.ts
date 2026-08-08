@@ -1,5 +1,5 @@
 import { assertInteractive, createPrompter, type Prompter } from "./setup/prompts";
-import { listConvexEnv } from "./setup/convex";
+import { listConvexEnvNames } from "./setup/convex";
 import {
   stepBootstrapConvex,
   stepCheckNodeVersion,
@@ -13,7 +13,7 @@ import {
 
 interface Context {
   prompter: Prompter;
-  existing: Map<string, string>;
+  existing: ReadonlySet<string>;
 }
 
 type Step =
@@ -67,7 +67,7 @@ async function main(): Promise<void> {
         await step.run();
         continue;
       }
-      if (!ctx) ctx = { prompter: createPrompter(), existing: listConvexEnv() };
+      if (!ctx) ctx = { prompter: createPrompter(), existing: listConvexEnvNames() };
       await step.run(ctx);
     }
   } finally {

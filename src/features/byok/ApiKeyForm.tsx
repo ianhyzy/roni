@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type { ProviderId } from "../../../convex/ai/providers";
+import { GEMINI_API_KEY_PATTERN } from "../../../lib/geminiApiKey";
 
 // Keep in sync with PROVIDERS in convex/ai/providers.ts
 // Client-side UI metadata only (no server-side createLanguageModel functions)
@@ -21,7 +22,7 @@ const PROVIDER_UI_CONFIG: Record<
 > = {
   gemini: {
     label: "Google Gemini",
-    keyRegex: /^(?:AIza[A-Za-z0-9_-]{35}|AQ\.?[A-Za-z0-9_-]{20,})$/,
+    keyRegex: GEMINI_API_KEY_PATTERN,
     keyFormatError: "Key format looks wrong. Gemini keys start with 'AIza' or 'AQ'.",
     keySourceUrl: "https://aistudio.google.com/app/apikey",
     keyPlaceholder: "AQ... or AIza...",
