@@ -2,6 +2,20 @@
 
 All notable changes to this project are documented here. This file is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commits on `main`. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.14.0](https://github.com/JeffOtano/roni/compare/v0.13.1...v0.14.0) (2026-08-08)
+
+
+### Features
+
+* add configurable BYOK budget controls ([#653](https://github.com/JeffOtano/roni/issues/653)) ([9bcdcce](https://github.com/JeffOtano/roni/commit/9bcdcce260c9ce0bb4fc75659b7f30c9eaaf1812))
+
+
+### Bug Fixes
+
+* keep tool-approval pairs intact when trimming context ([#649](https://github.com/JeffOtano/roni/issues/649)) ([02a0eb8](https://github.com/JeffOtano/roni/commit/02a0eb8e6543b7f33ed4657945095ad39fc7544e))
+* let users bulk-curate exercise exclusions without hitting a wall ([#651](https://github.com/JeffOtano/roni/issues/651)) ([72a2d13](https://github.com/JeffOtano/roni/commit/72a2d1313d4816d2f66d02f4b42bfb4ce3bd707a))
+* support current Gemini keys and harden Convex setup ([#647](https://github.com/JeffOtano/roni/issues/647)) ([68f5b06](https://github.com/JeffOtano/roni/commit/68f5b06cad5d8b20f438afeff2ec590056c81594))
+
 ## [0.13.1](https://github.com/JeffOtano/roni/compare/v0.13.0...v0.13.1) (2026-08-08)
 
 
