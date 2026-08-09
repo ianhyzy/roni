@@ -67,4 +67,19 @@ describe("RunAccumulator attempt cost", () => {
     expect(attempt.inputTokens).toBe(300_000);
     expect(attempt.estimatedCostUsd).toBeCloseTo(0.75, 6);
   });
+
+  it("persists the accumulated request cost on the run row", () => {
+    const accumulator = createAccumulator();
+
+    accumulator.onStepFinish(
+      createModelStep({
+        inputTokens: 1_000,
+        outputTokens: 1_000,
+        provider: "openai.responses",
+        modelId: "gpt-5.4",
+      }),
+    );
+
+    expect(accumulator.toRow().totalCostUsd).toBeCloseTo(0.0175, 6);
+  });
 });

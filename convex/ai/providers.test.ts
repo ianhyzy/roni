@@ -10,6 +10,7 @@ import {
   PROMPT_OUTPUT_HEADROOM_RATIO,
   type ProviderId,
   PROVIDERS,
+  resolvePricingProviderId,
   validateKeyFormat,
 } from "./providers";
 
@@ -135,6 +136,22 @@ describe("isValidProvider", () => {
   it("returns false for invalid providers", () => {
     expect(isValidProvider("gpt")).toBe(false);
     expect(isValidProvider("")).toBe(false);
+    expect(isValidProvider("constructor")).toBe(false);
+    expect(isValidProvider("__proto__")).toBe(false);
+  });
+});
+
+describe("resolvePricingProviderId", () => {
+  it("maps AI SDK provider IDs to billing providers", () => {
+    expect(resolvePricingProviderId("google.generative-ai")).toBe("gemini");
+    expect(resolvePricingProviderId("anthropic.messages")).toBe("claude");
+    expect(resolvePricingProviderId("openai.responses")).toBe("openai");
+    expect(resolvePricingProviderId("openai.chat")).toBe("openrouter");
+  });
+
+  it("falls back conservatively for inherited object keys", () => {
+    expect(resolvePricingProviderId("constructor")).toBe("openrouter");
+    expect(resolvePricingProviderId("__proto__")).toBe("openrouter");
   });
 });
 

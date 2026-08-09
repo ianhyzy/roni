@@ -312,7 +312,7 @@ export class RunAccumulator {
       outputTokens: this.outputTokens,
       cacheReadTokens: this.cacheReadTokens,
       cacheWriteTokens: this.cacheWriteTokens,
-      totalCostUsd: undefined,
+      totalCostUsd: this.estimatedCostUsd,
       scheduledAt: this.scheduledAt,
       processingStartedAt: this.processingStartedAt,
       streamStartedAt: this.startedAt,

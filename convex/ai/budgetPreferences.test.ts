@@ -1,27 +1,20 @@
 import { describe, expect, it } from "vitest";
 import {
-  DEFAULT_PROVIDER_BUDGET_LIMITS_USD,
   isValidProviderBudgetLimitUsd,
-  MAX_PROVIDER_BUDGET_LIMIT_USD,
   resolveAiBudgetPolicy,
   resolveAiBudgetPreferences,
 } from "../../lib/aiBudgetPreferences";
 
 describe("resolveAiBudgetPreferences", () => {
-  it("uses the documented reference-scenario defaults for every provider", () => {
-    expect(DEFAULT_PROVIDER_BUDGET_LIMITS_USD).toEqual({
-      gemini: 25,
-      claude: 101,
-      openai: 200,
-      openrouter: 200,
-    });
-    expect(MAX_PROVIDER_BUDGET_LIMIT_USD).toBe(400);
-  });
-
   it("uses the provider defaults when preferences are absent", () => {
     expect(resolveAiBudgetPreferences()).toEqual({
       ignoreBudget: false,
-      providerLimitsUsd: DEFAULT_PROVIDER_BUDGET_LIMITS_USD,
+      providerLimitsUsd: {
+        gemini: 25,
+        claude: 101,
+        openai: 200,
+        openrouter: 200,
+      },
     });
   });
 
@@ -31,8 +24,10 @@ describe("resolveAiBudgetPreferences", () => {
     });
 
     expect(preferences.providerLimitsUsd).toEqual({
-      ...DEFAULT_PROVIDER_BUDGET_LIMITS_USD,
+      gemini: 25,
       claude: 0.75,
+      openai: 200,
+      openrouter: 200,
     });
   });
 
@@ -41,8 +36,8 @@ describe("resolveAiBudgetPreferences", () => {
       providerLimitOverridesUsd: { gemini: 0, openai: Number.POSITIVE_INFINITY },
     });
 
-    expect(preferences.providerLimitsUsd.gemini).toBe(DEFAULT_PROVIDER_BUDGET_LIMITS_USD.gemini);
-    expect(preferences.providerLimitsUsd.openai).toBe(DEFAULT_PROVIDER_BUDGET_LIMITS_USD.openai);
+    expect(preferences.providerLimitsUsd.gemini).toBe(25);
+    expect(preferences.providerLimitsUsd.openai).toBe(200);
   });
 });
 

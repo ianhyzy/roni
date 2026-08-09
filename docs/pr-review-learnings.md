@@ -1235,6 +1235,28 @@ alerts and requires history rewriting to remove cleanly.
   or rebase the offending unmerged commit and use `--force-with-lease`; a normal
   follow-up commit cannot remove the finding from the scanned history.
 
+## 28. Dynamic object-map lookups must reject inherited property names
+
+**Seen in:** #661 (2 lookups)
+
+**Problem.** Provider identifiers and model-vendor prefixes arrived as strings
+and indexed ordinary object maps directly. Inputs such as `constructor` and
+`__proto__` therefore resolved inherited prototype properties instead of an own
+mapping, violating the typed provider contract at runtime.
+
+**Why it matters.** A `Record<string, T>` describes TypeScript access but does
+not make an ordinary JavaScript object safe for untrusted keys. A truthy inherited
+function or object can escape the lookup as if it were a valid domain value and
+silently bypass the intended conservative fallback.
+
+**Preventive checks.**
+
+- Before indexing a string-keyed object map with external data, require
+  `Object.prototype.hasOwnProperty.call(map, key)` or use a map representation
+  with equivalent own-key semantics.
+- Exercise `constructor` and `__proto__` alongside ordinary unknown values at the
+  exported behavior boundary; assert they take the same safe fallback path.
+
 ---
 
 ## How to use this log
@@ -1265,8 +1287,9 @@ alerts and requires history rewriting to remove cleanly.
   cross-source dedup, reachable navigation, and surfaced sync errors), or
   user-entered "completed" dates/timestamps (bounding future values so they
   aren't read back as current), or secret-shaped test fixtures (avoiding
-  history-wide scanner false positives without weakening detection)**, skim the
-  matching section above.
+  history-wide scanner false positives without weakening detection), or dynamic
+  object-map lookups over untrusted strings (rejecting inherited keys)**, skim
+  the matching section above.
 - When a review surfaces a _new_ recurring, legitimate gap (not stylistic, not
   one-off), add an entry here with the PR reference so the next agent inherits
   the lesson.

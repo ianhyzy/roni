@@ -274,5 +274,6 @@ export function isValidProvider(value: string): value is ProviderId {
 
 export function resolvePricingProviderId(value: string): ProviderId {
   if (isValidProvider(value)) return value;
+  if (!Object.prototype.hasOwnProperty.call(AI_SDK_PROVIDER_IDS, value)) return "openrouter";
   return AI_SDK_PROVIDER_IDS[value] ?? "openrouter";
 }

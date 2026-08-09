@@ -31,6 +31,8 @@ describe("getModelPricing", () => {
 
   it.each([
     ["openrouter", "attacker/gpt-5.4-nano"],
+    ["openrouter", "constructor/gpt-5.4-nano"],
+    ["openrouter", "__proto__/gpt-5.4-nano"],
     ["openrouter", "gpt-5.4-nano"],
     ["openrouter", "openai/gpt-5.4-nano-premium"],
     ["gemini", "gpt-5.4-nano"],

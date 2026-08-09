@@ -299,14 +299,25 @@ describe("runWithPrimaryCircuitBreaker", () => {
       runMutation,
       scheduler: { runAfter },
     } as unknown as ActionCtx;
+    const firstAttemptSnapshot = {
+      inputTokens: 1_000,
+      outputTokens: 100,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      estimatedCostUsd: 0.25,
+      modelId: "gemini-2.5-flash",
+      provider: "google.generative-ai",
+    };
     const accumulator = {
-      snapshotUsage: vi.fn(() => ({
+      snapshotUsage: vi.fn(() => firstAttemptSnapshot),
+      usageDeltaSince: vi.fn(() => ({
         inputTokens: 10,
         outputTokens: 2,
         cacheReadTokens: 0,
         cacheWriteTokens: 0,
         estimatedCostUsd: 0.001,
         modelId: "gemini-2.5-flash",
+        provider: "google.generative-ai",
       })),
     } as unknown as RunAccumulator;
     const runAttempt = vi.fn(
@@ -346,8 +357,10 @@ describe("runWithPrimaryCircuitBreaker", () => {
       userId: "user-1" as Id<"users">,
       threadId: "thread-1",
       model: "gemini-2.5-flash",
+      totalCostUsd: 0.001,
       errorClass: "unexpected_error",
     });
+    expect(accumulator.usageDeltaSince).toHaveBeenCalledWith(firstAttemptSnapshot);
     expect(runAfter).toHaveBeenCalledTimes(1);
     expect(runAfter.mock.calls[0]?.[2]).toMatchObject({
       source: "aiCircuitBreaker",
