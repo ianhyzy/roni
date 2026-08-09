@@ -1,6 +1,7 @@
 import type { ToolCtx } from "@convex-dev/agent";
 import type { ToolExecutionOptions } from "ai";
 import { describe, expect, it, vi } from "vitest";
+import { z } from "zod";
 import { internal } from "../_generated/api";
 import type { Movement } from "../tonal/types";
 import { TONAL_REST_MOVEMENT_ID } from "../tonal/transforms";
@@ -25,11 +26,14 @@ const movementDefaults: Omit<Movement, "id" | "name" | "shortName" | "muscleGrou
   sortOrder: 0,
 };
 
-function movement(id: string, name: string): Movement {
+function createMovement(id: string, name: string): Movement {
   return { ...movementDefaults, id, name, shortName: name, muscleGroups: ["Legs"] };
 }
 
-const CATALOG: Movement[] = [movement("m-frogger", "Frogger"), movement("m-squat", "Racked Squat")];
+const CATALOG: Movement[] = [
+  createMovement("m-frogger", "Frogger"),
+  createMovement("m-squat", "Racked Squat"),
+];
 
 const TOOL_OPTIONS = {
   toolCallId: "tool-call-1",
@@ -63,6 +67,21 @@ async function runTool(tool: unknown, ctx: ToolCtx, input: unknown): Promise<unk
   if (!execute) throw new Error("execute handler missing");
   return await execute.call(bound, input as never, TOOL_OPTIONS);
 }
+
+describe("excludeExercisesTool input schema", () => {
+  const schema = excludeExercisesTool.inputSchema as z.ZodType<unknown>;
+
+  it.each([
+    ["an empty reference", {}, false],
+    ["whitespace-only fields", { name: " ", movementId: "\t" }, false],
+    ["a trimmed exact name", { name: " Frogger " }, true],
+    ["a trimmed movement ID", { movementId: " m-squat " }, true],
+  ])("validates %s", (_label, exercise, accepted) => {
+    const result = schema.safeParse({ exercises: [exercise] });
+
+    expect(result.success).toBe(accepted);
+  });
+});
 
 describe("excludeExercisesTool", () => {
   it("resolves exact catalog entries and persists them in one atomic batch", async () => {
