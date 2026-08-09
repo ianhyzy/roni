@@ -119,7 +119,7 @@ describe("deleteWeekPlanInternal", () => {
           leaseExpiresAt: 10_000,
         },
       },
-      error: "Workout scheduling is in progress",
+      error: "Workout scheduling or approval is in progress for this week. Try again in a minute.",
     },
   ])("rejects a $name workout without deleting any linked row", async ({ workout, error }) => {
     const t = convexTest(schema, modules);

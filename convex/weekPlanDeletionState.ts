@@ -1,91 +1,29 @@
 import { v } from "convex/values";
-import type { Doc, Id } from "./_generated/dataModel";
-import { internalMutation, type MutationCtx } from "./_generated/server";
+import { internalMutation } from "./_generated/server";
 import {
-  CLAIMED_WEEK_PLAN_DELETE_ERROR,
   COMPLETED_WEEK_PLAN_DELETE_ERROR,
   deletionTargetValidator,
 } from "./weekPlanDeletionShared";
-
-type Target = {
-  workoutPlanId: Id<"workoutPlans">;
-  tonalWorkoutId: string | null;
-  remoteStatus: "not_required" | "pending" | "absent";
-};
+import {
+  markWeekPlanDeletionSnapshotConflict as markSnapshotConflict,
+  readWeekPlanDeletionSnapshot as readSnapshot,
+  sameWeekPlanDeletionTargets as sameTargets,
+} from "./weekPlanDeletionSnapshot";
 
 const reservationResultValidator = v.union(
   v.object({
     status: v.literal("reserved"),
     claimId: v.string(),
-    state: v.string(),
+    state: v.union(
+      v.literal("reserved"),
+      v.literal("remote_deleting"),
+      v.literal("needs_attention"),
+    ),
     targets: v.array(deletionTargetValidator),
   }),
   v.object({ status: v.literal("conflict"), error: v.string() }),
   v.object({ status: v.literal("missing") }),
 );
-
-function linkedIds(plan: Doc<"weekPlans">): Id<"workoutPlans">[] {
-  return [...new Set(plan.days.flatMap((day) => (day.workoutPlanId ? [day.workoutPlanId] : [])))];
-}
-
-function sameTargets(left: readonly Target[], right: readonly Target[]): boolean {
-  return (
-    left.length === right.length &&
-    left.every(
-      (target, index) =>
-        target.workoutPlanId === right[index]?.workoutPlanId &&
-        target.tonalWorkoutId === right[index]?.tonalWorkoutId,
-    )
-  );
-}
-
-async function readSnapshot(
-  ctx: MutationCtx,
-  plan: Doc<"weekPlans">,
-): Promise<{ ok: true; targets: Target[] } | { ok: false; error: string }> {
-  if (plan.days.some((day) => day.status === "completed")) {
-    return { ok: false, error: COMPLETED_WEEK_PLAN_DELETE_ERROR };
-  }
-  const targets: Target[] = [];
-  for (const workoutPlanId of linkedIds(plan)) {
-    const workout = await ctx.db.get(workoutPlanId);
-    if (!workout) return { ok: false, error: "Linked workout not found" };
-    if (workout.userId !== plan.userId) return { ok: false, error: "Linked workout access denied" };
-    if (workout.status === "completed") {
-      return { ok: false, error: COMPLETED_WEEK_PLAN_DELETE_ERROR };
-    }
-    if (workout.tonalWorkoutId) {
-      const completed = await ctx.db
-        .query("completedWorkouts")
-        .withIndex("by_userId_tonalWorkoutId", (q) =>
-          q.eq("userId", plan.userId).eq("tonalWorkoutId", workout.tonalWorkoutId),
-        )
-        .first();
-      if (completed) return { ok: false, error: COMPLETED_WEEK_PLAN_DELETE_ERROR };
-    }
-    if (workout.tonalSchedulingClaim || workout.status === "pushing") {
-      return { ok: false, error: CLAIMED_WEEK_PLAN_DELETE_ERROR };
-    }
-    const tonalWorkoutId = workout.tonalWorkoutId ?? null;
-    targets.push({
-      workoutPlanId,
-      tonalWorkoutId,
-      remoteStatus:
-        tonalWorkoutId && workout.status !== "draft" && workout.status !== "deleted"
-          ? "pending"
-          : "not_required",
-    });
-  }
-  return { ok: true, targets };
-}
-
-async function markSnapshotConflict(ctx: MutationCtx, plan: Doc<"weekPlans">): Promise<void> {
-  const reservation = plan.deletionReservation;
-  if (!reservation || reservation.state === "cancelled_completed") return;
-  await ctx.db.patch(plan._id, {
-    deletionReservation: { ...reservation, state: "needs_attention", reason: "snapshot_changed" },
-  });
-}
 
 /** Atomically freezes the exact local/remote rows before any Tonal DELETE. */
 export const reserveWeekPlanDeletion = internalMutation({
@@ -109,7 +47,9 @@ export const reserveWeekPlanDeletion = internalMutation({
     if (!snapshot.ok) {
       const existing = plan.deletionReservation;
       if (existing && existing.state !== "cancelled_completed") {
-        if (existing.state === "reserved") {
+        if (snapshot.error !== COMPLETED_WEEK_PLAN_DELETE_ERROR) {
+          await markSnapshotConflict(ctx, plan);
+        } else if (existing.state === "reserved") {
           for (const target of existing.targets) {
             const workout = await ctx.db.get(target.workoutPlanId);
             if (workout?.weekPlanDeletionReservation?.claimId === existing.claimId) {
@@ -141,10 +81,16 @@ export const reserveWeekPlanDeletion = internalMutation({
         await markSnapshotConflict(ctx, plan);
         return { status: "conflict" as const, error: "Week-plan deletion snapshot changed" };
       }
+      const state: "reserved" | "remote_deleting" | "needs_attention" =
+        existing.state === "reserved"
+          ? "reserved"
+          : existing.state === "remote_deleting"
+            ? "remote_deleting"
+            : "needs_attention";
       return {
         status: "reserved" as const,
         claimId: existing.claimId,
-        state: existing.state,
+        state,
         targets: existing.targets,
       };
     }
@@ -169,7 +115,12 @@ export const reserveWeekPlanDeletion = internalMutation({
         targets: snapshot.targets,
       },
     });
-    return { status: "reserved" as const, claimId, state: "reserved", targets: snapshot.targets };
+    return {
+      status: "reserved" as const,
+      claimId,
+      state: "reserved" as const,
+      targets: snapshot.targets,
+    };
   },
 });
 
@@ -324,18 +275,20 @@ export const finalizeWeekPlanDeletion = internalMutation({
       return { ok: false as const, error: "Week-plan deletion claim was lost" };
     }
     if (
-      (reservation.state !== "remote_deleting" && reservation.state !== "reserved") ||
+      reservation.state === "cancelled_completed" ||
+      (reservation.state === "needs_attention" && reservation.reason !== "remote_failure") ||
       reservation.targets.some((t) => t.remoteStatus === "pending")
     ) {
       return { ok: false as const, error: "Remote deletion is not fully confirmed" };
     }
     const snapshot = await readSnapshot(ctx, plan);
     if (!snapshot.ok || !sameTargets(reservation.targets, snapshot.ok ? snapshot.targets : [])) {
+      const completed = !snapshot.ok && snapshot.error === COMPLETED_WEEK_PLAN_DELETE_ERROR;
       await ctx.db.patch(plan._id, {
         deletionReservation: {
           ...reservation,
           state: "needs_attention",
-          reason: snapshot.ok ? "snapshot_changed" : "completion_recorded",
+          reason: completed ? "completion_recorded" : "snapshot_changed",
         },
       });
       return {

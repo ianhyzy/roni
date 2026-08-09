@@ -14,10 +14,10 @@ import { internalAction, internalMutation, internalQuery } from "./_generated/se
 import { getDraftWorkoutMutationBlocker } from "./weekPlanHelpers";
 import { rateLimiter } from "./rateLimits";
 import {
-  CLAIMED_WEEK_PLAN_DELETE_ERROR,
   COMPLETED_WEEK_PLAN_DELETE_ERROR,
   WEEK_PLAN_DELETION_IN_PROGRESS_ERROR,
 } from "./weekPlanDeletionShared";
+import { readWeekPlanDeletionSnapshot } from "./weekPlanDeletionSnapshot";
 
 export {
   CLAIMED_WEEK_PLAN_DELETE_ERROR,
@@ -45,45 +45,20 @@ export const getWeekPlanDeletionState = internalQuery({
     const plan = await ctx.db.get(args.weekPlanId);
     if (!plan) return { ok: true, tonalWorkoutIds: [] };
     if (plan.userId !== args.userId) return { ok: false, error: "Week plan access denied" };
+    if (plan.deletionReservation?.state === "cancelled_completed") {
+      return { ok: false, error: COMPLETED_WEEK_PLAN_DELETE_ERROR };
+    }
     if (plan.deletionReservation) {
       return { ok: false, error: WEEK_PLAN_DELETION_IN_PROGRESS_ERROR };
     }
-    if (plan.days.some((day) => day.status === "completed")) {
-      return { ok: false, error: COMPLETED_WEEK_PLAN_DELETE_ERROR };
-    }
-
-    const workoutPlanIds = [
-      ...new Set(plan.days.flatMap((day) => (day.workoutPlanId ? [day.workoutPlanId] : []))),
-    ];
-
-    const tonalWorkoutIds: string[] = [];
-    for (const workoutPlanId of workoutPlanIds) {
-      const workout = await ctx.db.get(workoutPlanId);
-      if (!workout) return { ok: false, error: "Linked workout not found" };
-      if (workout.userId !== args.userId) {
-        return { ok: false, error: "Linked workout access denied" };
-      }
-      if (workout.tonalSchedulingClaim !== undefined) {
-        return { ok: false, error: CLAIMED_WEEK_PLAN_DELETE_ERROR };
-      }
-      if (workout.status === "completed") {
-        return { ok: false, error: COMPLETED_WEEK_PLAN_DELETE_ERROR };
-      }
-      if (workout.tonalWorkoutId) {
-        const completed = await ctx.db
-          .query("completedWorkouts")
-          .withIndex("by_userId_tonalWorkoutId", (q) =>
-            q.eq("userId", args.userId).eq("tonalWorkoutId", workout.tonalWorkoutId),
-          )
-          .first();
-        if (completed) return { ok: false, error: COMPLETED_WEEK_PLAN_DELETE_ERROR };
-      }
-      if (workout.status !== "draft" && workout.status !== "deleted" && workout.tonalWorkoutId) {
-        tonalWorkoutIds.push(workout.tonalWorkoutId);
-      }
-    }
-
-    return { ok: true, tonalWorkoutIds };
+    const snapshot = await readWeekPlanDeletionSnapshot(ctx, plan);
+    if (!snapshot.ok) return snapshot;
+    return {
+      ok: true,
+      tonalWorkoutIds: snapshot.targets.flatMap((target) =>
+        target.remoteStatus === "pending" && target.tonalWorkoutId ? [target.tonalWorkoutId] : [],
+      ),
+    };
   },
 });
 
@@ -257,16 +232,18 @@ export const deleteWeekPlanInternal = internalMutation({
     if (plan.userId !== args.userId) {
       return { ok: false as const, error: "Week plan access denied" };
     }
+    if (plan.deletionReservation?.state === "cancelled_completed") {
+      return { ok: false as const, error: COMPLETED_WEEK_PLAN_DELETE_ERROR };
+    }
     if (plan.deletionReservation) {
       return { ok: false as const, error: "This week plan is being deleted" };
     }
-    if (plan.days.some((day) => day.status === "completed")) {
-      return { ok: false as const, error: COMPLETED_WEEK_PLAN_DELETE_ERROR };
+    const snapshot = await readWeekPlanDeletionSnapshot(ctx, plan);
+    if (!snapshot.ok) return { ok: false as const, error: snapshot.error };
+    if (snapshot.targets.some((target) => target.remoteStatus === "pending")) {
+      return { ok: false as const, error: "Only draft week plans can be deleted" };
     }
-
-    const workoutPlanIds = [
-      ...new Set(plan.days.flatMap((day) => (day.workoutPlanId ? [day.workoutPlanId] : []))),
-    ];
+    const workoutPlanIds = snapshot.targets.map((target) => target.workoutPlanId);
     for (const workoutPlanId of workoutPlanIds) {
       const workout = await ctx.db.get(workoutPlanId);
       if (!workout) {
@@ -274,14 +251,6 @@ export const deleteWeekPlanInternal = internalMutation({
       }
       if (workout.userId !== args.userId) {
         return { ok: false as const, error: "Linked workout access denied" };
-      }
-      // Checked directly rather than via the blocker, which short-circuits on
-      // "non_draft" and would let a pushed workout skip the claim check.
-      if (workout.tonalSchedulingClaim !== undefined) {
-        return { ok: false as const, error: "Workout scheduling is in progress" };
-      }
-      if (workout.status === "completed") {
-        return { ok: false as const, error: COMPLETED_WEEK_PLAN_DELETE_ERROR };
       }
       const blocker = getDraftWorkoutMutationBlocker(workout);
       if (blocker === "non_draft") {
