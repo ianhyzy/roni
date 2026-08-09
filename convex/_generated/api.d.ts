@@ -94,8 +94,8 @@ import type * as coach_weekDayModifications from "../coach/weekDayModifications.
 import type * as coach_weekModifications from "../coach/weekModifications.js";
 import type * as coach_weekProgramming from "../coach/weekProgramming.js";
 import type * as coach_weekProgrammingDirect from "../coach/weekProgrammingDirect.js";
-import type * as coach_weekPushDraft from "../coach/weekPushDraft.js";
 import type * as coach_weekProgrammingHelpers from "../coach/weekProgrammingHelpers.js";
+import type * as coach_weekPushDraft from "../coach/weekPushDraft.js";
 import type * as coach_workoutBlocks from "../coach/workoutBlocks.js";
 import type * as coachState from "../coachState.js";
 import type * as contact from "../contact.js";
@@ -251,6 +251,7 @@ import type * as weekPlanApproval from "../weekPlanApproval.js";
 import type * as weekPlanCompletion from "../weekPlanCompletion.js";
 import type * as weekPlanDeletion from "../weekPlanDeletion.js";
 import type * as weekPlanDeletionShared from "../weekPlanDeletionShared.js";
+import type * as weekPlanDeletionSnapshot from "../weekPlanDeletionSnapshot.js";
 import type * as weekPlanDeletionState from "../weekPlanDeletionState.js";
 import type * as weekPlanEnriched from "../weekPlanEnriched.js";
 import type * as weekPlanHelpers from "../weekPlanHelpers.js";
@@ -356,8 +357,8 @@ declare const fullApi: ApiFromModules<{
   "coach/weekModifications": typeof coach_weekModifications;
   "coach/weekProgramming": typeof coach_weekProgramming;
   "coach/weekProgrammingDirect": typeof coach_weekProgrammingDirect;
-  "coach/weekPushDraft": typeof coach_weekPushDraft;
   "coach/weekProgrammingHelpers": typeof coach_weekProgrammingHelpers;
+  "coach/weekPushDraft": typeof coach_weekPushDraft;
   "coach/workoutBlocks": typeof coach_workoutBlocks;
   coachState: typeof coachState;
   contact: typeof contact;
@@ -513,6 +514,7 @@ declare const fullApi: ApiFromModules<{
   weekPlanCompletion: typeof weekPlanCompletion;
   weekPlanDeletion: typeof weekPlanDeletion;
   weekPlanDeletionShared: typeof weekPlanDeletionShared;
+  weekPlanDeletionSnapshot: typeof weekPlanDeletionSnapshot;
   weekPlanDeletionState: typeof weekPlanDeletionState;
   weekPlanEnriched: typeof weekPlanEnriched;
   weekPlanHelpers: typeof weekPlanHelpers;
