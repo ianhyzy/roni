@@ -38,20 +38,20 @@ describe("default provider budget thresholds", () => {
   it.each(PROVIDER_IDS)(
     "permits the 25-step %s reference scenario in every known billing class",
     (provider) => {
-      const onTrip = vi.fn();
-      const stopWhen = budgetCapStopCondition({ provider, onTrip });
       const estimates: number[] = [];
 
       for (const billingClass of INPUT_BILLING_CLASSES) {
+        const onTrip = vi.fn();
+        const stopWhen = budgetCapStopCondition({ provider, onTrip });
         const steps = createReferenceAttemptSteps(provider, billingClass);
         const referenceAttemptUsd = estimateAttemptCostUsd(steps, provider);
         estimates.push(referenceAttemptUsd);
 
         expect(stopWhen({ steps })).toBe(false);
         expect(DEFAULT_PROVIDER_BUDGET_LIMITS_USD[provider]).toBeGreaterThan(referenceAttemptUsd);
+        expect(onTrip).not.toHaveBeenCalled();
       }
       expect(Math.max(...estimates)).toBeCloseTo(REFERENCE_ATTEMPT_COST_USD[provider], 6);
-      expect(onTrip).not.toHaveBeenCalled();
     },
   );
 
@@ -80,6 +80,7 @@ describe("default provider budget thresholds", () => {
       }
     }
 
+    expect(stoppedAt).toBeDefined();
     expect(stoppedAt).toBeLessThan(COACH_MAX_STEPS);
     expect(onTrip).toHaveBeenCalledOnce();
   });

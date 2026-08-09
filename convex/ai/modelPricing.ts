@@ -148,7 +148,8 @@ function usesConservativeOpenRouterRouting(
   provider: ProviderId,
   requestedModelId: string | undefined,
 ): boolean {
-  if (provider !== "openrouter" || !requestedModelId) return provider === "openrouter";
+  if (provider !== "openrouter") return false;
+  if (!requestedModelId) return true;
   const reference = parseModelReference(requestedModelId);
   if (!reference) return true;
   const resolved = resolveModelPricing(provider, reference);
@@ -217,6 +218,9 @@ function resolvePricingProvider(
 ): ProviderId | null {
   if (requestedProvider === "openrouter") {
     if (!reference.vendor) return reference.modelId === "auto" ? "openrouter" : null;
+    if (!Object.prototype.hasOwnProperty.call(OPENROUTER_VENDOR_PROVIDERS, reference.vendor)) {
+      return null;
+    }
     return OPENROUTER_VENDOR_PROVIDERS[reference.vendor] ?? null;
   }
 
