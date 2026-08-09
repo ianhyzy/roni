@@ -2,6 +2,10 @@ import { v } from "convex/values";
 import type { Id } from "../_generated/dataModel";
 import { internalMutation } from "../_generated/server";
 import { getDraftWorkoutMutationBlocker } from "../weekPlanHelpers";
+import {
+  isWeekPlanDeletionReserved,
+  WEEK_PLAN_DELETION_IN_PROGRESS_ERROR,
+} from "../weekPlanDeletionShared";
 
 export type SwapDaySlotsResult = { ok: true } | { ok: false; error: string };
 
@@ -28,6 +32,9 @@ export const swapDaySlots = internalMutation({
     const plan = await ctx.db.get(weekPlanId);
     if (!plan || plan.userId !== userId) {
       throw new Error("Week plan not found or access denied");
+    }
+    if (isWeekPlanDeletionReserved(plan)) {
+      return { ok: false, error: WEEK_PLAN_DELETION_IN_PROGRESS_ERROR };
     }
 
     const linkedPlanIds = [

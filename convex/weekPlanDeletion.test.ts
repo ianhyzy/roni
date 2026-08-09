@@ -166,7 +166,7 @@ describe("deleteWeekPlanInternal allowPushed", () => {
     ).resolves.toEqual({ ok: false, error: "Only draft week plans can be deleted" });
   });
 
-  it("removes the rows once the caller has cleared Tonal", async () => {
+  it("cannot bypass remote deletion receipts with the legacy allowPushed flag", async () => {
     const t = convexTest(schema, modules);
     const { userId, weekPlanId } = await seedWeekPlan(t, [
       { status: "pushed", tonalWorkoutId: "tw-1", tonalScheduledDate: "2026-08-03" },
@@ -178,8 +178,8 @@ describe("deleteWeekPlanInternal allowPushed", () => {
         weekPlanId,
         allowPushed: true,
       }),
-    ).resolves.toEqual({ ok: true, deleted: true });
-    await expect(t.run((ctx) => ctx.db.get(weekPlanId))).resolves.toBeNull();
+    ).resolves.toEqual({ ok: false, error: "Only draft week plans can be deleted" });
+    await expect(t.run((ctx) => ctx.db.get(weekPlanId))).resolves.not.toBeNull();
   });
 
   it("never lets allowPushed override an in-flight scheduling claim", async () => {

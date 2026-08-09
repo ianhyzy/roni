@@ -28,6 +28,7 @@ interface HarnessOptions {
   eligibleDays?: number;
   workoutStatusesByLookup?: readonly ("draft" | "pushed" | "completed" | "missing")[];
   reachCutoffBeforeDays?: boolean;
+  claimConflict?: string;
 }
 
 function getHandler<T>(registered: unknown): T {
@@ -110,10 +111,14 @@ function makeHarness(options: HarnessOptions = {}) {
     if (name === "discord:notifyError") return undefined;
     throw new Error(`Unexpected action ${name}`);
   });
-  const runMutation = vi.fn(async () => ({
-    status: "replaced" as const,
-    workoutPlanId: PUSHED_PLAN_ID,
-  }));
+  const runMutation = vi.fn(async (ref: TestFunctionReference) => {
+    if (getFunctionName(ref) === "weekPlanApproval:claimDraftForWeekPush") {
+      return options.claimConflict
+        ? { status: "conflict" as const, error: options.claimConflict }
+        : { status: "claimed" as const };
+    }
+    return { status: "replaced" as const, workoutPlanId: PUSHED_PLAN_ID };
+  });
   const ctx = { runQuery, runAction, runMutation } as unknown as ActionCtx;
   return { ctx, runAction, runMutation, scheduleWorkout };
 }
@@ -184,6 +189,22 @@ describe("pushWeekPlanToTonal scheduling", () => {
       scheduledDate: FUTURE_WEEK_START,
     });
     expect(actionNames(runAction)).toEqual(["tonal/mutations:createWorkout"]);
+  });
+
+  it("does not create or schedule when deletion owns the approval fence", async () => {
+    const { ctx, runAction, scheduleWorkout } = makeHarness({
+      claimConflict: "This week plan is being deleted.",
+    });
+
+    const result = await pushHandler(ctx, { userId: USER_ID, weekPlanId: WEEK_PLAN_ID });
+
+    expect(result).toMatchObject({ success: false, pushed: 0, deferred: 1, skipped: 6 });
+    expect(result.results[0]).toMatchObject({
+      status: "deferred",
+      error: "This week plan is being deleted.",
+    });
+    expect(actionNames(runAction)).toEqual([]);
+    expect(scheduleWorkout).not.toHaveBeenCalled();
   });
 
   it("retries scheduling for a pushed workout without creating a duplicate", async () => {
@@ -267,7 +288,7 @@ describe("pushWeekPlanToTonal scheduling", () => {
       error: "Tonal calendar scheduling failed (status 400)",
       pushDivergence,
     });
-    expect(runMutation).toHaveBeenCalledOnce();
+    expect(runMutation).toHaveBeenCalledTimes(2);
     expect(actionNames(runAction)).toEqual([
       "tonal/mutations:createWorkout",
       "discord:notifyError",

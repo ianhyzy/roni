@@ -373,6 +373,28 @@ export const deleteWorkout = internalAction({
     }),
 });
 
+/** Remote-only idempotent delete used by the week-plan receipt state machine. */
+export const deleteWorkoutFromTonal = internalAction({
+  args: {
+    userId: v.id("users"),
+    workoutId: v.string(),
+  },
+  returns: v.object({ status: v.union(v.literal("deleted"), v.literal("absent")) }),
+  handler: async (ctx, { userId, workoutId }) => {
+    const status = await withTokenRetry(ctx, userId, async (token) => {
+      try {
+        await tonalFetch(token, `/v6/user-workouts/${workoutId}`, { method: "DELETE" });
+        return "deleted" as const;
+      } catch (error) {
+        if (error instanceof TonalApiError && error.status === 404) return "absent" as const;
+        throw error;
+      }
+    });
+    await expireCustomWorkoutsCache(ctx, userId);
+    return { status };
+  },
+});
+
 export const estimateWorkout = internalAction({
   args: {
     userId: v.id("users"),

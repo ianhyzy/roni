@@ -85,7 +85,7 @@ describe("pushWeekPlanToTonal failure notifications", () => {
     const ctx = {
       runQuery,
       runAction,
-      runMutation: vi.fn(),
+      runMutation: vi.fn(async () => ({ status: "claimed" as const })),
     } as unknown as ActionCtx;
 
     const result = await handler(ctx, { userId: USER_ID, weekPlanId: WEEK_PLAN_ID });

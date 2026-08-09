@@ -2,6 +2,7 @@ import { v } from "convex/values";
 import type { Doc } from "../_generated/dataModel";
 import { internalMutation } from "../_generated/server";
 import { isValidWeekStartDateString } from "../weekPlanHelpers";
+import { isWorkoutReservedForWeekPlanDeletion } from "../weekPlanDeletionShared";
 
 export const SCHEDULING_RECEIPT_FRESH_MS = 10 * 60 * 1000;
 export const SCHEDULING_CLAIM_LEASE_MS = 11 * 60 * 1000;
@@ -74,6 +75,9 @@ export const acquireClaim = internalMutation({
 
     const plan = await ctx.db.get(workoutPlanId);
     assertMatchingPlan(plan, userId, workoutId);
+    if (isWorkoutReservedForWeekPlanDeletion(plan)) {
+      return { status: "busy" as const, retryable: true as const };
+    }
     const workoutSignupId = freshReceipt(plan, scheduledDate, now);
     if (workoutSignupId) return { status: "already_scheduled" as const, workoutSignupId };
 
@@ -107,6 +111,13 @@ export const authorizePost = internalMutation({
     validateNow(now);
     const plan = await ctx.db.get(workoutPlanId);
     assertMatchingPlan(plan, userId, workoutId);
+    if (isWorkoutReservedForWeekPlanDeletion(plan)) {
+      return {
+        ok: false as const,
+        error: "The linked week plan is being deleted. Please retry later.",
+        retryable: true as const,
+      };
+    }
     const claim = plan.tonalSchedulingClaim;
     if (
       !claim ||

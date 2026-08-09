@@ -24,10 +24,16 @@ import {
 } from "./weekPlanHelpers";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
+import {
+  isWeekPlanDeletionReserved,
+  isWorkoutReservedForWeekPlanDeletion,
+  WEEK_PLAN_DELETION_IN_PROGRESS_ERROR,
+} from "./weekPlanDeletionShared";
 
 function getIncomingWorkoutLinkBlocker(
   workout: Doc<"workoutPlans">,
-): "scheduled" | "claimed" | null {
+): "scheduled" | "claimed" | "deleting" | null {
+  if (isWorkoutReservedForWeekPlanDeletion(workout)) return "deleting";
   if (
     workout.tonalWorkoutSignupId !== undefined ||
     workout.tonalScheduledDate !== undefined ||
@@ -61,9 +67,11 @@ async function assertWorkoutRelinkAllowed(
   }
   if (blocker === "scheduled") throw new Error("Scheduled workouts cannot be relinked");
   if (blocker === "claimed") throw new Error("Workout scheduling is in progress");
+  if (blocker === "deleting") throw new Error(WEEK_PLAN_DELETION_IN_PROGRESS_ERROR);
   const incomingBlocker = nextWorkout ? getIncomingWorkoutLinkBlocker(nextWorkout) : null;
   if (incomingBlocker === "scheduled") throw new Error("Scheduled workouts cannot be linked");
   if (incomingBlocker === "claimed") throw new Error("Workout scheduling is in progress");
+  if (incomingBlocker === "deleting") throw new Error(WEEK_PLAN_DELETION_IN_PROGRESS_ERROR);
 }
 
 // Re-export for external consumers
@@ -187,11 +195,23 @@ export const update = mutation({
     if (!plan || plan.userId !== userId) {
       throw new Error("Week plan not found or access denied");
     }
+    if (isWeekPlanDeletionReserved(plan)) throw new Error(WEEK_PLAN_DELETION_IN_PROGRESS_ERROR);
     if (args.days !== undefined && args.days.length !== 7) {
       throw new Error("days must have exactly 7 elements (Mon-Sun)");
     }
     if (args.days !== undefined) {
       for (let dayIndex = 0; dayIndex < plan.days.length; dayIndex += 1) {
+        const currentDay = plan.days[dayIndex];
+        const nextDay = args.days[dayIndex];
+        if (
+          currentDay?.status === "completed" &&
+          (nextDay?.status !== "completed" ||
+            nextDay.sessionType !== currentDay.sessionType ||
+            nextDay.workoutPlanId !== currentDay.workoutPlanId ||
+            nextDay.estimatedDuration !== currentDay.estimatedDuration)
+        ) {
+          throw new Error("Completed week-plan days cannot be changed");
+        }
         await assertWorkoutRelinkAllowed(ctx, {
           userId,
           currentWorkoutPlanId: plan.days[dayIndex]?.workoutPlanId,
@@ -228,8 +248,16 @@ export const linkWorkoutPlanToDay = mutation({
     if (!plan || plan.userId !== userId) {
       throw new Error("Week plan not found or access denied");
     }
+    if (isWeekPlanDeletionReserved(plan)) throw new Error(WEEK_PLAN_DELETION_IN_PROGRESS_ERROR);
     const days = [...plan.days];
     const slot = { ...days[args.dayIndex] };
+    if (
+      slot.status === "completed" &&
+      (slot.workoutPlanId !== args.workoutPlanId ||
+        (args.status !== undefined && args.status !== "completed"))
+    ) {
+      throw new Error("Completed week-plan days cannot be changed");
+    }
     await assertWorkoutRelinkAllowed(ctx, {
       userId,
       currentWorkoutPlanId: slot.workoutPlanId,
