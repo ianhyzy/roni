@@ -44,8 +44,10 @@ function resolveRefs(refs: readonly ExerciseRef[], catalog: Movement[]): Resolve
   const catalogMovementIds = new Set(catalog.map((movement) => movement.id));
 
   for (const ref of refs) {
-    const outcome = resolveMovement({ movementId: ref.movementId, name: ref.name }, catalog);
-    const label = ref.name ?? ref.movementId ?? "(unnamed exercise)";
+    const movementId = ref.movementId?.trim() || undefined;
+    const name = ref.name?.trim() || undefined;
+    const outcome = resolveMovement({ movementId, name }, catalog);
+    const label = name ?? movementId ?? "(unnamed exercise)";
 
     if (outcome.status === "resolved" && catalogMovementIds.has(outcome.movementId)) {
       movementIds.push(outcome.movementId);

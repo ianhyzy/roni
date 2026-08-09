@@ -97,6 +97,29 @@ describe("excludeExercisesTool", () => {
     expect(batchWrites).toHaveLength(1);
   });
 
+  it("normalizes a copied movement ID before resolving it", async () => {
+    const runMutation = vi.fn(async (_reference: unknown, args: unknown) => {
+      const { movementIds } = args as { movementIds?: string[] };
+      return (movementIds ?? []).map((movementId) => ({
+        movementId,
+        movementName: "Racked Squat",
+        muscleGroups: ["Legs"],
+        createdAt: 1,
+      }));
+    });
+    const ctx = buildCtx(runMutation);
+
+    const result = await runTool(excludeExercisesTool, ctx, {
+      exercises: [{ movementId: " m-squat " }],
+    });
+
+    expect(result).toMatchObject({ success: true, excluded: ["Racked Squat"], unresolved: [] });
+    expect(runMutation).toHaveBeenCalledWith(internal.exerciseExclusions.addManyForUser, {
+      userId: "user-1",
+      movementIds: ["m-squat"],
+    });
+  });
+
   it("reports unresolved names instead of excluding a guessed movement", async () => {
     const runMutation = vi.fn(async (_reference: unknown, _args: unknown) => undefined);
     const ctx = buildCtx(runMutation);
