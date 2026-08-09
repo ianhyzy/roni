@@ -32,7 +32,7 @@ export function getWorkoutApprovalFingerprint(workout: { title: string; blocks: 
   return JSON.stringify([workout.title, workout.blocks]);
 }
 
-export type DraftWorkoutMutationBlocker = "non_draft" | "scheduled" | "claimed";
+export type DraftWorkoutMutationBlocker = "non_draft" | "scheduled" | "claimed" | "deleting";
 
 /** Classify why a linked workout is unsafe to mutate or unlink. */
 export function getDraftWorkoutMutationBlocker(workout: {
@@ -41,7 +41,9 @@ export function getDraftWorkoutMutationBlocker(workout: {
   tonalScheduledDate?: string;
   tonalSchedulingReceiptVerifiedAt?: number;
   tonalSchedulingClaim?: unknown;
+  weekPlanDeletionReservation?: unknown;
 }): DraftWorkoutMutationBlocker | null {
+  if (workout.weekPlanDeletionReservation !== undefined) return "deleting";
   if (workout.status !== "draft") return "non_draft";
   if (
     workout.tonalWorkoutSignupId !== undefined ||

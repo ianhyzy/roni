@@ -24,6 +24,7 @@ import { blocksFromMovementIds } from "./workoutBlocks";
 import type { SessionType } from "./weekProgrammingHelpers";
 import { fetchAndComputePlanData } from "./weekProgramming";
 import type { RepSetScheme } from "./goalConfig";
+import { getWorkoutApprovalFingerprint } from "../weekPlanHelpers";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -158,17 +159,40 @@ async function fillWorkoutsPhase(
       goalScheme,
     });
     const title = `${sessionType.replaceAll("_", " ")} – ${weekStartDate} day ${dayIndex + 1}`;
+    const draftId = (await ctx.runMutation(internal.weekPlans.createDraftWorkoutInternal, {
+      userId,
+      title,
+      blocks,
+      estimatedDuration: sessionDurationMinutes,
+    })) as Id<"workoutPlans">;
+    await ctx.runMutation(internal.weekPlans.linkWorkoutPlanToDayInternal, {
+      userId,
+      weekPlanId,
+      dayIndex,
+      workoutPlanId: draftId,
+      estimatedDuration: sessionDurationMinutes,
+    });
+    const claim = await ctx.runMutation(internal.weekPlanApproval.claimDraftForWeekPush, {
+      userId,
+      weekPlanId,
+      dayIndex,
+      expectedWorkoutPlanId: draftId,
+      expectedDraftFingerprint: getWorkoutApprovalFingerprint({ title, blocks }),
+    });
+    if (claim.status !== "claimed") continue;
     const result = (await ctx.runAction(internal.tonal.mutations.createWorkout, {
       userId,
       title,
       blocks,
     })) as { success: boolean; planId?: Id<"workoutPlans"> };
     if (result.success && result.planId) {
-      await ctx.runMutation(internal.weekPlans.linkWorkoutPlanToDayInternal, {
+      await ctx.runMutation(internal.weekPlans.replaceDraftWithPushed, {
         userId,
         weekPlanId,
         dayIndex,
-        workoutPlanId: result.planId,
+        oldWorkoutPlanId: draftId,
+        expectedDraftFingerprint: getWorkoutApprovalFingerprint({ title, blocks }),
+        newWorkoutPlanId: result.planId,
         estimatedDuration: sessionDurationMinutes,
       });
     }

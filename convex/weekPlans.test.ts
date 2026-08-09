@@ -371,4 +371,29 @@ describe("public week-plan relink guards", () => {
       estimatedDuration: 45,
     });
   });
+
+  it("never lets public writes downgrade a completed day", async () => {
+    const t = convexTest(schema, modules);
+    const seeded = await seedRelinkCase(t);
+    const completedDays = seeded.days.map((day) => ({ ...day }));
+    completedDays[0] = { ...completedDays[0], status: "completed" };
+    await t.run((ctx) => ctx.db.patch(seeded.weekPlanId, { days: completedDays }));
+    const downgradedDays = completedDays.map((day) => ({ ...day }));
+    downgradedDays[0] = { ...downgradedDays[0], status: "programmed" };
+
+    await expect(
+      withUser(t, seeded.userId).mutation(api.weekPlans.update, {
+        weekPlanId: seeded.weekPlanId,
+        days: downgradedDays,
+      }),
+    ).rejects.toThrow("Completed week-plan days cannot be changed");
+    await expect(
+      withUser(t, seeded.userId).mutation(api.weekPlans.linkWorkoutPlanToDay, {
+        weekPlanId: seeded.weekPlanId,
+        dayIndex: 0,
+        workoutPlanId: seeded.currentWorkoutPlanId,
+        status: "programmed",
+      }),
+    ).rejects.toThrow("Completed week-plan days cannot be changed");
+  });
 });

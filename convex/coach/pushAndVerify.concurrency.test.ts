@@ -98,7 +98,11 @@ function makeContext(replacement: Replacement, canonicalStatus: "pushed" | "draf
     if (name === "discord:notifyError") return undefined;
     throw new Error(`Unexpected action ${name}`);
   });
-  const runMutation = vi.fn(async () => replacement);
+  const runMutation = vi.fn(async (ref: TestRef) =>
+    getFunctionName(ref) === "weekPlanApproval:claimDraftForWeekPush"
+      ? { status: "claimed" as const }
+      : replacement,
+  );
   return {
     ctx: { runQuery, runAction, runMutation } as unknown as ActionCtx,
     runMutation,

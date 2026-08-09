@@ -2,6 +2,7 @@ import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 import { authTables } from "@convex-dev/auth/server";
 import { blockInputValidator } from "./validators";
+import { weekPlanDeletionReservationValidator } from "./weekPlanDeletionShared";
 
 export default defineSchema({
   ...authTables,
@@ -362,6 +363,13 @@ export default defineSchema({
         leaseExpiresAt: v.number(),
       }),
     ),
+    /** Durable fence while the owning week is being removed from Tonal. */
+    weekPlanDeletionReservation: v.optional(
+      v.object({
+        claimId: v.string(),
+        weekPlanId: v.id("weekPlans"),
+      }),
+    ),
     source: v.optional(v.string()),
     title: v.string(),
     blocks: blockInputValidator,
@@ -394,6 +402,8 @@ export default defineSchema({
       v.literal("bro_split"),
     ),
     targetDays: v.number(),
+    /** Durable, phase-aware claim acquired before any destructive Tonal call. */
+    deletionReservation: v.optional(weekPlanDeletionReservationValidator),
     days: v.array(
       v.object({
         sessionType: v.union(
@@ -739,7 +749,8 @@ export default defineSchema({
     performanceSyncComplete: v.optional(v.literal(true)),
   })
     .index("by_userId_activityId", ["userId", "activityId"])
-    .index("by_userId_date", ["userId", "date"]),
+    .index("by_userId_date", ["userId", "date"])
+    .index("by_userId_tonalWorkoutId", ["userId", "tonalWorkoutId"]),
 
   /** User-entered lifting sessions, kept separate from Tonal performance records. */
   liftingSessions: defineTable({

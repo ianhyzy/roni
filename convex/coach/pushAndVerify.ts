@@ -2,14 +2,13 @@
 
 import { v } from "convex/values";
 import { internalAction } from "../_generated/server";
-import type { ActionCtx } from "../_generated/server";
 import { internal } from "../_generated/api";
 import type { Id } from "../_generated/dataModel";
 import { DAY_NAMES } from "./weekProgrammingHelpers";
 import type { BlockInput } from "../tonal/transforms";
 import type { PushDivergence } from "../tonal/mutations";
 import { scheduleWorkoutForUser } from "../tonal/scheduling";
-import { getWorkoutApprovalFingerprint } from "../weekPlanHelpers";
+import { pushDraftForWeekDay } from "./weekPushDraft";
 import {
   type PushResult,
   type WeekPushResult,
@@ -24,17 +23,6 @@ const FINALIZATION_MARGIN_MS = 30_000;
 export const START_NEW_DAY_CUTOFF_MS =
   CONVEX_ACTION_LIMIT_MS - MAX_DAY_OPERATION_MS - FINALIZATION_MARGIN_MS;
 const DEFERRED_MESSAGE = "Approval is still in progress. Retry to finish this day safely.";
-
-type CreateWorkoutResult =
-  | {
-      success: true;
-      workoutId: string;
-      title: string;
-      setCount: number;
-      planId: Id<"workoutPlans">;
-      pushDivergence: PushDivergence | null;
-    }
-  | { success: false; error: string; planId: Id<"workoutPlans"> };
 
 type WorkoutPlan = {
   _id: Id<"workoutPlans">;
@@ -55,31 +43,6 @@ type WeekPlan = {
   weekStartDate: string;
   days: WeekPlanDay[];
 };
-
-type DraftReplacementResult =
-  | { status: "replaced"; workoutPlanId: Id<"workoutPlans"> }
-  | { status: "canonical"; workoutPlanId: Id<"workoutPlans"> }
-  | { status: "conflict"; error: string };
-
-/** Push a single draft workout to Tonal, retrying once on failure. */
-async function pushOneWorkout(
-  ctx: Pick<ActionCtx, "runAction">,
-  userId: Id<"users">,
-  wp: WorkoutPlan,
-): Promise<CreateWorkoutResult> {
-  const push = () =>
-    ctx.runAction(internal.tonal.mutations.createWorkout, {
-      userId,
-      title: wp.title,
-      blocks: wp.blocks,
-    }) as Promise<CreateWorkoutResult>;
-
-  const first = await push();
-  if (first.success) return first;
-
-  // Single retry
-  return push();
-}
 
 function countExercises(blocks: BlockInput[]): number {
   let count = 0;
@@ -224,73 +187,45 @@ export const pushWeekPlanToTonal = internalAction({
       if (wp.status !== "pushed") {
         // Gap between creations to stay under Tonal's per-user rate limit.
         if (createdWorkouts > 0) await new Promise((resolve) => setTimeout(resolve, 5000));
-
-        const expectedDraftFingerprint = getWorkoutApprovalFingerprint(wp);
-        const createResult = await pushOneWorkout(ctx, userId, wp);
-        if (!createResult.success) {
+        const draftPush = await pushDraftForWeekDay(ctx, {
+          userId,
+          weekPlanId,
+          dayIndex: i,
+          workout: wp,
+          estimatedDuration: day.estimatedDuration,
+        });
+        if (draftPush.status === "failed") {
           results.push({
             dayIndex: i,
             dayName,
             sessionType: day.sessionType,
             status: "failed",
             title: wp.title,
-            error: createResult.error,
+            error: draftPush.error,
           });
           hasReportableFailure = true;
           failed++;
           continue;
         }
-
-        createdWorkouts++;
-        const replacement = (await ctx.runMutation(internal.weekPlans.replaceDraftWithPushed, {
-          userId,
-          weekPlanId,
-          dayIndex: i,
-          oldWorkoutPlanId: wp._id,
-          expectedDraftFingerprint,
-          newWorkoutPlanId: createResult.planId,
-          estimatedDuration: day.estimatedDuration,
-        })) as DraftReplacementResult;
-        if (replacement.status === "conflict") {
+        if (draftPush.status === "deferred") {
           results.push({
             dayIndex: i,
             dayName,
             sessionType: day.sessionType,
             status: "deferred",
-            error: replacement.error,
+            error: draftPush.error,
             retryable: true,
           });
           deferred++;
           continue;
         }
-        if (replacement.status === "canonical") {
-          const canonical = (await ctx.runQuery(internal.workoutPlans.getById, {
-            planId: replacement.workoutPlanId,
-            userId,
-          })) as WorkoutPlan | null;
-          if (!canonical || canonical.status !== "pushed" || !canonical.tonalWorkoutId) {
-            results.push({
-              dayIndex: i,
-              dayName,
-              sessionType: day.sessionType,
-              status: "deferred",
-              error: DEFERRED_MESSAGE,
-              retryable: true,
-            });
-            deferred++;
-            continue;
-          }
-          tonalWorkoutId = canonical.tonalWorkoutId;
-          pushedWorkoutPlanId = canonical._id;
-          title = canonical.title;
-          blocks = canonical.blocks;
-        } else {
-          tonalWorkoutId = createResult.workoutId;
-          pushedWorkoutPlanId = createResult.planId;
-          title = createResult.title;
-          pushDivergence = createResult.pushDivergence;
-          createdThisRun = true;
-        }
+        tonalWorkoutId = draftPush.tonalWorkoutId;
+        pushedWorkoutPlanId = draftPush.workoutPlanId;
+        title = draftPush.title;
+        blocks = draftPush.blocks;
+        pushDivergence = draftPush.pushDivergence;
+        createdThisRun = draftPush.created;
+        if (draftPush.created) createdWorkouts++;
       }
 
       if (!tonalWorkoutId) {

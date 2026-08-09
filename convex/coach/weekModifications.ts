@@ -23,6 +23,10 @@ import { blocksFromMovementIds } from "./workoutBlocks";
 import { normalizeBlocksAgainstCatalog } from "./normalizeBlocks";
 import type { SessionType } from "./weekProgrammingHelpers";
 import { NON_DRAFT_WORKOUT_EDIT_ERROR } from "../weekPlanHelpers";
+import {
+  isWorkoutReservedForWeekPlanDeletion,
+  WEEK_PLAN_DELETION_IN_PROGRESS_ERROR,
+} from "../weekPlanDeletionShared";
 
 // ---------------------------------------------------------------------------
 // swapExerciseInDraft
@@ -45,6 +49,9 @@ export const swapExerciseInDraft = internalMutation({
     const wp = await ctx.db.get(workoutPlanId);
     if (!wp || wp.userId !== userId) {
       return { ok: false, error: "Workout plan not found or access denied" };
+    }
+    if (isWorkoutReservedForWeekPlanDeletion(wp)) {
+      return { ok: false, error: WEEK_PLAN_DELETION_IN_PROGRESS_ERROR };
     }
     if (wp.status !== "draft") {
       return { ok: false, error: "Can only swap exercises in draft workout plans" };
@@ -111,6 +118,9 @@ export const addExerciseToDraft = internalMutation({
     const wp = await ctx.db.get(workoutPlanId);
     if (!wp || wp.userId !== userId) {
       return { ok: false, error: "Workout plan not found or access denied" };
+    }
+    if (isWorkoutReservedForWeekPlanDeletion(wp)) {
+      return { ok: false, error: WEEK_PLAN_DELETION_IN_PROGRESS_ERROR };
     }
     if (wp.status !== "draft") {
       return { ok: false, error: "Can only add exercises to draft workout plans" };
@@ -194,6 +204,9 @@ export const setWarmupBlock = internalMutation({
     const wp = await ctx.db.get(workoutPlanId);
     if (!wp || wp.userId !== userId) {
       return { ok: false, error: "Workout plan not found or access denied" };
+    }
+    if (isWorkoutReservedForWeekPlanDeletion(wp)) {
+      return { ok: false, error: WEEK_PLAN_DELETION_IN_PROGRESS_ERROR };
     }
     if (wp.status !== "draft") {
       return { ok: false, error: "Can only set warmup block on draft workout plans" };

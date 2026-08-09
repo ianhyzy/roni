@@ -8,6 +8,10 @@ import * as analytics from "./lib/posthog";
 import { vWorkflowId } from "@convex-dev/workflow";
 import { type RunResult, vResultValidator } from "@convex-dev/workpool";
 import { workflow } from "./workflows";
+import {
+  isWorkoutReservedForWeekPlanDeletion,
+  WEEK_PLAN_DELETION_IN_PROGRESS_ERROR,
+} from "./weekPlanDeletionShared";
 
 type RetryPushResult = { success: true; started: true } | { success: false; error: string };
 type RetryPushWorkflowResult =
@@ -120,6 +124,10 @@ export const updatePushOutcome = internalMutation({
   },
   handler: async (ctx, args) => {
     const { planId, status, tonalWorkoutId, pushErrorReason, pushedAt } = args;
+    const plan = await ctx.db.get(planId);
+    if (plan && isWorkoutReservedForWeekPlanDeletion(plan)) {
+      throw new Error(WEEK_PLAN_DELETION_IN_PROGRESS_ERROR);
+    }
     await ctx.db.patch(planId, {
       status,
       ...(tonalWorkoutId !== undefined && { tonalWorkoutId }),
@@ -134,6 +142,7 @@ export const transitionToPushing = internalMutation({
   handler: async (ctx, { planId }): Promise<boolean> => {
     const plan = await ctx.db.get(planId);
     if (!plan || (plan.status !== "draft" && plan.status !== "failed")) return false;
+    if (isWorkoutReservedForWeekPlanDeletion(plan)) return false;
     await ctx.db.patch(planId, { status: "pushing" as const });
     return true;
   },
@@ -252,6 +261,8 @@ export const onRetryPushComplete = internalMutation({
       await analytics.flush();
       return;
     }
+    const plan = await ctx.db.get(context.planId);
+    if (plan && isWorkoutReservedForWeekPlanDeletion(plan)) return;
     await ctx.db.patch(context.planId, {
       status: "failed" as const,
       pushErrorReason: completion.reason,
@@ -319,6 +330,7 @@ export const retryPush = action({
 
 export const markDeleted = internalMutation({
   args: { tonalWorkoutId: v.string() },
+  returns: v.null(),
   handler: async (ctx, { tonalWorkoutId }) => {
     const plan = await ctx.db
       .query("workoutPlans")
@@ -326,8 +338,41 @@ export const markDeleted = internalMutation({
       .unique();
 
     if (plan) {
+      if (isWorkoutReservedForWeekPlanDeletion(plan)) {
+        const fence = plan.weekPlanDeletionReservation;
+        if (!fence) throw new Error(WEEK_PLAN_DELETION_IN_PROGRESS_ERROR);
+        const week = await ctx.db.get(fence.weekPlanId);
+        const reservation = week?.deletionReservation;
+        const targetIndex = reservation?.targets.findIndex(
+          (target) => target.workoutPlanId === plan._id && target.tonalWorkoutId === tonalWorkoutId,
+        );
+        if (
+          week &&
+          reservation?.claimId === fence.claimId &&
+          targetIndex !== undefined &&
+          targetIndex >= 0 &&
+          reservation.state !== "cancelled_completed"
+        ) {
+          const targets = [...reservation.targets];
+          targets[targetIndex] = { ...targets[targetIndex], remoteStatus: "absent" };
+          const deletionReservation =
+            reservation.state === "reserved"
+              ? {
+                  claimId: reservation.claimId,
+                  state: "remote_deleting" as const,
+                  reservedAt: reservation.reservedAt,
+                  targets,
+                }
+              : { ...reservation, targets };
+          await ctx.db.patch(week._id, { deletionReservation });
+          await ctx.db.patch(plan._id, { status: "deleted" as const });
+          return null;
+        }
+        throw new Error(WEEK_PLAN_DELETION_IN_PROGRESS_ERROR);
+      }
       await ctx.db.patch(plan._id, { status: "deleted" as const });
     }
+    return null;
   },
 });
 

@@ -1,8 +1,3 @@
-/**
- * Internal mutations and queries for week plan management.
- * Re-exported from weekPlans.ts to preserve the internal API paths.
- */
-
 import { v } from "convex/values";
 import { internalMutation, internalQuery } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
@@ -19,6 +14,12 @@ import {
 import { blockInputValidator } from "./validators";
 import { WORKOUT_SOURCE } from "./workoutPlans";
 import { normalizeBlocksAgainstCatalog } from "./coach/normalizeBlocks";
+import {
+  isWeekPlanDeletionReserved,
+  isWorkoutReservedForWeekPlanDeletion,
+  WEEK_PLAN_DELETION_IN_PROGRESS_ERROR,
+} from "./weekPlanDeletionShared";
+import { fenceDeletionAfterCompletion } from "./weekPlanCompletion";
 
 /** Internal: get week plan by userId and weekStartDate (for cron/check-ins). */
 export const getByUserIdAndWeekStartInternal = internalQuery({
@@ -79,13 +80,18 @@ export const getWeekPlanDaysWithWorkoutPlanInternal = internalQuery({
 /** Internal: set a single day's status on a week plan. */
 export const setDayStatusInternal = internalMutation({
   args: { weekPlanId: v.id("weekPlans"), dayIndex: v.number(), status: dayStatusValidator },
+  returns: v.null(),
   handler: async (ctx, { weekPlanId, dayIndex, status }) => {
-    if (dayIndex < 0 || dayIndex > 6) return;
+    if (dayIndex < 0 || dayIndex > 6) return null;
     const plan = await ctx.db.get(weekPlanId);
-    if (!plan || plan.days.length !== 7) return;
+    if (!plan || plan.days.length !== 7) return null;
+    if (plan.days[dayIndex]?.status === "completed" && status !== "completed") return null;
+    if (isWeekPlanDeletionReserved(plan) && status !== "completed") return null;
     const days = [...plan.days];
     days[dayIndex] = { ...days[dayIndex], status };
     await ctx.db.patch(weekPlanId, { days, updatedAt: Date.now() });
+    if (status === "completed") await fenceDeletionAfterCompletion(ctx, plan);
+    return null;
   },
 });
 
@@ -107,9 +113,23 @@ export const linkWorkoutPlanToDayInternal = internalMutation({
     if (!plan || plan.userId !== args.userId) {
       throw new Error("Week plan not found or access denied");
     }
+    if (isWeekPlanDeletionReserved(plan)) throw new Error(WEEK_PLAN_DELETION_IN_PROGRESS_ERROR);
+    if (plan.days[args.dayIndex]?.status === "completed") {
+      throw new Error("Completed week-plan days cannot be changed");
+    }
     const workout = await ctx.db.get(args.workoutPlanId);
     if (!workout || workout.userId !== args.userId) {
       throw new Error("Workout plan not found or access denied");
+    }
+    if (isWorkoutReservedForWeekPlanDeletion(workout)) {
+      throw new Error(WEEK_PLAN_DELETION_IN_PROGRESS_ERROR);
+    }
+    const currentWorkoutPlanId = plan.days[args.dayIndex]?.workoutPlanId;
+    if (currentWorkoutPlanId && currentWorkoutPlanId !== args.workoutPlanId) {
+      const currentWorkout = await ctx.db.get(currentWorkoutPlanId);
+      if (currentWorkout && isWorkoutReservedForWeekPlanDeletion(currentWorkout)) {
+        throw new Error(WEEK_PLAN_DELETION_IN_PROGRESS_ERROR);
+      }
     }
     const days = [...plan.days];
     const slot = { ...days[args.dayIndex] };
@@ -173,16 +193,23 @@ export const batchUpdateDayStatusesInternal = internalMutation({
       }),
     ),
   },
+  returns: v.null(),
   handler: async (ctx, { weekPlanId, updates }) => {
-    if (updates.length === 0) return;
+    if (updates.length === 0) return null;
     const plan = await ctx.db.get(weekPlanId);
-    if (!plan || plan.days.length !== 7) return;
+    if (!plan || plan.days.length !== 7) return null;
     const days = [...plan.days];
+    let recordedCompletion = false;
     for (const { dayIndex, status } of updates) {
       if (dayIndex < 0 || dayIndex > 6) continue;
+      if (days[dayIndex]?.status === "completed" && status !== "completed") continue;
+      if (isWeekPlanDeletionReserved(plan) && status !== "completed") continue;
       days[dayIndex] = { ...days[dayIndex], status };
+      if (status === "completed") recordedCompletion = true;
     }
     await ctx.db.patch(weekPlanId, { days, updatedAt: Date.now() });
+    if (recordedCompletion) await fenceDeletionAfterCompletion(ctx, plan);
+    return null;
   },
 });
 
@@ -230,6 +257,9 @@ export const replaceDayDraftWorkoutInternal = internalMutation({
     if (!plan || plan.userId !== args.userId) {
       throw new Error("Week plan not found or access denied");
     }
+    if (isWeekPlanDeletionReserved(plan)) {
+      return { ok: false, error: WEEK_PLAN_DELETION_IN_PROGRESS_ERROR };
+    }
 
     const currentWorkoutPlanId = plan.days[args.dayIndex]?.workoutPlanId ?? null;
     if (currentWorkoutPlanId !== args.expectedWorkoutPlanId) {
@@ -242,6 +272,9 @@ export const replaceDayDraftWorkoutInternal = internalMutation({
       const currentWorkout = await ctx.db.get(currentWorkoutPlanId);
       if (!currentWorkout || currentWorkout.userId !== args.userId) {
         return { ok: false, error: "Linked workout not found or access denied" };
+      }
+      if (isWorkoutReservedForWeekPlanDeletion(currentWorkout)) {
+        return { ok: false, error: WEEK_PLAN_DELETION_IN_PROGRESS_ERROR };
       }
       if (getDraftWorkoutMutationBlocker(currentWorkout)) {
         return { ok: false, error: NON_DRAFT_WORKOUT_EDIT_ERROR };
@@ -272,7 +305,6 @@ export const replaceDayDraftWorkoutInternal = internalMutation({
   },
 });
 
-/** Internal: delete a week plan and its linked draft workouts. */
 /** Internal: get week plan by ID with ownership check. */
 export const getWeekPlanById = internalQuery({
   args: { weekPlanId: v.id("weekPlans"), userId: v.id("users") },
@@ -288,7 +320,10 @@ export const deleteDraftWorkout = internalMutation({
   args: { workoutPlanId: v.id("workoutPlans") },
   handler: async (ctx, { workoutPlanId }) => {
     const wp = await ctx.db.get(workoutPlanId);
-    if (wp && wp.status === "draft") {
+    if (wp && isWorkoutReservedForWeekPlanDeletion(wp)) {
+      throw new Error(WEEK_PLAN_DELETION_IN_PROGRESS_ERROR);
+    }
+    if (wp?.status === "draft") {
       await ctx.db.delete(workoutPlanId);
     }
   },
@@ -317,9 +352,13 @@ export const replaceDraftWithPushed = internalMutation({
     if (!plan || plan.userId !== args.userId) {
       return conflict("Week plan not found or access denied");
     }
+    if (isWeekPlanDeletionReserved(plan)) return conflict(WEEK_PLAN_DELETION_IN_PROGRESS_ERROR);
     const replacement = await ctx.db.get(args.newWorkoutPlanId);
     if (!replacement || replacement.userId !== args.userId || replacement.status !== "pushed") {
       return conflict("Replacement workout is not an owned pushed plan");
+    }
+    if (isWorkoutReservedForWeekPlanDeletion(replacement)) {
+      return conflict(WEEK_PLAN_DELETION_IN_PROGRESS_ERROR);
     }
     const currentWorkoutPlanId = plan.days[args.dayIndex]?.workoutPlanId;
     if (currentWorkoutPlanId !== args.oldWorkoutPlanId) {
@@ -331,8 +370,15 @@ export const replaceDraftWithPushed = internalMutation({
       return { status: "canonical" as const, workoutPlanId: canonical._id };
     }
     const draft = await ctx.db.get(args.oldWorkoutPlanId);
-    if (!draft || draft.userId !== args.userId || draft.status !== "draft") {
+    if (
+      !draft ||
+      draft.userId !== args.userId ||
+      (draft.status !== "draft" && draft.status !== "pushing")
+    ) {
       return conflict("The linked draft is missing or no longer editable");
+    }
+    if (isWorkoutReservedForWeekPlanDeletion(draft)) {
+      return conflict(WEEK_PLAN_DELETION_IN_PROGRESS_ERROR);
     }
     if (getWorkoutApprovalFingerprint(draft) !== args.expectedDraftFingerprint) {
       return conflict(
