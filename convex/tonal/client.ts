@@ -42,6 +42,23 @@ export async function tonalFetch<T = unknown>(
   return res.json() as Promise<T>;
 }
 
+/** 3s/6s backoff on Tonal 5xx; 4xx/401/non-Tonal errors bubble immediately. */
+export async function retryOn5xx<T>(fn: () => Promise<T>, maxRetries = 2): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      const is5xx = error instanceof TonalApiError && error.status >= 500;
+      if (!is5xx || attempt >= maxRetries) throw error;
+      const delayMs = 3000 * (attempt + 1);
+      console.warn(
+        `Tonal ${error.status} (attempt ${attempt + 1}/${maxRetries + 1}), retrying in ${delayMs / 1000}s`,
+      );
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+}
+
 const PG_PAGE_SIZE = 200;
 
 interface WorkoutActivitiesPage<T> {
