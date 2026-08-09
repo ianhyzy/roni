@@ -1,5 +1,5 @@
 export const MIN_PROVIDER_BUDGET_LIMIT_USD = 0.01;
-export const MAX_PROVIDER_BUDGET_LIMIT_USD = 200;
+export const MAX_PROVIDER_BUDGET_LIMIT_USD = 400;
 
 /**
  * Default estimated cumulative-cost stop thresholds for one model attempt.
@@ -11,8 +11,8 @@ export const MAX_PROVIDER_BUDGET_LIMIT_USD = 200;
 export const DEFAULT_PROVIDER_BUDGET_LIMITS_USD = {
   gemini: 25,
   claude: 101,
-  openai: 101,
-  openrouter: 101,
+  openai: 200,
+  openrouter: 200,
 } as const;
 
 type BudgetProviderId = keyof typeof DEFAULT_PROVIDER_BUDGET_LIMITS_USD;

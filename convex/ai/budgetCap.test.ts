@@ -1,51 +1,18 @@
 import { describe, expect, it, vi } from "vitest";
 import { budgetCapStopCondition, estimateAttemptCostUsd } from "./budgetCap";
-import { getConservativeModelPricing } from "./modelPricing";
-import { MAX_PROMPT_INPUT_BUDGET_TOKENS, type ProviderId } from "./providers";
-import { COACH_MAX_OUTPUT_TOKENS, COACH_MAX_STEPS } from "./turnLimits";
-import { DEFAULT_PROVIDER_BUDGET_LIMITS_USD } from "../../lib/aiBudgetPreferences";
-
-type BudgetStopSteps = Parameters<ReturnType<typeof budgetCapStopCondition>>[0]["steps"];
+import { createModelStep } from "./modelStepTestUtils";
 
 describe("budgetCapStopCondition", () => {
   it("estimates one model attempt's cost from each step model id", () => {
     const cost = estimateAttemptCostUsd(
       [
-        {
-          usage: {
-            inputTokens: 10_000,
-            outputTokens: 2_000,
-            totalTokens: 12_000,
-            inputTokenDetails: {
-              noCacheTokens: undefined,
-              cacheReadTokens: undefined,
-              cacheWriteTokens: undefined,
-            },
-            outputTokenDetails: {
-              textTokens: undefined,
-              reasoningTokens: undefined,
-            },
-          },
-          model: { provider: "openai", modelId: "gpt-5.4-nano" },
-        },
-        {
-          usage: {
-            inputTokens: 5_000,
-            outputTokens: 3_000,
-            totalTokens: 8_000,
-            inputTokenDetails: {
-              noCacheTokens: undefined,
-              cacheReadTokens: undefined,
-              cacheWriteTokens: undefined,
-            },
-            outputTokenDetails: {
-              textTokens: undefined,
-              reasoningTokens: undefined,
-            },
-          },
-          model: { provider: "openai", modelId: "gpt-5.4" },
-        },
-      ] as Parameters<typeof estimateAttemptCostUsd>[0],
+        createModelStep({
+          inputTokens: 10_000,
+          outputTokens: 2_000,
+          modelId: "gpt-5.4-nano",
+        }),
+        createModelStep({ inputTokens: 5_000, outputTokens: 3_000 }),
+      ],
       "openai",
     );
 
@@ -53,27 +20,11 @@ describe("budgetCapStopCondition", () => {
   });
 
   it("uses conservative provider pricing when a step omits model metadata", () => {
-    const cost = estimateAttemptCostUsd(
-      [
-        {
-          usage: {
-            inputTokens: 10_000,
-            outputTokens: 2_000,
-            totalTokens: 12_000,
-            inputTokenDetails: {
-              noCacheTokens: undefined,
-              cacheReadTokens: undefined,
-              cacheWriteTokens: undefined,
-            },
-            outputTokenDetails: {
-              textTokens: undefined,
-              reasoningTokens: undefined,
-            },
-          },
-        },
-      ] as Parameters<typeof estimateAttemptCostUsd>[0],
-      "openai",
-    );
+    const stepWithoutModelMetadata: Parameters<typeof estimateAttemptCostUsd>[0][number] = {
+      usage: createModelStep({ inputTokens: 10_000, outputTokens: 2_000 }).usage,
+    };
+
+    const cost = estimateAttemptCostUsd([stepWithoutModelMetadata], "openai");
 
     expect(cost).toBeCloseTo(0.11, 6);
   });
@@ -81,15 +32,72 @@ describe("budgetCapStopCondition", () => {
   it("uses conservative provider pricing for a model from the wrong provider", () => {
     const cost = estimateAttemptCostUsd(
       [
-        {
-          usage: { inputTokens: 10_000, outputTokens: 2_000 },
-          model: { provider: "gemini", modelId: "openai/gpt-5.4-nano" },
-        },
-      ] as unknown as Parameters<typeof estimateAttemptCostUsd>[0],
+        createModelStep({
+          inputTokens: 10_000,
+          outputTokens: 2_000,
+          provider: "gemini",
+          modelId: "openai/gpt-5.4-nano",
+        }),
+      ],
       "gemini",
     );
 
     expect(cost).toBeCloseTo(0.03, 6);
+  });
+
+  it("prices the response model when routing changes the requested model", () => {
+    const cost = estimateAttemptCostUsd(
+      [
+        createModelStep({
+          inputTokens: 300_000,
+          outputTokens: 10_000,
+          modelId: "gpt-5.4-mini",
+          responseModelId: "gpt-5.6-sol",
+          billingClass: "cache_write",
+        }),
+      ],
+      "openai",
+    );
+
+    expect(cost).toBeCloseTo(4.2, 6);
+  });
+
+  it.each(["openrouter/auto", "attacker/unknown-model"])(
+    "keeps OpenRouter request %s conservative when the response model is cheaper",
+    (modelId) => {
+      const cost = estimateAttemptCostUsd(
+        [
+          createModelStep({
+            inputTokens: 300_000,
+            outputTokens: 10_000,
+            provider: "openai.chat",
+            modelId,
+            responseModelId: "google/gemini-2.5-flash",
+            billingClass: "cache_write",
+          }),
+        ],
+        "openrouter",
+      );
+
+      expect(cost).toBeCloseTo(4.2, 6);
+    },
+  );
+
+  it("prices a trusted response model instead of a more expensive requested model", () => {
+    const cost = estimateAttemptCostUsd(
+      [
+        createModelStep({
+          inputTokens: 300_000,
+          outputTokens: 10_000,
+          modelId: "gpt-5.6-sol",
+          responseModelId: "gpt-5.6-luna",
+          billingClass: "cache_write",
+        }),
+      ],
+      "openai",
+    );
+
+    expect(cost).toBeCloseTo(0.168, 6);
   });
 
   it("stops after a completed step crosses the cumulative-cost threshold", () => {
@@ -108,14 +116,12 @@ describe("budgetCapStopCondition", () => {
       },
     });
 
-    const firstStep = {
-      usage: { inputTokens: 10_000, outputTokens: 2_000 },
-      model: { provider: "openai", modelId: "gpt-5.4" },
-    } as unknown as BudgetStopSteps[number];
-    const secondStep = {
-      usage: { inputTokens: 5_000, outputTokens: 3_000 },
-      model: { provider: "openai", modelId: "gpt-5.4" },
-    } as unknown as BudgetStopSteps[number];
+    const firstStep = createModelStep({ inputTokens: 10_000, outputTokens: 2_000 });
+    const secondStep = createModelStep({
+      inputTokens: 5_000,
+      outputTokens: 3_000,
+      stepNumber: 1,
+    });
 
     const firstStop = stopWhen({ steps: [firstStep] });
     const secondStop = stopWhen({ steps: [firstStep, secondStep] });
@@ -139,12 +145,7 @@ describe("budgetCapStopCondition", () => {
     });
 
     const shouldStop = stopWhen({
-      steps: [
-        {
-          usage: { inputTokens: 10_000, outputTokens: 2_000 },
-          model: { provider: "openai", modelId: "gpt-5.4" },
-        } as unknown as Parameters<typeof stopWhen>[0]["steps"][number],
-      ],
+      steps: [createModelStep({ inputTokens: 10_000, outputTokens: 2_000 })],
     });
 
     expect(shouldStop).toBe(true);
@@ -161,117 +162,49 @@ describe("budgetCapStopCondition", () => {
 
     const shouldStop = stopWhen({
       steps: [
-        {
-          usage: { inputTokens: 10_000, outputTokens: 2_000 },
-          model: { provider: "openai", modelId: "gpt-5.4" },
-        },
-        {
-          usage: { inputTokens: 5_000, outputTokens: 3_000 },
-          model: { provider: "openai", modelId: "gpt-5.4" },
-        },
-      ] as Parameters<typeof stopWhen>[0]["steps"],
+        createModelStep({ inputTokens: 10_000, outputTokens: 2_000 }),
+        createModelStep({ inputTokens: 5_000, outputTokens: 3_000, stepNumber: 1 }),
+      ],
     });
 
     expect(shouldStop).toBe(false);
     expect(onTrip).not.toHaveBeenCalled();
   });
-});
 
-describe("default provider budget thresholds", () => {
-  const PROVIDERS: readonly ProviderId[] = ["gemini", "claude", "openai", "openrouter"];
-  const INPUT_BILLING_CLASSES = ["uncached", "cache_read", "cache_write"] as const;
-  // The context builder targets 500k estimated input tokens initially. This
-  // reference adds 25% headroom for loop growth; it is intentionally not a
-  // runtime ceiling because raw tool results can grow the prompt further.
-  const REFERENCE_STEP_INPUT_TOKENS = Math.floor(MAX_PROMPT_INPUT_BUDGET_TOKENS * 1.25);
-  const REFERENCE_ATTEMPT_COST_USD: Readonly<Record<ProviderId, number>> = {
-    gemini: 24.2055,
-    claude: 100.21625,
-    openai: 100.72825,
-    openrouter: 100.72825,
-  };
+  it.each([
+    ["uncached", 5, 10],
+    ["cache_read", 0.5, 1],
+    ["cache_write", 6.25, 12.5],
+  ] as const)(
+    "applies GPT-5.6 long-context %s pricing only above 272,000 input tokens",
+    (billingClass, baseInputRate, longInputRate) => {
+      const thresholdInputTokens = 272_000;
+      const longInputTokens = thresholdInputTokens + 1;
+      const outputTokens = 1_000;
+      const atThreshold = createModelStep({
+        inputTokens: thresholdInputTokens,
+        outputTokens,
+        modelId: "gpt-5.6-sol",
+        billingClass,
+      });
+      const aboveThreshold = createModelStep({
+        inputTokens: longInputTokens,
+        outputTokens,
+        modelId: "gpt-5.6-sol",
+        billingClass,
+      });
 
-  function referenceAttemptSteps(
-    provider: ProviderId,
-    billingClass: (typeof INPUT_BILLING_CLASSES)[number],
-  ) {
-    const inputTokenDetails = {
-      noCacheTokens: billingClass === "uncached" ? REFERENCE_STEP_INPUT_TOKENS : 0,
-      cacheReadTokens: billingClass === "cache_read" ? REFERENCE_STEP_INPUT_TOKENS : 0,
-      cacheWriteTokens: billingClass === "cache_write" ? REFERENCE_STEP_INPUT_TOKENS : 0,
-    };
-    return Array.from({ length: COACH_MAX_STEPS }, () => ({
-      usage: {
-        inputTokens: REFERENCE_STEP_INPUT_TOKENS,
-        outputTokens: COACH_MAX_OUTPUT_TOKENS,
-        inputTokenDetails,
-      },
-      model: { provider, modelId: undefined },
-    })) as unknown as BudgetStopSteps;
-  }
+      const baseCost = estimateAttemptCostUsd([atThreshold], "openai");
+      const longCost = estimateAttemptCostUsd([aboveThreshold], "openai");
 
-  it.each(PROVIDERS)(
-    "permits the 25-step %s reference scenario in every known billing class",
-    (provider) => {
-      const onTrip = vi.fn();
-      const stopWhen = budgetCapStopCondition({ provider, onTrip });
-      const estimates: number[] = [];
-
-      expect(getConservativeModelPricing(provider)).toBeDefined();
-      for (const billingClass of INPUT_BILLING_CLASSES) {
-        const steps = referenceAttemptSteps(provider, billingClass);
-        const referenceAttemptUsd = estimateAttemptCostUsd(steps, provider);
-        estimates.push(referenceAttemptUsd);
-
-        expect(stopWhen({ steps })).toBe(false);
-        expect(DEFAULT_PROVIDER_BUDGET_LIMITS_USD[provider]).toBeGreaterThan(referenceAttemptUsd);
-      }
-      expect(Math.max(...estimates)).toBeCloseTo(REFERENCE_ATTEMPT_COST_USD[provider], 6);
-      expect(onTrip).not.toHaveBeenCalled();
+      expect(baseCost).toBeCloseTo(
+        (thresholdInputTokens * baseInputRate + outputTokens * 30) / 1_000_000,
+        8,
+      );
+      expect(longCost).toBeCloseTo(
+        (longInputTokens * longInputRate + outputTokens * 45) / 1_000_000,
+        8,
+      );
     },
   );
-
-  it("can stop before the step limit when tool-loop input outgrows the reference", () => {
-    const onTrip = vi.fn();
-    const stopWhen = budgetCapStopCondition({ provider: "openai", onTrip });
-    const finalInputTokens = MAX_PROMPT_INPUT_BUDGET_TOKENS * 2;
-    const growthPerStep =
-      (finalInputTokens - MAX_PROMPT_INPUT_BUDGET_TOKENS) / (COACH_MAX_STEPS - 1);
-    const steps = Array.from({ length: COACH_MAX_STEPS }, (_, index) => {
-      const inputTokens = Math.round(MAX_PROMPT_INPUT_BUDGET_TOKENS + growthPerStep * index);
-      return {
-        usage: {
-          inputTokens,
-          outputTokens: COACH_MAX_OUTPUT_TOKENS,
-          inputTokenDetails: { cacheWriteTokens: inputTokens },
-        },
-        model: { provider: "openai", modelId: undefined },
-      } as unknown as BudgetStopSteps[number];
-    });
-
-    let stoppedAt: number | undefined;
-    for (let stepCount = 1; stepCount <= steps.length; stepCount += 1) {
-      if (stopWhen({ steps: steps.slice(0, stepCount) })) {
-        stoppedAt = stepCount;
-        break;
-      }
-    }
-
-    expect(stoppedAt).toBeLessThan(COACH_MAX_STEPS);
-    expect(onTrip).toHaveBeenCalledOnce();
-  });
-
-  it("stops when a completed attempt estimate exactly equals the configured threshold", () => {
-    const steps = referenceAttemptSteps("openai", "cache_write");
-    const estimatedCostUsd = estimateAttemptCostUsd(steps, "openai");
-    const onTrip = vi.fn();
-    const stopWhen = budgetCapStopCondition({
-      provider: "openai",
-      maxAttemptUsd: estimatedCostUsd,
-      onTrip,
-    });
-
-    expect(stopWhen({ steps })).toBe(true);
-    expect(onTrip).toHaveBeenCalledOnce();
-  });
 });

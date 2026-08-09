@@ -3,65 +3,10 @@ import {
   CIRCUIT_BREAKER_OPEN_MS,
   CIRCUIT_BREAKER_WINDOW_MS,
   decideCircuitRoute,
-  estimateAttemptCostUsd,
   evaluateBreakerOpenReason,
   resolveHalfOpenProbeResult,
   type StoredCircuitBreakerState,
 } from "./circuitBreakerCore";
-
-describe("estimateAttemptCostUsd", () => {
-  it("prices GPT-5.4 mini using cached-input discounts", () => {
-    expect(
-      estimateAttemptCostUsd({
-        provider: "openai",
-        model: "gpt-5.4-mini",
-        inputTokens: 100_000,
-        outputTokens: 10_000,
-        cacheReadTokens: 20_000,
-        cacheWriteTokens: 0,
-      }),
-    ).toBeCloseTo(0.1065, 4);
-  });
-
-  it("normalizes provider-prefixed Gemini model ids", () => {
-    expect(
-      estimateAttemptCostUsd({
-        provider: "openrouter",
-        model: "google/gemini-2.5-flash",
-        inputTokens: 200_000,
-        outputTokens: 25_000,
-        cacheReadTokens: 50_000,
-        cacheWriteTokens: 0,
-      }),
-    ).toBeCloseTo(0.109, 4);
-  });
-
-  it("uses conservative pricing for unknown OpenRouter override models", () => {
-    expect(
-      estimateAttemptCostUsd({
-        provider: "openrouter",
-        model: "google/gemini-3-flash-preview",
-        inputTokens: 1_000,
-        outputTokens: 1_000,
-        cacheReadTokens: 0,
-        cacheWriteTokens: 0,
-      }),
-    ).toBeCloseTo(0.035, 6);
-  });
-
-  it("does not trust a known model family behind an unknown OpenRouter vendor", () => {
-    expect(
-      estimateAttemptCostUsd({
-        provider: "openrouter",
-        model: "attacker/gpt-5.4-nano",
-        inputTokens: 1_000,
-        outputTokens: 1_000,
-        cacheReadTokens: 0,
-        cacheWriteTokens: 0,
-      }),
-    ).toBeCloseTo(0.035, 6);
-  });
-});
 
 describe("evaluateBreakerOpenReason", () => {
   it("opens on five failures inside the rolling window", () => {
