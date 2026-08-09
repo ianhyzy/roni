@@ -1,5 +1,5 @@
-import { getConservativeModelPricing, getModelPricing, type ModelPricing } from "./modelPricing";
-import { isValidProvider, type ProviderId } from "./providers";
+import { estimateModelRequestCostUsd } from "./modelPricing";
+import { type ProviderId, resolvePricingProviderId } from "./providers";
 
 export const CIRCUIT_BREAKER_WINDOW_MS = 60_000;
 export const CIRCUIT_BREAKER_OPEN_MS = 5 * 60_000;
@@ -49,21 +49,15 @@ export interface HalfOpenProbeResolution {
   nextState: StoredCircuitBreakerState;
 }
 
-export function estimateAttemptCostUsd(input: AttemptCostInput): number | undefined {
-  const rate = getModelRate(input.provider, input.model);
-  if (!rate) return undefined;
-
-  const cacheReadTokens = Math.max(0, input.cacheReadTokens);
-  const cacheWriteTokens = Math.max(0, input.cacheWriteTokens);
-  const freshInputTokens = Math.max(0, input.inputTokens - cacheReadTokens - cacheWriteTokens);
-
-  return (
-    (freshInputTokens * rate.inputUsdPerMillion +
-      cacheReadTokens * rate.cacheReadUsdPerMillion +
-      cacheWriteTokens * rate.cacheWriteUsdPerMillion +
-      Math.max(0, input.outputTokens) * rate.outputUsdPerMillion) /
-    1_000_000
-  );
+export function estimateAttemptCostUsd(input: AttemptCostInput): number {
+  return estimateModelRequestCostUsd({
+    provider: resolvePricingProviderId(input.provider),
+    requestedModelId: input.model,
+    inputTokens: input.inputTokens,
+    outputTokens: input.outputTokens,
+    cacheReadTokens: input.cacheReadTokens,
+    cacheWriteTokens: input.cacheWriteTokens,
+  });
 }
 
 export function evaluateBreakerOpenReason(metrics: BreakerWindowMetrics): BreakerOpenReason | null {
@@ -167,9 +161,4 @@ export function resolveHalfOpenProbeResult(args: {
       lastOpenReason: "half_open_failure",
     },
   };
-}
-
-function getModelRate(provider: string, model: string): ModelPricing | undefined {
-  const providerId = isValidProvider(provider) ? provider : "openrouter";
-  return getModelPricing(providerId, model) ?? getConservativeModelPricing(providerId);
 }

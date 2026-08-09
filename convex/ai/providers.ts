@@ -4,7 +4,16 @@ import { createOpenAI } from "@ai-sdk/openai";
 import type { LanguageModelV3 } from "@ai-sdk/provider";
 import { GEMINI_API_KEY_PATTERN } from "../../lib/geminiApiKey";
 
-export type ProviderId = "gemini" | "claude" | "openai" | "openrouter";
+export const PROVIDER_IDS = ["gemini", "claude", "openai", "openrouter"] as const;
+export type ProviderId = (typeof PROVIDER_IDS)[number];
+
+const AI_SDK_PROVIDER_IDS: Readonly<Record<string, ProviderId>> = {
+  "google.generative-ai": "gemini",
+  "anthropic.messages": "claude",
+  "openai.responses": "openai",
+  // This project uses the OpenAI-compatible chat client only for OpenRouter.
+  "openai.chat": "openrouter",
+};
 
 export const MODEL_TIERS = ["router", "chat", "programming", "summarize"] as const;
 export type ModelTier = (typeof MODEL_TIERS)[number];
@@ -261,4 +270,9 @@ export function validateKeyFormat(provider: ProviderId, key: string): boolean {
 
 export function isValidProvider(value: string): value is ProviderId {
   return Object.prototype.hasOwnProperty.call(PROVIDERS, value);
+}
+
+export function resolvePricingProviderId(value: string): ProviderId {
+  if (isValidProvider(value)) return value;
+  return AI_SDK_PROVIDER_IDS[value] ?? "openrouter";
 }

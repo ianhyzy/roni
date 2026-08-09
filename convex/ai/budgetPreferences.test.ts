@@ -12,10 +12,10 @@ describe("resolveAiBudgetPreferences", () => {
     expect(DEFAULT_PROVIDER_BUDGET_LIMITS_USD).toEqual({
       gemini: 25,
       claude: 101,
-      openai: 101,
-      openrouter: 101,
+      openai: 200,
+      openrouter: 200,
     });
-    expect(MAX_PROVIDER_BUDGET_LIMIT_USD).toBe(200);
+    expect(MAX_PROVIDER_BUDGET_LIMIT_USD).toBe(400);
   });
 
   it("uses the provider defaults when preferences are absent", () => {
@@ -83,8 +83,8 @@ describe("resolveAiBudgetPolicy", () => {
 describe("isValidProviderBudgetLimitUsd", () => {
   it.each([
     [0.01, true],
-    [200, true],
-    [200.01, false],
+    [400, true],
+    [400.01, false],
     [0, false],
     [-1, false],
     [Number.NaN, false],

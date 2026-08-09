@@ -146,6 +146,7 @@ export async function streamWithRetry(
         scheduledAt,
         processingStartedAt,
         retrievalEnabled,
+        pricingProvider: provider,
       };
       const accumulator = new RunAccumulator(accInit);
 

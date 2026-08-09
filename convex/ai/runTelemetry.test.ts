@@ -15,6 +15,7 @@ function baseInit(overrides: Partial<AccumulatorInit> = {}): AccumulatorInit {
     messageId: "msg-1",
     source: "chat",
     environment: "dev",
+    pricingProvider: "gemini",
     startedAt: 1_700_000_000_000,
     ...overrides,
   };

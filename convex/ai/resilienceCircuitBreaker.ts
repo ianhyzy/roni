@@ -3,7 +3,6 @@ import { makeFunctionReference } from "convex/server";
 import { internal } from "../_generated/api";
 import type { Id } from "../_generated/dataModel";
 import type { ActionCtx } from "../_generated/server";
-import { estimateAttemptCostUsd } from "./circuitBreakerCore";
 import type { ProviderId } from "./providers";
 import { getFinalizeCodeForError, sanitizeErrorCode } from "./resilienceReporting";
 import type { AttemptUsageSnapshot, RunAccumulator } from "./runTelemetry";
@@ -151,14 +150,7 @@ export async function runWithPrimaryCircuitBreaker(args: CircuitBreakerFlowArgs)
     const usage = accumulator.usageDeltaSince(failure.snapshot);
     const model = usage.modelId ?? primaryModelName;
     const primaryErrorClass = errorClassName(failure.error);
-    const totalCostUsd = estimateAttemptCostUsd({
-      provider,
-      model,
-      inputTokens: usage.inputTokens,
-      outputTokens: usage.outputTokens,
-      cacheReadTokens: usage.cacheReadTokens,
-      cacheWriteTokens: usage.cacheWriteTokens,
-    });
+    const totalCostUsd = usage.estimatedCostUsd;
     const result: {
       opened: boolean;
       openReason: "error_threshold" | "cost_threshold" | "half_open_failure" | null;
