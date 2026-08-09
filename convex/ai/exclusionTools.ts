@@ -18,18 +18,22 @@ import type { Movement } from "../tonal/types";
 import { resolveMovement } from "../tonal/movementResolve";
 import { requireUserId, withToolTracking } from "./helpers";
 
-const exerciseRefSchema = z.object({
-  name: z
-    .string()
-    .optional()
-    .describe(
-      'Exact exercise name from search_exercises, e.g. "Frogger". Preferred — the server resolves it to a catalog ID.',
-    ),
-  movementId: z
-    .string()
-    .optional()
-    .describe("UUID from search_exercises. Optional when an exact name is provided."),
-});
+const exerciseRefSchema = z
+  .object({
+    name: z
+      .string()
+      .optional()
+      .describe(
+        'Exact exercise name from search_exercises, e.g. "Frogger". Preferred — the server resolves it to a catalog ID.',
+      ),
+    movementId: z
+      .string()
+      .optional()
+      .describe("UUID from search_exercises. Optional when an exact name is provided."),
+  })
+  .refine(({ name, movementId }) => Boolean(name?.trim() || movementId?.trim()), {
+    message: "Exercise reference requires a non-empty name or movementId.",
+  });
 
 type ExerciseRef = z.infer<typeof exerciseRefSchema>;
 
