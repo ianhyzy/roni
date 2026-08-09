@@ -5,6 +5,10 @@ export const COMPLETED_WEEK_PLAN_DELETE_ERROR =
   "This week has completed sessions, so it can't be deleted. Delete the individual draft days instead.";
 export const CLAIMED_WEEK_PLAN_DELETE_ERROR =
   "Workout scheduling or approval is in progress for this week. Try again in a minute.";
+export const MISSING_TONAL_WORKOUT_ID_DELETE_ERROR =
+  "A pushed workout is missing its Tonal ID, so remote deletion cannot be verified.";
+export const SHARED_WORKOUT_DELETE_ERROR =
+  "A linked workout is also used by another week plan, so it cannot be deleted safely.";
 export const WEEK_PLAN_DELETION_IN_PROGRESS_ERROR =
   "This week plan is being deleted. Wait for deletion to finish before changing it.";
 

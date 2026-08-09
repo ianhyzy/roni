@@ -204,7 +204,7 @@ describe("deleteWeekPlanInternal allowPushed", () => {
         weekPlanId,
         allowPushed: true,
       }),
-    ).resolves.toEqual({ ok: false, error: "Workout scheduling is in progress" });
+    ).resolves.toEqual({ ok: false, error: CLAIMED_WEEK_PLAN_DELETE_ERROR });
   });
 
   it("rechecks completed days after preflight before deleting local rows", async () => {
@@ -255,5 +255,33 @@ describe("deleteWeekPlanInternal allowPushed", () => {
     }));
     expect(retainedRows.plan).not.toBeNull();
     expect(retainedRows.workout).not.toBeNull();
+  });
+
+  it("preserves a draft-linked row when durable Tonal history proves completion", async () => {
+    const t = convexTest(schema, modules);
+    const { userId, weekPlanId, workoutPlanIds } = await seedWeekPlan(t, [
+      { status: "draft", tonalWorkoutId: "tw-completed" },
+    ]);
+    await t.run((ctx) =>
+      ctx.db.insert("completedWorkouts", {
+        userId,
+        activityId: "activity-completed",
+        date: "2026-08-03",
+        title: "Completed draft-linked workout",
+        targetArea: "Upper",
+        totalVolume: 1,
+        totalDuration: 1,
+        totalWork: 1,
+        workoutType: "Custom",
+        tonalWorkoutId: "tw-completed",
+        syncedAt: 1,
+      }),
+    );
+
+    await expect(
+      t.mutation(internal.weekPlans.deleteWeekPlanInternal, { userId, weekPlanId }),
+    ).resolves.toEqual({ ok: false, error: COMPLETED_WEEK_PLAN_DELETE_ERROR });
+    await expect(t.run((ctx) => ctx.db.get(weekPlanId))).resolves.not.toBeNull();
+    await expect(t.run((ctx) => ctx.db.get(workoutPlanIds[0]))).resolves.not.toBeNull();
   });
 });

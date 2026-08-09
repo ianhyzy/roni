@@ -143,6 +143,12 @@ describe("week-plan deletion reservations", () => {
         claimId: "delete-1",
       }),
     ).resolves.toMatchObject({ ok: false });
+    await expect(
+      seeded.t.mutation(internal.weekPlans.deleteWeekPlanInternal, {
+        userId: seeded.userId,
+        weekPlanId: seeded.weekPlanId,
+      }),
+    ).resolves.toMatchObject({ ok: false });
     await expect(seeded.t.run((ctx) => ctx.db.get(seeded.weekPlanId))).resolves.not.toBeNull();
   });
 
