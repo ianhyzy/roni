@@ -13,7 +13,7 @@ import {
   type AiBudgetPolicy,
   DEFAULT_PROVIDER_BUDGET_LIMITS_USD,
 } from "../../lib/aiBudgetPreferences";
-import { COACH_MAX_STEPS } from "./coach";
+import { COACH_MAX_OUTPUT_TOKENS, COACH_MAX_STEPS } from "./turnLimits";
 import { type ProviderId } from "./providers";
 import { type AttemptOutcome, runWithPrimaryCircuitBreaker } from "./resilienceCircuitBreaker";
 import { type AccumulatorInit, RunAccumulator } from "./runTelemetry";
@@ -36,7 +36,6 @@ export { getFinalizeCodeForError } from "./resilienceReporting";
 const BUDGET_CAP_MESSAGE =
   "This model attempt's estimated cumulative cost reached or passed your budget threshold after a completed step, so I'm stopping before another step. A narrower follow-up starts a new attempt with a fresh threshold.";
 const MASKED_UI_STREAM_ERROR = "An error occurred.";
-const MAX_OUTPUT_TOKENS = 4096;
 const RETRY_DELAY_MS = 3000;
 
 interface StreamWithRetryArgs {
@@ -102,9 +101,9 @@ export async function streamWithRetry(
       ? {
           promptMessageId: args.promptMessageId,
           prompt: args.prompt as Array<ModelMessage>,
-          maxOutputTokens: MAX_OUTPUT_TOKENS,
+          maxOutputTokens: COACH_MAX_OUTPUT_TOKENS,
         }
-      : { promptMessageId: args.promptMessageId, maxOutputTokens: MAX_OUTPUT_TOKENS };
+      : { promptMessageId: args.promptMessageId, maxOutputTokens: COACH_MAX_OUTPUT_TOKENS };
 
   return runInRunSpan(
     {
@@ -147,6 +146,7 @@ export async function streamWithRetry(
         scheduledAt,
         processingStartedAt,
         retrievalEnabled,
+        pricingProvider: provider,
       };
       const accumulator = new RunAccumulator(accInit);
 

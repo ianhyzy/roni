@@ -15,6 +15,7 @@ function baseInit(overrides: Partial<AccumulatorInit> = {}): AccumulatorInit {
     messageId: "msg-1",
     source: "chat",
     environment: "dev",
+    pricingProvider: "gemini",
     startedAt: 1_700_000_000_000,
     ...overrides,
   };
@@ -355,9 +356,9 @@ describe("RunAccumulator", () => {
     expect(acc.toRow().timeToFirstTokenMs).toBe(200);
   });
 
-  it("leaves totalCostUsd undefined because per-model cost is not modeled today", () => {
+  it("starts with zero estimated cost before any model step completes", () => {
     const acc = new RunAccumulator(baseInit());
-    expect(acc.toRow().totalCostUsd).toBeUndefined();
+    expect(acc.toRow().totalCostUsd).toBe(0);
   });
 
   it("uses approval_continuation source when configured and preserves messageId undefined", () => {

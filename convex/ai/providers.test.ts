@@ -3,7 +3,6 @@ import {
   assertNoPreviewDefaults,
   getFallbackTier,
   getModelForTier,
-  getModelPricing,
   getPromptInputBudget,
   getProviderConfig,
   isValidProvider,
@@ -11,6 +10,7 @@ import {
   PROMPT_OUTPUT_HEADROOM_RATIO,
   type ProviderId,
   PROVIDERS,
+  resolvePricingProviderId,
   validateKeyFormat,
 } from "./providers";
 
@@ -136,6 +136,22 @@ describe("isValidProvider", () => {
   it("returns false for invalid providers", () => {
     expect(isValidProvider("gpt")).toBe(false);
     expect(isValidProvider("")).toBe(false);
+    expect(isValidProvider("constructor")).toBe(false);
+    expect(isValidProvider("__proto__")).toBe(false);
+  });
+});
+
+describe("resolvePricingProviderId", () => {
+  it("maps AI SDK provider IDs to billing providers", () => {
+    expect(resolvePricingProviderId("google.generative-ai")).toBe("gemini");
+    expect(resolvePricingProviderId("anthropic.messages")).toBe("claude");
+    expect(resolvePricingProviderId("openai.responses")).toBe("openai");
+    expect(resolvePricingProviderId("openai.chat")).toBe("openrouter");
+  });
+
+  it("falls back conservatively for inherited object keys", () => {
+    expect(resolvePricingProviderId("constructor")).toBe("openrouter");
+    expect(resolvePricingProviderId("__proto__")).toBe("openrouter");
   });
 });
 
@@ -178,67 +194,5 @@ describe("getPromptInputBudget", () => {
 
   it("reserves twenty percent output headroom", () => {
     expect(PROMPT_OUTPUT_HEADROOM_RATIO).toBe(0.2);
-  });
-});
-
-describe("getModelPricing", () => {
-  it("prices all default policy tiers", () => {
-    for (const provider of Object.keys(PROVIDERS) as ProviderId[]) {
-      for (const tier of MODEL_TIERS) {
-        const modelId = getModelForTier(provider, tier);
-        expect(getModelPricing(provider, modelId), `${provider}.${tier}`).toBeDefined();
-      }
-    }
-  });
-
-  it("normalizes provider-prefixed model ids", () => {
-    expect(getModelPricing("openrouter", "openai/gpt-5.4-nano")?.inputUsdPerMillion).toBe(0.2);
-    expect(getModelPricing("openrouter", "google/gemini-2.5-flash-lite")?.outputUsdPerMillion).toBe(
-      0.4,
-    );
-  });
-
-  it.each([
-    ["gemini", "gemini-3.5-flash-lite", 0.3, 0.03, 0.03, 2.5],
-    ["gemini", "gemini-3.6-flash", 1.5, 0.15, 0.15, 7.5],
-    ["claude", "claude-sonnet-5", 3, 0.3, 3.75, 15],
-    ["claude", "claude-opus-5", 5, 0.5, 6.25, 25],
-    ["openai", "gpt-5.6-luna", 1, 0.1, 1.25, 6],
-    ["openai", "gpt-5.6-terra", 2.5, 0.25, 3.125, 15],
-    ["openai", "gpt-5.6-sol", 5, 0.5, 6.25, 30],
-  ] as const)(
-    "prices current %s model %s",
-    (provider, modelId, input, cacheRead, cacheWrite, output) => {
-      expect(getModelPricing(provider, modelId)).toEqual({
-        inputUsdPerMillion: input,
-        cacheReadUsdPerMillion: cacheRead,
-        cacheWriteUsdPerMillion: cacheWrite,
-        outputUsdPerMillion: output,
-      });
-    },
-  );
-
-  it("prices dated provider model variants by family", () => {
-    expect(getModelPricing("claude", "anthropic/claude-sonnet-5-20260715")).toEqual(
-      getModelPricing("claude", "claude-sonnet-5"),
-    );
-    expect(getModelPricing("openrouter", "openai/gpt-5.6-terra-20260715")).toEqual(
-      getModelPricing("openai", "gpt-5.6-terra"),
-    );
-    expect(getModelPricing("claude", "anthropic/claude-sonnet-4-6-20250514")).toEqual(
-      getModelPricing("claude", "claude-sonnet-4-6"),
-    );
-    expect(getModelPricing("openrouter", "openai/gpt-5.4-mini-20260501")).toEqual(
-      getModelPricing("openai", "gpt-5.4-mini"),
-    );
-  });
-
-  it("uses the high Gemini Pro prompt tier for enforcement pricing", () => {
-    expect(getModelPricing("gemini", "gemini-2.5-pro")).toEqual({
-      inputUsdPerMillion: 2.5,
-      cacheReadUsdPerMillion: 0.25,
-      cacheWriteUsdPerMillion: 0.25,
-      outputUsdPerMillion: 15,
-    });
   });
 });

@@ -42,6 +42,7 @@ describe("runWithPrimaryCircuitBreaker", () => {
         outputTokens: 0,
         cacheReadTokens: 0,
         cacheWriteTokens: 0,
+        estimatedCostUsd: 0,
         modelId: undefined,
       })),
       usageDeltaSince: vi.fn(() => ({
@@ -49,6 +50,7 @@ describe("runWithPrimaryCircuitBreaker", () => {
         outputTokens: 0,
         cacheReadTokens: 0,
         cacheWriteTokens: 0,
+        estimatedCostUsd: 0.75,
         modelId: "claude-sonnet-4-5",
       })),
       markFallback: vi.fn(),
@@ -88,6 +90,7 @@ describe("runWithPrimaryCircuitBreaker", () => {
       runAttempt.mock.invocationCallOrder[1] ?? 0,
     );
     expect(recordTerminalError).not.toHaveBeenCalled();
+    expect(runMutation.mock.calls[1]?.[1]).toMatchObject({ totalCostUsd: 0.75 });
     const notifyArgs = runAfter.mock.calls[0]?.[2];
     expect(notifyArgs).toMatchObject({
       source: "aiCircuitBreaker",
@@ -118,6 +121,7 @@ describe("runWithPrimaryCircuitBreaker", () => {
         outputTokens: 0,
         cacheReadTokens: 0,
         cacheWriteTokens: 0,
+        estimatedCostUsd: 0,
         modelId: "gemini-2.5-flash",
       })),
       usageDeltaSince: vi.fn(() => ({
@@ -125,6 +129,7 @@ describe("runWithPrimaryCircuitBreaker", () => {
         outputTokens: 0,
         cacheReadTokens: 0,
         cacheWriteTokens: 0,
+        estimatedCostUsd: 0,
         modelId: "gemini-2.5-flash",
       })),
       markRetry: vi.fn(),
@@ -207,6 +212,7 @@ describe("runWithPrimaryCircuitBreaker", () => {
         outputTokens: 0,
         cacheReadTokens: 0,
         cacheWriteTokens: 0,
+        estimatedCostUsd: 0,
         modelId: undefined,
       })),
       usageDeltaSince: vi.fn(() => ({
@@ -214,6 +220,7 @@ describe("runWithPrimaryCircuitBreaker", () => {
         outputTokens: 1_000_000,
         cacheReadTokens: 0,
         cacheWriteTokens: 0,
+        estimatedCostUsd: 0.625,
         modelId: "claude-sonnet-4-5",
       })),
       markRetry: vi.fn(),
@@ -292,13 +299,25 @@ describe("runWithPrimaryCircuitBreaker", () => {
       runMutation,
       scheduler: { runAfter },
     } as unknown as ActionCtx;
+    const firstAttemptSnapshot = {
+      inputTokens: 1_000,
+      outputTokens: 100,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      estimatedCostUsd: 0.25,
+      modelId: "gemini-2.5-flash",
+      provider: "google.generative-ai",
+    };
     const accumulator = {
-      snapshotUsage: vi.fn(() => ({
+      snapshotUsage: vi.fn(() => firstAttemptSnapshot),
+      usageDeltaSince: vi.fn(() => ({
         inputTokens: 10,
         outputTokens: 2,
         cacheReadTokens: 0,
         cacheWriteTokens: 0,
+        estimatedCostUsd: 0.001,
         modelId: "gemini-2.5-flash",
+        provider: "google.generative-ai",
       })),
     } as unknown as RunAccumulator;
     const runAttempt = vi.fn(
@@ -338,8 +357,10 @@ describe("runWithPrimaryCircuitBreaker", () => {
       userId: "user-1" as Id<"users">,
       threadId: "thread-1",
       model: "gemini-2.5-flash",
+      totalCostUsd: 0.001,
       errorClass: "unexpected_error",
     });
+    expect(accumulator.usageDeltaSince).toHaveBeenCalledWith(firstAttemptSnapshot);
     expect(runAfter).toHaveBeenCalledTimes(1);
     expect(runAfter.mock.calls[0]?.[2]).toMatchObject({
       source: "aiCircuitBreaker",

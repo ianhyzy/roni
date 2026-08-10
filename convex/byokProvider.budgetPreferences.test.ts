@@ -98,13 +98,13 @@ describe("AI provider budget preferences", () => {
 
     await expect(
       authed.mutation(api.byokProvider.setSelectedProviderBudgetLimit, { budgetLimitUsd: 0 }),
-    ).rejects.toThrow("Budget threshold must be between $0.01 and $100.00");
+    ).rejects.toThrow("Budget threshold must be between $0.01 and $400.00");
 
     await expect(
       authed.mutation(api.byokProvider.setSelectedProviderBudgetLimit, {
         budgetLimitUsd: MAX_PROVIDER_BUDGET_LIMIT_USD + 1,
       }),
-    ).rejects.toThrow("Budget threshold must be between $0.01 and $100.00");
+    ).rejects.toThrow("Budget threshold must be between $0.01 and $400.00");
   });
 
   test("rejects unauthenticated writes", async () => {

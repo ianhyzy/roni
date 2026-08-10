@@ -1,6 +1,9 @@
 import type { StepResult, ToolSet } from "ai";
 import type { Id } from "../_generated/dataModel";
 import type { PushDivergence } from "../tonal/mutations";
+import { estimateModelRequestCostUsd } from "./modelPricing";
+import type { ProviderId } from "./providers";
+import { normalizeFinishReason, type TelemetryFinishReason } from "./runTelemetryFinishReason";
 
 export interface AiRunRow {
   runId: string;
@@ -15,8 +18,7 @@ export interface AiRunRow {
   toolSequence: string[];
   retryCount: number;
   fallbackReason?: "transient_exhaustion" | "primary_error" | "circuit_open";
-  finishReason?:
-    "stop" | "tool-calls" | "length" | "content-filter" | "error" | "other" | "unknown";
+  finishReason?: TelemetryFinishReason;
   terminalErrorClass?: string;
   modelId?: string;
   provider?: string;
@@ -64,6 +66,7 @@ export interface AccumulatorInit {
   processingStartedAt?: number;
   retrievalEnabled?: boolean;
   startedAt?: number;
+  pricingProvider: ProviderId;
 }
 
 export interface ContextTimingMetrics {
@@ -82,24 +85,9 @@ export interface AttemptUsageSnapshot {
   outputTokens: number;
   cacheReadTokens: number;
   cacheWriteTokens: number;
+  estimatedCostUsd: number;
   modelId?: string;
   provider?: string;
-}
-
-const ALLOWED_FINISH_REASONS = new Set<AiRunRow["finishReason"]>([
-  "stop",
-  "tool-calls",
-  "length",
-  "content-filter",
-  "error",
-  "other",
-  "unknown",
-]);
-
-function normalizeFinishReason(raw: StepResult<ToolSet>["finishReason"]): AiRunRow["finishReason"] {
-  return ALLOWED_FINISH_REASONS.has(raw as AiRunRow["finishReason"])
-    ? (raw as AiRunRow["finishReason"])
-    : "other";
 }
 
 type CreateWorkoutOutput =
@@ -148,6 +136,7 @@ export class RunAccumulator {
   private outputTokens = 0;
   private cacheReadTokens = 0;
   private cacheWriteTokens = 0;
+  private estimatedCostUsd = 0;
   private approvalPauses = 0;
   private workoutPlanCreatedId?: Id<"workoutPlans">;
   private workoutPushOutcome?: AiRunRow["workoutPushOutcome"];
@@ -207,25 +196,31 @@ export class RunAccumulator {
       }
     }
 
+    const stepModel = step.model;
+    const responseModelId = step.response?.modelId;
+    this.provider = stepModel?.provider ?? this.provider;
+    this.modelId = responseModelId ?? stepModel?.modelId ?? this.modelId;
+
     const usage = step.usage;
     if (usage) {
       this.inputTokens += usage.inputTokens ?? 0;
       this.outputTokens += usage.outputTokens ?? 0;
-      const details = (usage as { inputTokenDetails?: Record<string, number | undefined> })
-        .inputTokenDetails;
+      const details = usage.inputTokenDetails;
       if (details) {
         this.cacheReadTokens += details.cacheReadTokens ?? 0;
         this.cacheWriteTokens += details.cacheWriteTokens ?? 0;
       }
+      this.estimatedCostUsd += estimateModelRequestCostUsd({
+        provider: this.init.pricingProvider,
+        requestedModelId: stepModel?.modelId,
+        responseModelId,
+        inputTokens: usage.inputTokens ?? 0,
+        outputTokens: usage.outputTokens ?? 0,
+        noCacheTokens: details?.noCacheTokens,
+        cacheReadTokens: details?.cacheReadTokens ?? 0,
+        cacheWriteTokens: details?.cacheWriteTokens ?? 0,
+      });
     }
-
-    // AI SDK v6 moved model info to `step.response.model` for some providers;
-    // fall back to `step.model` for providers that still expose it there.
-    const responseModel = (step.response as { model?: { provider?: string; modelId?: string } })
-      ?.model;
-    const stepModel = step.model;
-    this.provider = responseModel?.provider ?? stepModel?.provider ?? this.provider;
-    this.modelId = responseModel?.modelId ?? stepModel?.modelId ?? this.modelId;
 
     this.finishReason = normalizeFinishReason(step.finishReason);
 
@@ -277,6 +272,7 @@ export class RunAccumulator {
       outputTokens: this.outputTokens,
       cacheReadTokens: this.cacheReadTokens,
       cacheWriteTokens: this.cacheWriteTokens,
+      estimatedCostUsd: this.estimatedCostUsd,
       modelId: this.modelId,
       provider: this.provider,
     };
@@ -288,6 +284,7 @@ export class RunAccumulator {
       outputTokens: Math.max(0, this.outputTokens - snapshot.outputTokens),
       cacheReadTokens: Math.max(0, this.cacheReadTokens - snapshot.cacheReadTokens),
       cacheWriteTokens: Math.max(0, this.cacheWriteTokens - snapshot.cacheWriteTokens),
+      estimatedCostUsd: Math.max(0, this.estimatedCostUsd - snapshot.estimatedCostUsd),
       modelId: this.modelId ?? snapshot.modelId,
       provider: this.provider ?? snapshot.provider,
     };
@@ -315,7 +312,7 @@ export class RunAccumulator {
       outputTokens: this.outputTokens,
       cacheReadTokens: this.cacheReadTokens,
       cacheWriteTokens: this.cacheWriteTokens,
-      totalCostUsd: undefined,
+      totalCostUsd: this.estimatedCostUsd,
       scheduledAt: this.scheduledAt,
       processingStartedAt: this.processingStartedAt,
       streamStartedAt: this.startedAt,

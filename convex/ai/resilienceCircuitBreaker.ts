@@ -3,7 +3,6 @@ import { makeFunctionReference } from "convex/server";
 import { internal } from "../_generated/api";
 import type { Id } from "../_generated/dataModel";
 import type { ActionCtx } from "../_generated/server";
-import { estimateAttemptCostUsd } from "./circuitBreakerCore";
 import type { ProviderId } from "./providers";
 import { getFinalizeCodeForError, sanitizeErrorCode } from "./resilienceReporting";
 import type { AttemptUsageSnapshot, RunAccumulator } from "./runTelemetry";
@@ -151,14 +150,7 @@ export async function runWithPrimaryCircuitBreaker(args: CircuitBreakerFlowArgs)
     const usage = accumulator.usageDeltaSince(failure.snapshot);
     const model = usage.modelId ?? primaryModelName;
     const primaryErrorClass = errorClassName(failure.error);
-    const totalCostUsd = estimateAttemptCostUsd({
-      provider,
-      model,
-      inputTokens: usage.inputTokens,
-      outputTokens: usage.outputTokens,
-      cacheReadTokens: usage.cacheReadTokens,
-      cacheWriteTokens: usage.cacheWriteTokens,
-    });
+    const totalCostUsd = usage.estimatedCostUsd;
     const result: {
       opened: boolean;
       openReason: "error_threshold" | "cost_threshold" | "half_open_failure" | null;
@@ -210,8 +202,8 @@ export async function runWithPrimaryCircuitBreaker(args: CircuitBreakerFlowArgs)
   const firstAttempt = await runAttempt(primaryAgent);
   if (firstAttempt.done) {
     if (isHalfOpenProbe) {
-      const finalUsage = accumulator.snapshotUsage();
       if (firstAttempt.success) {
+        const finalUsage = accumulator.snapshotUsage();
         await ctx.runMutation(recordPrimaryAttemptSuccessRef, {
           provider,
           runId,
@@ -220,13 +212,15 @@ export async function runWithPrimaryCircuitBreaker(args: CircuitBreakerFlowArgs)
           model: finalUsage.modelId ?? primaryModelName,
         });
       } else {
+        const failedUsage = accumulator.usageDeltaSince(firstAttemptSnapshot);
         const terminalErrorClass = sanitizeErrorCode(firstAttempt.errorClass);
         const failure = await ctx.runMutation(recordPrimaryAttemptFailureRef, {
           provider,
           runId,
           userId: breakerUserId,
           threadId,
-          model: finalUsage.modelId ?? primaryModelName,
+          model: failedUsage.modelId ?? primaryModelName,
+          totalCostUsd: failedUsage.estimatedCostUsd,
           errorClass: terminalErrorClass,
         });
         if (failure.opened && failure.openReason) {

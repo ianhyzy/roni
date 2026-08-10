@@ -10,6 +10,7 @@ const INIT: AccumulatorInit = {
   messageId: "message-1",
   source: "chat",
   environment: "dev",
+  pricingProvider: "gemini",
   startedAt: 1_700_000_000_000,
 };
 

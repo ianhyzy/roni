@@ -1,11 +1,18 @@
 export const MIN_PROVIDER_BUDGET_LIMIT_USD = 0.01;
-export const MAX_PROVIDER_BUDGET_LIMIT_USD = 100;
+export const MAX_PROVIDER_BUDGET_LIMIT_USD = 400;
 
+/**
+ * Default estimated cumulative-cost stop thresholds for one model attempt.
+ * The backend budget-cap test exercises these against a documented reference
+ * attempt with conservative known pricing. Tool-loop input can grow beyond that
+ * reference, and the guard checks only after a completed step, so these are
+ * neither full-attempt guarantees, hard spend caps, nor spend targets.
+ */
 export const DEFAULT_PROVIDER_BUDGET_LIMITS_USD = {
-  gemini: 0.1,
-  claude: 0.1,
-  openai: 0.1,
-  openrouter: 0.1,
+  gemini: 25,
+  claude: 101,
+  openai: 200,
+  openrouter: 200,
 } as const;
 
 type BudgetProviderId = keyof typeof DEFAULT_PROVIDER_BUDGET_LIMITS_USD;
