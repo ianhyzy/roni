@@ -200,7 +200,7 @@ export const update = mutation({
       throw new Error("days must have exactly 7 elements (Mon-Sun)");
     }
     if (args.days !== undefined) {
-      for (let dayIndex = 0; dayIndex < plan.days.length; dayIndex += 1) {
+      for (let dayIndex = 0; dayIndex < args.days.length; dayIndex += 1) {
         const currentDay = plan.days[dayIndex];
         const nextDay = args.days[dayIndex];
         if (
@@ -250,7 +250,9 @@ export const linkWorkoutPlanToDay = mutation({
     }
     if (isWeekPlanDeletionReserved(plan)) throw new Error(WEEK_PLAN_DELETION_IN_PROGRESS_ERROR);
     const days = [...plan.days];
-    const slot = { ...days[args.dayIndex] };
+    const existingSlot = days[args.dayIndex];
+    if (!existingSlot) throw new Error("Week plan is missing that day");
+    const slot = { ...existingSlot };
     if (
       slot.status === "completed" &&
       (slot.workoutPlanId !== args.workoutPlanId ||
