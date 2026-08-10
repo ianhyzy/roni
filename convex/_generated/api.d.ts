@@ -30,6 +30,7 @@ import type * as ai_divergenceNote from "../ai/divergenceNote.js";
 import type * as ai_estimationTools from "../ai/estimationTools.js";
 import type * as ai_evalHarness from "../ai/evalHarness.js";
 import type * as ai_evalScenarios from "../ai/evalScenarios.js";
+import type * as ai_exclusionTools from "../ai/exclusionTools.js";
 import type * as ai_helpers from "../ai/helpers.js";
 import type * as ai_liftingSnapshot from "../ai/liftingSnapshot.js";
 import type * as ai_memoryFactExtraction from "../ai/memoryFactExtraction.js";
@@ -280,6 +281,7 @@ declare const fullApi: ApiFromModules<{
   "ai/estimationTools": typeof ai_estimationTools;
   "ai/evalHarness": typeof ai_evalHarness;
   "ai/evalScenarios": typeof ai_evalScenarios;
+  "ai/exclusionTools": typeof ai_exclusionTools;
   "ai/helpers": typeof ai_helpers;
   "ai/liftingSnapshot": typeof ai_liftingSnapshot;
   "ai/memoryFactExtraction": typeof ai_memoryFactExtraction;

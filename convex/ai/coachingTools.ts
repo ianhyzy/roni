@@ -250,7 +250,7 @@ export const getGoalsTool = createTool({
 
 export const reportInjuryTool = createTool({
   description:
-    "Record a new injury, pain report, or physical limitation. Use when the user reports pain, discomfort beyond normal soreness, or a movement restriction that should affect future programming. Do not use for ordinary post-workout fatigue, disliked exercises, or resolved injuries. Inputs require area, severity, avoidance keywords, and optional notes; returns the recorded area and severity.",
+    "Record a new injury, pain report, or physical limitation. Use when the user reports pain, discomfort beyond normal soreness, or a movement restriction that should affect future programming. Do not use for ordinary post-workout fatigue, resolved injuries, or a plain dislike of a movement — use exclude_exercises for exercises the user simply never wants programmed. Inputs require area, severity, avoidance keywords, and optional notes; returns the recorded area and severity.",
   inputSchema: z.object({
     area: z.string().describe("Body area: 'left shoulder', 'lower back', 'right knee', etc."),
     severity: z.enum(["mild", "moderate", "severe"]),

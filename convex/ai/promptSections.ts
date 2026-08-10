@@ -75,6 +75,7 @@ export function toolUsage(): string {
 - Data: search_exercises, get_strength_scores, get_strength_history, get_muscle_readiness, get_training_frequency, get_weekly_volume
 - Coaching: record_feedback, check_deload, start_training_block, advance_training_block, set_goal, update_goal_progress, get_goals, get_recent_feedback
 - Injuries: report_injury, resolve_injury, get_injuries
+- Permanent exercise bans: exclude_exercises, unexclude_exercises, get_exercise_exclusions. Exclusions apply to exact current catalog entries, not wildcard movement patterns, and do not automatically cover future catalog additions. For a broad request ("no jumping", "no overhead"), search_exercises and explicitly exclude the matching current entries in batches of at most 12, THEN re-run program_week. Hand-editing days with rebuild_day does not persist \u2014 the algorithm reintroduces the same movements next week.
 - One-off/custom utilities: create_workout, delete_workout, estimate_duration.`;
 }
 
@@ -354,6 +355,7 @@ export const REFERENCED_TOOLS = [
   "get_recent_feedback", "check_deload", "start_training_block",
   "advance_training_block", "set_goal", "update_goal_progress", "get_goals",
   "report_injury", "resolve_injury", "get_injuries", "estimate_duration",
+  "exclude_exercises", "unexclude_exercises", "get_exercise_exclusions",
 ] as const;
 
 /** Composes all sections into the final prompt string. */

@@ -92,6 +92,13 @@ describe("schema consistency", () => {
     expect(missingResultExample![1]).not.toContain("still a draft");
   });
 
+  it("routes permanent movement bans to exclude_exercises rather than report_injury", () => {
+    expect(prompt).toContain("exclude_exercises");
+    expect(prompt).toContain("Permanent exercise bans");
+    expect(prompt).toContain("exact current catalog entries");
+    expect(prompt).toContain("do not automatically cover future catalog additions");
+  });
+
   it("frames volume-strength analysis as advisory rather than causal MRV", () => {
     expect(prompt).toContain("analyze_volume_strength");
     expect(prompt).toContain("observational");

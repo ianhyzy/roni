@@ -14,12 +14,18 @@ function createTest() {
   return t;
 }
 
-async function createUser(t: ReturnType<typeof convexTest>): Promise<Id<"users">> {
+type TestHarness = ReturnType<typeof createTest>;
+
+async function createUser(t: TestHarness): Promise<Id<"users">> {
   return await t.run(async (ctx) => ctx.db.insert("users", {}));
 }
 
+async function createDeletingUser(t: TestHarness): Promise<Id<"users">> {
+  return await t.run(async (ctx) => ctx.db.insert("users", { deletionInProgress: true }));
+}
+
 async function insertMovement(
-  t: ReturnType<typeof convexTest>,
+  t: TestHarness,
   overrides: { tonalId: string; name: string; muscleGroups?: string[] },
 ): Promise<void> {
   await t.run(async (ctx) => {
@@ -39,8 +45,32 @@ async function insertMovement(
       isAlternating: false,
       descriptionHow: "",
       descriptionWhy: "",
-      lastSyncedAt: Date.now(),
+      lastSyncedAt: 1,
     });
+  });
+}
+
+async function insertExclusions(t: TestHarness, userId: Id<"users">, count: number): Promise<void> {
+  await t.run(async (ctx) => {
+    for (let index = 0; index < count; index += 1) {
+      await ctx.db.insert("exerciseExclusions", {
+        userId,
+        movementId: `existing-${index}`,
+        movementName: `Existing ${index}`,
+        muscleGroups: ["Legs"],
+        createdAt: index,
+      });
+    }
+  });
+}
+
+async function countExclusions(t: TestHarness, userId: Id<"users">): Promise<number> {
+  return await t.run(async (ctx) => {
+    const rows = await ctx.db
+      .query("exerciseExclusions")
+      .withIndex("by_userId", (q) => q.eq("userId", userId))
+      .take(101);
+    return rows.length;
   });
 }
 
@@ -163,5 +193,85 @@ describe("exerciseExclusions", () => {
         createdAt: 1000,
       },
     ]);
+  });
+
+  test("rejects an over-cap batch without partially inserting it", async () => {
+    const t = createTest();
+    const userId = await createUser(t);
+    await insertExclusions(t, userId, 99);
+    await insertMovement(t, { tonalId: "new-a", name: "New A" });
+    await insertMovement(t, { tonalId: "new-b", name: "New B" });
+
+    await expect(
+      t.mutation(internal.exerciseExclusions.addManyForUser, {
+        userId,
+        movementIds: ["new-a", "new-b"],
+      }),
+    ).rejects.toThrow("Maximum 100 excluded exercises");
+
+    await expect(countExclusions(t, userId)).resolves.toBe(99);
+    const rows = await t.run(async (ctx) => {
+      return await Promise.all([
+        ctx.db
+          .query("exerciseExclusions")
+          .withIndex("by_userId_movementId", (q) =>
+            q.eq("userId", userId).eq("movementId", "new-a"),
+          )
+          .unique(),
+        ctx.db
+          .query("exerciseExclusions")
+          .withIndex("by_userId_movementId", (q) =>
+            q.eq("userId", userId).eq("movementId", "new-b"),
+          )
+          .unique(),
+      ]);
+    });
+    expect(rows).toEqual([null, null]);
+  });
+
+  test("keeps add, remove, and read paths inert while account deletion is in progress", async () => {
+    const t = createTest();
+    const userId = await createDeletingUser(t);
+    await insertMovement(t, { tonalId: "new-movement", name: "New Movement" });
+    await t.run(async (ctx) => {
+      await ctx.db.insert("exerciseExclusions", {
+        userId,
+        movementId: "existing-movement",
+        movementName: "Existing Movement",
+        muscleGroups: ["Back"],
+        createdAt: 1,
+      });
+    });
+
+    await expect(
+      t.mutation(internal.exerciseExclusions.addManyForUser, {
+        userId,
+        movementIds: ["new-movement"],
+      }),
+    ).rejects.toThrow("Account deletion in progress");
+    await expect(
+      t.mutation(internal.exerciseExclusions.removeManyForUser, {
+        userId,
+        movementIds: ["existing-movement"],
+      }),
+    ).rejects.toThrow("Account deletion in progress");
+    await expect(t.query(internal.exerciseExclusions.getForUser, { userId })).resolves.toEqual([]);
+
+    await expect(countExclusions(t, userId)).resolves.toBe(1);
+  });
+
+  test("allows an idempotent existing ID plus one new ID at the cap", async () => {
+    const t = createTest();
+    const userId = await createUser(t);
+    await insertExclusions(t, userId, 99);
+    await insertMovement(t, { tonalId: "new-movement", name: "New Movement" });
+
+    const result = await t.mutation(internal.exerciseExclusions.addManyForUser, {
+      userId,
+      movementIds: [" existing-0 ", "new-movement", "new-movement"],
+    });
+
+    expect(result.map((exclusion) => exclusion.movementId)).toEqual(["existing-0", "new-movement"]);
+    await expect(countExclusions(t, userId)).resolves.toBe(100);
   });
 });
