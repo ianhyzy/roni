@@ -179,12 +179,21 @@ async function fillWorkoutsPhase(
       expectedWorkoutPlanId: draftId,
       expectedDraftFingerprint: getWorkoutApprovalFingerprint({ title, blocks }),
     });
-    if (claim.status !== "claimed") continue;
+    if (claim.status !== "claimed") {
+      const reason = "error" in claim ? claim.error : `claim returned ${claim.status}`;
+      console.error("[weekProgrammingDirect] Draft claim not acquired", { dayIndex, reason });
+      void ctx.runAction(internal.discord.notifyError, {
+        source: "weekProgrammingDirect",
+        message: `Day ${dayIndex + 1} was not pushed: ${reason}`,
+        userId,
+      });
+      continue;
+    }
     const result = (await ctx.runAction(internal.tonal.mutations.createWorkout, {
       userId,
       title,
       blocks,
-    })) as { success: boolean; planId?: Id<"workoutPlans"> };
+    })) as { success: boolean; planId?: Id<"workoutPlans">; error?: string };
     if (result.success && result.planId) {
       await ctx.runMutation(internal.weekPlans.replaceDraftWithPushed, {
         userId,
@@ -194,6 +203,18 @@ async function fillWorkoutsPhase(
         expectedDraftFingerprint: getWorkoutApprovalFingerprint({ title, blocks }),
         newWorkoutPlanId: result.planId,
         estimatedDuration: sessionDurationMinutes,
+      });
+    } else {
+      await ctx.runMutation(internal.weekPlanApproval.releaseDraftClaimForWeekPush, {
+        userId,
+        workoutPlanId: draftId,
+      });
+      const reason = result.error ?? "Tonal workout creation failed";
+      console.error("[weekProgrammingDirect] Tonal workout creation failed", { dayIndex, reason });
+      void ctx.runAction(internal.discord.notifyError, {
+        source: "weekProgrammingDirect",
+        message: `Day ${dayIndex + 1} was not pushed: ${reason}`,
+        userId,
       });
     }
   }

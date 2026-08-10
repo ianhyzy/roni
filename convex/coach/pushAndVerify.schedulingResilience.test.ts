@@ -106,7 +106,7 @@ function makeHarness(options: HarnessOptions = {}) {
     if (name === "discord:notifyError") return undefined;
     throw new Error(`Unexpected action ${name}`);
   });
-  const runMutation = vi.fn(async (ref: TestFunctionReference) =>
+  const runMutation = vi.fn(async (ref: TestFunctionReference, _args?: unknown) =>
     getFunctionName(ref) === "weekPlanApproval:claimDraftForWeekPush"
       ? { status: "claimed" as const }
       : { status: "replaced" as const, workoutPlanId: PUSHED_PLAN_ID },
@@ -179,9 +179,28 @@ describe("pushWeekPlanToTonal scheduling resilience", () => {
     expect(scheduleWorkout).not.toHaveBeenCalled();
     expect(actionNames(runAction)).toEqual([
       "tonal/mutations:createWorkout",
-      "tonal/mutations:createWorkout",
       "discord:notifyError",
     ]);
+  });
+
+  it("releases the draft claim when Tonal workout creation fails", async () => {
+    const { ctx, runMutation } = makeHarness({
+      createFailure: "Tonal workout creation failed",
+    });
+
+    await pushHandler(ctx, { userId: USER_ID, weekPlanId: WEEK_PLAN_ID });
+
+    const mutationNames = runMutation.mock.calls.map(([ref]) =>
+      getFunctionName(ref as TestFunctionReference),
+    );
+    expect(mutationNames).toEqual([
+      "weekPlanApproval:claimDraftForWeekPush",
+      "weekPlanApproval:releaseDraftClaimForWeekPush",
+    ]);
+    expect(runMutation.mock.calls[1]?.[1]).toMatchObject({
+      userId: USER_ID,
+      workoutPlanId: DRAFT_PLAN_ID,
+    });
   });
 
   it("defers remaining eligible days after the safe start-work cutoff", async () => {

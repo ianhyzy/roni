@@ -101,11 +101,7 @@ describe("pushWeekPlanToTonal failure notifications", () => {
       { status: "deferred", retryable: true },
     ]);
     const actionNames = runAction.mock.calls.map(([ref]) => getFunctionName(ref));
-    expect(actionNames).toEqual([
-      "tonal/mutations:createWorkout",
-      "tonal/mutations:createWorkout",
-      "discord:notifyError",
-    ]);
+    expect(actionNames).toEqual(["tonal/mutations:createWorkout", "discord:notifyError"]);
   });
 
   it("reports a scheduling failure even when a later day reaches the deferral cutoff", async () => {

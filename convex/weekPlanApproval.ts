@@ -63,3 +63,26 @@ export const claimDraftForWeekPush = internalMutation({
     return { status: "claimed" as const };
   },
 });
+
+/** Releases an untouched claim so a failed day stays retryable; a draft that reached Tonal keeps its state. */
+export const releaseDraftClaimForWeekPush = internalMutation({
+  args: {
+    userId: v.id("users"),
+    workoutPlanId: v.id("workoutPlans"),
+  },
+  returns: v.object({ released: v.boolean() }),
+  handler: async (ctx, args) => {
+    const draft = await ctx.db.get(args.workoutPlanId);
+    if (
+      !draft ||
+      draft.userId !== args.userId ||
+      draft.status !== "pushing" ||
+      draft.tonalWorkoutId !== undefined ||
+      draft.weekPlanDeletionReservation
+    ) {
+      return { released: false };
+    }
+    await ctx.db.patch(draft._id, { status: "draft" as const });
+    return { released: true };
+  },
+});

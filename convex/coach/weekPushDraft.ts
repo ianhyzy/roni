@@ -46,19 +46,17 @@ export type WeekDraftPushResult =
       created: boolean;
     };
 
-async function createWithRetry(
+/** Single POST on purpose: a failure never proves Tonal rejected the write, so a blind retry can duplicate the remote workout. Transient 5xx and token expiry are already retried inside `createWorkout`. */
+async function createTonalWorkout(
   ctx: Pick<ActionCtx, "runAction">,
   userId: Id<"users">,
   workout: WorkoutPlan,
 ): Promise<CreateWorkoutResult> {
-  const push = () =>
-    ctx.runAction(internal.tonal.mutations.createWorkout, {
-      userId,
-      title: workout.title,
-      blocks: workout.blocks,
-    }) as Promise<CreateWorkoutResult>;
-  const first = await push();
-  return first.success ? first : push();
+  return (await ctx.runAction(internal.tonal.mutations.createWorkout, {
+    userId,
+    title: workout.title,
+    blocks: workout.blocks,
+  })) as CreateWorkoutResult;
 }
 
 async function readCanonical(
@@ -110,8 +108,14 @@ export async function pushDraftForWeekDay(
     return readCanonical(ctx, args.userId, claim.workoutPlanId);
   }
 
-  const created = await createWithRetry(ctx, args.userId, args.workout);
-  if (!created.success) return { status: "failed", error: created.error };
+  const created = await createTonalWorkout(ctx, args.userId, args.workout);
+  if (!created.success) {
+    await ctx.runMutation(internal.weekPlanApproval.releaseDraftClaimForWeekPush, {
+      userId: args.userId,
+      workoutPlanId: args.workout._id,
+    });
+    return { status: "failed", error: created.error };
+  }
   const replacement = (await ctx.runMutation(internal.weekPlans.replaceDraftWithPushed, {
     userId: args.userId,
     weekPlanId: args.weekPlanId,
