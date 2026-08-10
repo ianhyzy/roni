@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented here. This file is maintained automatically by [release-please](https://github.com/googleapis/release-please) from Conventional Commits on `main`. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.15.0](https://github.com/JeffOtano/roni/compare/v0.14.0...v0.15.0) (2026-08-10)
+
+
+### Features
+
+* let the coach manage exercise exclusions ([#660](https://github.com/JeffOtano/roni/issues/660)) ([fea8973](https://github.com/JeffOtano/roni/commit/fea89731552fac84eb044efa11a872a272e0b8e4))
+
+
+### Bug Fixes
+
+* raise BYOK budget default thresholds ([#661](https://github.com/JeffOtano/roni/issues/661)) ([6424184](https://github.com/JeffOtano/roni/commit/6424184856951b86d9c169afc9cf875c3a861a89))
+
 ## [0.14.0](https://github.com/JeffOtano/roni/compare/v0.13.1...v0.14.0) (2026-08-08)
 
 
