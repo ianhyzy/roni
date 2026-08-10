@@ -195,7 +195,7 @@ async function fillWorkoutsPhase(
       blocks,
     })) as { success: boolean; planId?: Id<"workoutPlans">; error?: string };
     if (result.success && result.planId) {
-      await ctx.runMutation(internal.weekPlans.replaceDraftWithPushed, {
+      const replacement = (await ctx.runMutation(internal.weekPlans.replaceDraftWithPushed, {
         userId,
         weekPlanId,
         dayIndex,
@@ -203,7 +203,16 @@ async function fillWorkoutsPhase(
         expectedDraftFingerprint: getWorkoutApprovalFingerprint({ title, blocks }),
         newWorkoutPlanId: result.planId,
         estimatedDuration: sessionDurationMinutes,
-      });
+      })) as { status: string; error?: string };
+      if (replacement.status === "conflict") {
+        const reason = replacement.error ?? "draft replacement conflicted";
+        console.error("[weekProgrammingDirect] Draft replacement conflicted", { dayIndex, reason });
+        void ctx.runAction(internal.discord.notifyError, {
+          source: "weekProgrammingDirect",
+          message: `Day ${dayIndex + 1} reached Tonal but stayed linked to its draft: ${reason}`,
+          userId,
+        });
+      }
     } else {
       await ctx.runMutation(internal.weekPlanApproval.releaseDraftClaimForWeekPush, {
         userId,
